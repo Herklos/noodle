@@ -10,6 +10,7 @@ All notable changes to Noodle are documented here, following
 
 - The widget gallery shows sample bots in every size of both desktop widgets, and placed widgets load only the bots they show, so they should no longer come up empty.
 - An urgent message to a busy bot on fx, OpenCode, Grok Build or Apple Intelligence no longer cancels its work. The bot gets the message when its turn ends; asking it to stop still stops the turn.
+- Remote Apple models whose saved catalog default is missing or no longer offered send no reasoning_effort instead of an empty one the provider rejects.
 
 ## [0.69.0] - 2026-10-18
 
