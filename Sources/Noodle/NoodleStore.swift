@@ -1943,17 +1943,21 @@ final class NoodleStore {
         for conversationID: UUID,
         repository: WorkspaceRepository
     ) -> TranscriptRevision {
-        let fileManager = FileManager.default
-        let messagesURL = repository.conversationDirectory(id: conversationID)
-            .appendingPathComponent("messages.json")
-        let messageAttributes = try? fileManager.attributesOfItem(atPath: messagesURL.path)
-        let attachmentAttributes = try? fileManager.attributesOfItem(
-            atPath: repository.attachmentsDirectory(conversationID: conversationID).path
-        )
+        // Every conversation, every second: one lstat each, not FileManager's attributes,
+        // which also read extended attributes and the owner's name.
+        func entry(_ path: String) -> stat? {
+            var info = stat()
+            return lstat(path, &info) == 0 ? info : nil
+        }
+        func date(_ time: timespec) -> Date {
+            Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1_000_000_000)
+        }
+        let directory = repository.conversationDirectory(id: conversationID).path
+        let messages = entry(directory + "/messages.json"), attachments = entry(directory + "/Attachments")
         return TranscriptRevision(
-            messagesModifiedAt: messageAttributes?[.modificationDate] as? Date,
-            messagesSize: (messageAttributes?[.size] as? NSNumber)?.uint64Value,
-            attachmentsModifiedAt: attachmentAttributes?[.modificationDate] as? Date
+            messagesModifiedAt: messages.map { date($0.st_mtimespec) },
+            messagesSize: messages.map { UInt64($0.st_size) },
+            attachmentsModifiedAt: attachments.map { date($0.st_mtimespec) }
         )
     }
 
