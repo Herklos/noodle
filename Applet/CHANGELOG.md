@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Sheets that change size hide their content while they resize, animate to the new size and fade the content back in, as Settings does, and never grow taller than the screen; taller content scrolls.
+- Sheets that change size hide their content while they resize, animate to the new size and fade the content back in, as Settings does, and never grow taller than the screen; taller content scrolls, with the scrollbar clear of the rounded corners.
 - Settings never grows taller than the screen; a tall tab scrolls.
 - Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
 

@@ -25,6 +25,21 @@ import NoodleSettingsUI
         XCTAssertLessThanOrEqual(fixture.contentHeight, screen.visibleFrame.height)
     }
 
+    func testScrollbarClearsTheRoundedCorners() async throws {
+        let fixture = try await sheet(Form {
+            ForEach(0..<100) { Text("Row \($0)") }
+        }.formStyle(.grouped).frame(width: 300))
+        try await wait { self.find(NSScrollView.self, in: fixture.host) != nil }
+        let insets = try XCTUnwrap(find(NSScrollView.self, in: fixture.host)).scrollerInsets
+        XCTAssertGreaterThanOrEqual(insets.top, 16)
+        XCTAssertGreaterThanOrEqual(insets.bottom, 16)
+    }
+
+    private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+        if let view = view as? T { return view }
+        return view.subviews.lazy.compactMap { self.find(type, in: $0) }.first
+    }
+
     @MainActor private struct Sheet {
         let model: Model
         let window: NSWindow
@@ -33,10 +48,14 @@ import NoodleSettingsUI
     }
 
     private func sheet(_ fixture: Fixture) async throws -> Sheet {
+        try await sheet(fixture, model: fixture.model)
+    }
+
+    private func sheet(_ content: some View, model: Model? = nil) async throws -> Sheet {
         _ = NSApplication.shared
         let parent = window(height: 600)
         let sheet = window(height: 100)
-        let host = NSHostingView(rootView: fixture.noodleSheetSizing())
+        let host = NSHostingView(rootView: content.noodleSheetSizing())
         host.sizingOptions = []
         sheet.contentView = host
         // Exercise a real sheet offscreen without taking focus.
@@ -44,7 +63,7 @@ import NoodleSettingsUI
         parent.beginSheet(sheet, completionHandler: nil)
         addTeardownBlock { @MainActor in parent.endSheet(sheet) }
         try await wait { sheet.sheetParent === parent }
-        return Sheet(model: fixture.model, window: sheet, host: host)
+        return Sheet(model: model ?? Model(), window: sheet, host: host)
     }
 
     private func window(height: CGFloat) -> NSWindow {
