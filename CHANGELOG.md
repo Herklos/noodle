@@ -6,6 +6,11 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Noodle no longer reads every conversation from disk several times a second, and checks what changed for its own devices without holding up the window, so it stays quieter while idle and while a chat is open.
+- A chat effect plays even when another conversation cannot be read.
+
 ## [0.54.0] - 2026-10-10
 
 ### Changed

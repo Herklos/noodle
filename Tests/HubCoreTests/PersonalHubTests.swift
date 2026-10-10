@@ -218,6 +218,35 @@ import XCTest
         XCTAssertNil(try f.repository.takePendingEffect(conversationID: conversation.id), "Not again on the Mac")
     }
 
+    /// The loops read the files off the main actor; what they find reaches the phone the same way.
+    func testTheBackgroundCheckTellsThePhoneOfChanges() async throws {
+        let (f, made) = try await fixture(bots: ["Kai"])
+        let conversation = try XCTUnwrap(f.repository.loadConversations().first { $0.participantIDs == [made[0].id] })
+        let events = try await f.device.subscribe()
+        await f.personal.bots.checkForChangesInBackground()
+        _ = try await f.device.request(.status)
+        _ = try f.repository.sendEffect(agentID: made[0].id, conversationID: conversation.id, kind: "confetti")
+        _ = try f.repository.sendAgentMessage(agentID: made[0].id, conversationID: conversation.id, body: "Hello")
+        await f.personal.bots.checkForChangesInBackground()
+        let heard = try await withThrowingTaskGroup(of: (Bool, Bool).self) { group in
+            group.addTask {
+                var effect = false, message = false
+                for try await event in events {
+                    if case .effectWaiting(conversation.id) = event { effect = true }
+                    if case .conversationChanged(conversation.id, _) = event { message = true }
+                    if effect && message { break }
+                }
+                return (effect, message)
+            }
+            group.addTask { try await Task.sleep(for: .seconds(10)); return (false, false) }
+            let first = try await group.next() ?? (false, false)
+            group.cancelAll()
+            return first
+        }
+        XCTAssertTrue(heard.0, "The phone hears that an effect waits")
+        XCTAssertTrue(heard.1, "The phone hears of the new message")
+    }
+
     func testThePhoneShowsAndSetsTheMacsBackgrounds() async throws {
         let (f, made) = try await fixture(bots: ["Eli"])
         let conversation = try XCTUnwrap(f.repository.loadConversations().first { $0.participantIDs == [made[0].id] })

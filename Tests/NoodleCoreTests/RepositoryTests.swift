@@ -24,6 +24,36 @@ final class RepositoryTests: XCTestCase {
         }
     }
 
+    /// Several loops list the conversations every second; an unchanged one is not read again,
+    /// but an edit, a new conversation or a deleted one is seen.
+    func testUnchangedConversationsAreNotReadAgainButChangesAreSeen() throws {
+        let created = try repository.createAgent(named: "Steady")
+        XCTAssertEqual(try repository.loadConversations().map(\.id), [created.conversation.id])
+        let reads = repository.conversationRecords.reads
+        _ = try repository.loadConversations()
+        _ = try repository.loadConversations()
+        XCTAssertEqual(repository.conversationRecords.reads, reads)
+
+        // Rewritten in place at the same size, as an edit from outside Noodle may be.
+        let file = repository.conversationDirectory(id: created.conversation.id).appendingPathComponent("conversation.json")
+        let original = try XCTUnwrap(String(data: Data(contentsOf: file), encoding: .utf8))
+        try Data(original.replacingOccurrences(of: "Steady", with: "Sturdy").utf8).write(to: file)
+        XCTAssertEqual(try repository.loadConversations().map(\.displayName), ["Sturdy"])
+
+        var renamed = try XCTUnwrap(repository.loadConversations().first)
+        renamed.displayName = "Renamed"
+        try repository.updateConversation(renamed)
+        XCTAssertEqual(try repository.loadConversations().map(\.displayName), ["Renamed"])
+
+        let second = try repository.createAgent(named: "Second")
+        XCTAssertEqual(Set(try repository.loadConversations().map(\.id)), [created.conversation.id, second.conversation.id])
+        try repository.deleteConversation(id: second.conversation.id)
+        XCTAssertEqual(try repository.loadConversations().map(\.id), [created.conversation.id])
+
+        try Data("not json".utf8).write(to: file)
+        XCTAssertThrowsError(try repository.loadConversations())
+    }
+
     func testAgentWorkspaceUsesStableOpaqueIdentifier() throws {
         let created = try repository.createAgent(named: "Build Bot")
         let directory = repository.directory(for: created.agent)

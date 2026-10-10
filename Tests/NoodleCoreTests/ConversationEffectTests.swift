@@ -37,6 +37,17 @@ final class ConversationEffectTests: XCTestCase {
         XCTAssertNil(try repository.takePendingEffect(conversationID: bot.conversation.id))
     }
 
+    /// A chat in front asks for its effect several times a second, so only that conversation is read:
+    /// another one that cannot be read does not stop it.
+    func testAnEffectReadsOnlyItsOwnConversation() throws {
+        let bot = try repository.createAgent(named: "Builder"), other = try repository.createAgent(named: "Other")
+        let sent = try repository.sendEffect(agentID: bot.agent.id, conversationID: bot.conversation.id, kind: "confetti")
+        try Data("not json".utf8).write(to: repository.conversationDirectory(id: other.conversation.id)
+            .appendingPathComponent("conversation.json"))
+        XCTAssertEqual(try repository.takePendingEffect(conversationID: bot.conversation.id)?.id, sent.id)
+        XCTAssertNil(try repository.takePendingEffect(conversationID: bot.conversation.id))
+    }
+
     func testCLIQueuesEveryListedEffectAndTheSkillSaysWhenToUseIt() throws {
         let bot = try repository.createAgent(named: "Builder")
         let directory = repository.directory(for: bot.agent)

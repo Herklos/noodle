@@ -45,7 +45,7 @@ extension WorkspaceRepository {
     ) throws -> ConversationEffect {
         guard ConversationEffectKind(rawValue: kind) != nil else { throw ConversationEffectError.unsupportedKind }
         return try withEffectsLock(conversationID) {
-            let conversation = try effectConversation(conversationID)
+            let conversation = try loadConversation(id: conversationID)
             guard conversation.participantIDs.contains(agentID),
                   try loadAgents().contains(where: { $0.id == agentID }) else {
                 throw ConversationEffectError.notParticipant
@@ -86,7 +86,7 @@ extension WorkspaceRepository {
         let file = conversationDirectory(id: conversationID).appendingPathComponent("effects.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return false }
         return try withEffectsLock(conversationID) {
-            try liveEffect(in: readEffects(conversationID), of: effectConversation(conversationID), now: now) != nil
+            try liveEffect(in: readEffects(conversationID), of: loadConversation(id: conversationID), now: now) != nil
         }
     }
 
@@ -96,7 +96,7 @@ extension WorkspaceRepository {
         let file = conversationDirectory(id: conversationID).appendingPathComponent("effects.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
         return try withEffectsLock(conversationID) {
-            let conversation = try effectConversation(conversationID)
+            let conversation = try loadConversation(id: conversationID)
             var queue = try readEffects(conversationID)
             let live = liveEffect(in: queue, of: conversation, now: now)
             var changed = false
@@ -119,15 +119,8 @@ extension WorkspaceRepository {
         }.max { $0.createdAt < $1.createdAt }
     }
 
-    private func effectConversation(_ id: UUID) throws -> BotConversation {
-        guard let conversation = try loadConversations().first(where: { $0.id == id }) else {
-            throw WorkspaceError.missingConversation(id)
-        }
-        return conversation
-    }
-
     private func withEffectsLock<Value>(_ id: UUID, operation: () throws -> Value) throws -> Value {
-        _ = try effectConversation(id)
+        _ = try loadConversation(id: id)
         let file = conversationDirectory(id: id).appendingPathComponent(".effects.lock")
         let descriptor = Darwin.open(file.path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { throw POSIXError(.EIO) }

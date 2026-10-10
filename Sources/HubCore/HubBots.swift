@@ -56,6 +56,8 @@ import NoodleRuntime
     private var phases: [UUID: AgentRuntimePhase] = [:]
     /// Each bot's status when last checked; an absent bot has not been checked yet.
     private var statuses: [UUID: String?] = [:]
+    /// How many checks have been applied, so a check read in the background yields to one made meanwhile.
+    private var checks = 0
     /// The latest Kick a device was asked to confirm, per bot. The runtime refuses it once stale.
     private var kickRequests: [UUID: AgentKickRequest] = [:]
     /// How far each conversation's owner has read it, so all their devices agree.
@@ -127,7 +129,7 @@ import NoodleRuntime
                     self.runtime.reconcile(agents: agents, repository: self.repository)
                 }
                 self.runtime.checkHeartbeats()
-                self.checkForChanges()
+                await self.checkForChangesInBackground()
             }
         }
     }
@@ -141,7 +143,7 @@ import NoodleRuntime
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self, !Task.isCancelled else { return }
-                self.checkForChanges()
+                await self.checkForChangesInBackground()
             }
         }
     }
@@ -959,29 +961,92 @@ import NoodleRuntime
     /// Tells owners about conversations whose messages changed since the last check.
     public func checkForChanges() {
         guard let agents = try? repository.loadAgents(), let conversations = try? repository.loadConversations() else { return }
-        for conversation in conversations {
-            guard let owner = person(of: conversation, among: agents) else { continue }
-            let background = (try? repository.loadBackground(conversationID: conversation.id)) ?? ConversationBackground()
-            if let known = backgrounds[conversation.id], known != background {
+        let owned = owned(conversations, among: agents)
+        let transcripts = transcripts, effectsChanged = effectsChanged
+        apply(agents: agents, conversations: conversations, reads: owned.map { conversation, owner in
+            (conversation, owner, Self.read(conversation, from: repository, transcript: transcripts[conversation.id],
+                                            effectsChanged: effectsChanged[conversation.id]))
+        })
+    }
+
+    /// The same check for the loops, which read the files off the main actor. A check made
+    /// meanwhile wins; this one is left to the next pass.
+    public func checkForChangesInBackground() async {
+        let repository = repository, checks = checks
+        guard let (agents, conversations) = try? await Task.detached(priority: .utility, operation: {
+            (try repository.loadAgents(), try repository.loadConversations())
+        }).value, checks == self.checks else { return }
+        let owned = owned(conversations, among: agents)
+        let transcripts = transcripts, effectsChanged = effectsChanged
+        let reads = await Task.detached(priority: .utility) {
+            owned.map { conversation, owner in
+                (conversation, owner, Self.read(conversation, from: repository, transcript: transcripts[conversation.id],
+                                                effectsChanged: effectsChanged[conversation.id]))
+            }
+        }.value
+        guard checks == self.checks else { return }
+        apply(agents: agents, conversations: conversations, reads: reads)
+    }
+
+    private func owned(_ conversations: [BotConversation], among agents: [AgentRecord]) -> [(BotConversation, UUID)] {
+        conversations.compactMap { conversation in person(of: conversation, among: agents).map { (conversation, $0) } }
+    }
+
+    /// What a check reads of one conversation. Messages are read only when their file changed
+    /// since the last check, and attachments only when a reaction came with them.
+    private struct ConversationRead: Sendable {
+        var background: ConversationBackground
+        var effects: Date?
+        var effectWaiting = false
+        var transcript: (size: Int, modified: Date)?
+        var messages: [ChatMessage]?
+        var attachments: [UUID: ConversationAttachment]?
+    }
+
+    nonisolated private static func read(
+        _ conversation: BotConversation, from repository: WorkspaceRepository,
+        transcript known: (size: Int, modified: Date, count: Int, reactions: Int)?, effectsChanged: Date?
+    ) -> ConversationRead {
+        let directory = repository.conversationDirectory(id: conversation.id)
+        var read = ConversationRead(background: (try? repository.loadBackground(conversationID: conversation.id)) ?? ConversationBackground())
+        read.effects = (try? directory.appendingPathComponent("effects.json")
+            .resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        if let effects = read.effects, effects != effectsChanged {
+            read.effectWaiting = (try? repository.hasPendingEffect(conversationID: conversation.id)) == true
+        }
+        let url = directory.appendingPathComponent("messages.json")
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = (attributes[.size] as? NSNumber)?.intValue,
+              let modified = attributes[.modificationDate] as? Date else { return read }
+        read.transcript = (size, modified)
+        if let known, known.size == size, known.modified == modified { return read }
+        guard let messages = try? repository.loadMessages(conversationID: conversation.id) else { return read }
+        read.messages = messages
+        let latestReaction = messages.flatMap { $0.reactionChanges ?? [] }.map(\.sequence).max() ?? 0
+        if let known, latestReaction > known.reactions, let files = try? repository.loadAttachments(conversationID: conversation.id) {
+            read.attachments = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        return read
+    }
+
+    private func apply(agents: [AgentRecord], conversations: [BotConversation], reads: [(BotConversation, UUID, ConversationRead)]) {
+        checks += 1
+        for (conversation, owner, read) in reads {
+            if let known = backgrounds[conversation.id], known != read.background {
                 onChange?(owner, .backgroundChanged(conversationID: conversation.id, background: self.background(of: conversation.id)))
                 onBackgroundChanged?(conversation.id)
             }
-            backgrounds[conversation.id] = background
+            backgrounds[conversation.id] = read.background
             // A device that shows the conversation takes the effect waiting there.
-            let effects = (try? repository.conversationDirectory(id: conversation.id).appendingPathComponent("effects.json")
-                .resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let effects, effects != effectsChanged[conversation.id] {
+            if let effects = read.effects, effects != effectsChanged[conversation.id] {
                 effectsChanged[conversation.id] = effects
-                if (try? repository.hasPendingEffect(conversationID: conversation.id)) == true {
+                if read.effectWaiting {
                     onChange?(owner, .effectWaiting(conversationID: conversation.id))
                 }
             }
-            let url = repository.conversationDirectory(id: conversation.id).appendingPathComponent("messages.json")
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let size = (attributes[.size] as? NSNumber)?.intValue,
-                  let modified = attributes[.modificationDate] as? Date else { continue }
+            guard let (size, modified) = read.transcript else { continue }
             if let known = transcripts[conversation.id], known.size == size, known.modified == modified { continue }
-            guard let messages = try? repository.loadMessages(conversationID: conversation.id) else { continue }
+            guard let messages = read.messages else { continue }
             let latestReaction = messages.flatMap { $0.reactionChanges ?? [] }.map(\.sequence).max() ?? 0
             let known = transcripts[conversation.id]
             transcripts[conversation.id] = (size, modified, messages.count, latestReaction)
@@ -992,7 +1057,7 @@ import NoodleRuntime
                 }
             }
             // Reactions change messages already sent, which a device reading on from its count would miss.
-            if let known, latestReaction > known.reactions, let files = try? attachments(in: conversation.id) {
+            if let known, latestReaction > known.reactions, let files = read.attachments {
                 let host = conversation.guest == nil ? nil : conversation.participantIDs.first.flatMap(access.host(ofBot:))
                 for message in messages where (message.reactionChanges ?? []).contains(where: { $0.sequence > known.reactions }) {
                     onChange?(owner, .messageChanged(linkMessage(message, files: files)))

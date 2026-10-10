@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Noodle Hub no longer reads every conversation from disk every second, and checks what changed for devices without holding up its window.
+
 ## [0.26.0] - 2026-10-10
 
 ### Changed

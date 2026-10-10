@@ -58,7 +58,8 @@ public enum WorkspaceError: LocalizedError, Equatable {
 public struct WorkspaceRepository: Sendable {
     public let rootURL: URL
     public let launcherExecutableURL: URL?
-    let agentRecords = AgentRecordCache()
+    let agentRecords = FileRecordCache<AgentRecord>()
+    let conversationRecords = FileRecordCache<BotConversation>()
 
     public init(rootURL: URL, launcherExecutableURL: URL? = nil) {
         self.rootURL = AgentStorageLayout.canonicalURL(rootURL)
@@ -447,16 +448,18 @@ public struct WorkspaceRepository: Sendable {
         let packages = try FileManager.default.contentsOfDirectory(at: agentsURL, includingPropertiesForKeys: nil,
                                                                    options: [.skipsHiddenFiles])
         var agents: [AgentRecord] = []
+        let root = rootURL.path, parent = agentsURL.path
         for url in packages {
-            let layout = AgentStorageLayout(package: url)
-            let stamp = AgentRecordCache.stamp(
-                directories: [rootURL, agentsURL, layout.package, layout.workspace, layout.runtime],
-                files: [layout.package.appendingPathComponent(AgentStorageLayout.markerName), layout.configuration]
+            let package = url.path
+            let stamp = FileRecordCache<AgentRecord>.stamp(
+                directories: [root, parent, package, package + "/workspace", package + "/runtime"],
+                files: [package + "/" + AgentStorageLayout.markerName, package + "/agent.json"]
             )
-            if let stamp, let agent = agentRecords.agent(at: layout.package, stamp: stamp) {
+            if let stamp, let agent = agentRecords.value(at: package, stamp: stamp) {
                 agents.append(agent)
                 continue
             }
+            let layout = AgentStorageLayout(package: url)
             guard AgentStorageLayout.exists(layout.configuration) else { continue }
             try AgentStorageLayout.requireDirectory(url)
             try AgentStorageLayout.requireFile(layout.configuration)
@@ -464,10 +467,10 @@ public struct WorkspaceRepository: Sendable {
             try layout.validate()
             let configuration = try AgentConfiguration.load(from: layout)
             _ = try configuration.requireBackstory()
-            if let stamp { agentRecords.store(configuration.agent, at: layout.package, stamp: stamp) }
+            if let stamp { agentRecords.store(configuration.agent, at: package, stamp: stamp) }
             agents.append(configuration.agent)
         }
-        agentRecords.keep(packages.map { AgentStorageLayout(package: $0).package })
+        agentRecords.keep(packages.map(\.path))
         return agents.sorted { $0.createdAt < $1.createdAt }
     }
 
@@ -797,10 +800,40 @@ public struct WorkspaceRepository: Sendable {
         try FileManager.default.removeItem(at: directory)
     }
 
+    /// Several loops ask every second, so a conversation is read again only when its file or
+    /// folder changed since.
     public func loadConversations() throws -> [BotConversation] {
         try prepare()
-        return try loadChildren(from: conversationsURL, filename: "conversation.json", as: BotConversation.self)
-            .sorted { $0.updatedAt > $1.updatedAt }
+        let directories = try FileManager.default.contentsOfDirectory(at: conversationsURL, includingPropertiesForKeys: [.isDirectoryKey],
+                                                                       options: [.skipsHiddenFiles])
+        var conversations: [BotConversation] = []
+        let parent = conversationsURL.path
+        for directory in directories {
+            let folder = directory.path
+            let stamp = FileRecordCache<BotConversation>.stamp(directories: [parent, folder], files: [folder + "/conversation.json"])
+            if let stamp, let conversation = conversationRecords.value(at: folder, stamp: stamp) {
+                conversations.append(conversation)
+                continue
+            }
+            let file = directory.appendingPathComponent("conversation.json")
+            let values = try directory.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true, FileManager.default.fileExists(atPath: file.path) else { continue }
+            conversationRecords.read()
+            let conversation = try read(BotConversation.self, from: file)
+            if let stamp { conversationRecords.store(conversation, at: folder, stamp: stamp) }
+            conversations.append(conversation)
+        }
+        conversationRecords.keep(directories.map(\.path))
+        return conversations.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// One conversation, without reading the others.
+    func loadConversation(id: UUID) throws -> BotConversation {
+        let file = conversationDirectory(id: id).appendingPathComponent("conversation.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { throw WorkspaceError.missingConversation(id) }
+        let conversation = try read(BotConversation.self, from: file)
+        guard conversation.id == id else { throw WorkspaceError.missingConversation(id) }
+        return conversation
     }
 
     private func createConversationFiles(_ conversation: BotConversation) throws {
@@ -1497,26 +1530,6 @@ public struct WorkspaceRepository: Sendable {
         return value.isEmpty ? nil : value
     }
 
-    private func loadChildren<Value: Decodable>(
-        from parent: URL,
-        filename: String,
-        as type: Value.Type
-    ) throws -> [Value] {
-        let directories = try FileManager.default.contentsOfDirectory(
-            at: parent,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-
-        return try directories.compactMap { directory in
-            let values = try directory.resourceValues(forKeys: [.isDirectoryKey])
-            guard values.isDirectory == true else { return nil }
-            let file = directory.appendingPathComponent(filename)
-            guard FileManager.default.fileExists(atPath: file.path) else { return nil }
-            return try read(Value.self, from: file)
-        }
-    }
-
     private func write<Value: Encodable>(_ value: Value, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -1556,38 +1569,38 @@ private struct ConversationReadState: Codable {
     }
 }
 
-/// Bots read from their packages, shared by the copies of one repository.
-final class AgentRecordCache: @unchecked Sendable {
+/// Bots or conversations read from their folders, shared by the copies of one repository.
+final class FileRecordCache<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
-    private var records: [String: (stamp: [Int64], agent: AgentRecord)] = [:]
+    private var records: [String: (stamp: [Int64], value: Value)] = [:]
     private var readCount = 0
 
-    /// Packages read in full, for tests.
+    /// Folders read in full, for tests.
     var reads: Int { lock.withLock { readCount } }
 
     func read() { lock.withLock { readCount += 1 } }
 
-    func agent(at package: URL, stamp: [Int64]) -> AgentRecord? {
-        lock.withLock { records[package.path].flatMap { $0.stamp == stamp ? $0.agent : nil } }
+    func value(at folder: String, stamp: [Int64]) -> Value? {
+        lock.withLock { records[folder].flatMap { $0.stamp == stamp ? $0.value : nil } }
     }
 
-    func store(_ agent: AgentRecord, at package: URL, stamp: [Int64]) {
-        lock.withLock { records[package.path] = (stamp, agent) }
+    func store(_ value: Value, at folder: String, stamp: [Int64]) {
+        lock.withLock { records[folder] = (stamp, value) }
     }
 
-    func keep(_ packages: [URL]) {
-        let paths = Set(packages.map(\.path))
-        lock.withLock { records = records.filter { paths.contains($0.key) } }
+    func keep(_ folders: [String]) {
+        let folders = Set(folders)
+        lock.withLock { records = records.filter { folders.contains($0.key) } }
     }
 
     /// The identity and type of each entry, without following links, and for files also
     /// their size and change time; nil when one is missing. Taken before reading, so a
     /// change made during a read shows up as a different stamp next time.
-    static func stamp(directories: [URL], files: [URL]) -> [Int64]? {
+    static func stamp(directories: [String], files: [String]) -> [Int64]? {
         var stamp: [Int64] = []
-        for (url, isFile) in directories.map({ ($0, false) }) + files.map({ ($0, true) }) {
+        for (path, isFile) in directories.map({ ($0, false) }) + files.map({ ($0, true) }) {
             var info = stat()
-            guard lstat(url.path, &info) == 0 else { return nil }
+            guard lstat(path, &info) == 0 else { return nil }
             stamp += [Int64(info.st_dev), Int64(bitPattern: info.st_ino), Int64(info.st_mode)]
             if isFile { stamp += [info.st_size, Int64(info.st_ctimespec.tv_sec), Int64(info.st_ctimespec.tv_nsec)] }
         }
