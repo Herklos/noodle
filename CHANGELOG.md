@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - Kling can be added as a tool.
+- Image Generation, a built-in tool that makes pictures on this Mac, from a description or by reworking a picture. Download Stable Diffusion XL models in Settings > Tools, pick the default, and add the tool to any bot. Bots kept on a Noodle Hub can use the Hub's image models too.
 
 ### Fixed
 

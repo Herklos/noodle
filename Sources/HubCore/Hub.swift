@@ -8,6 +8,7 @@ import NoodleAppletTools
 import NoodleBrowserTools
 import NoodleComputerTools
 import NoodleCore
+import NoodleImagesTools
 import NoodleMCP
 import NoodleRuntime
 
@@ -25,6 +26,7 @@ import NoodleRuntime
     public let computers: HubComputers
     public let browsers: HubBrowsers
     public let bots: HubBots
+    public let imageGeneration: ImageGenerationController
     public let link: HubLinkService
 
     /// `computer`, `browser` and `applet` reach Noodle Computer, Browser and Applet on this Mac,
@@ -70,6 +72,15 @@ import NoodleRuntime
             bots?.synchronizeToolSkills()
         }
         try? tools.register(AppletToolProvider { [applets] in try await applets.tool($0) })
+        // The models are the Hub's, for every person's bots; each bot is granted the tool on its own.
+        imageGeneration = ImageGenerationController(repository: repository)
+        imageGeneration.onAssignmentsChange = { [weak bots] granted in
+            assignments.replace(ImageGenerationSettings.kind, with: granted)
+            bots?.synchronizeToolSkills()
+        }
+        bots.imageGeneration = imageGeneration
+        let imageHelper = ImageGenerationHelper(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NoodleAppleAgent"))
+        try? tools.register(ImageToolProvider(library: { [root] in ImageLibrary.load(root: root) }, generate: { try await imageHelper.png($0) }))
         access.onOwnersChange = { [weak bots, weak computers, weak browsers] in
             bots?.synchronizeOwners()
             Task { await computers?.synchronizeOwners() }

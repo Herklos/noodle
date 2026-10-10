@@ -27,6 +27,10 @@ import NoodleRuntime
     private let browsers: HubBrowsers
     /// Noodle Applet on this Mac, for the Hub's bots' applet tool and for people's devices.
     public let applets: AppletController
+    /// The image models and which bots may use them, kept where the bots run: the Hub, or Noodle for This Mac.
+    public var imageGeneration: ImageGenerationController?
+    /// The default image model's name, which devices show beside the tool. Nil while none is downloaded.
+    public var imageModel: String? { imageGeneration?.currentModel?.name }
     /// Serves bots the tools their owners assigned them from the Hub's own connections.
     private var toolBroker: ToolBridgeBroker?
     private let messenger: MessengerBroker
@@ -303,6 +307,7 @@ import NoodleRuntime
         do {
             if let profile = draft.profile { try repository.updateAgentHarnessProfile(created.agent, profile: profile) }
             if let voice = validVoice(draft.voice, on: provider) { try repository.updateAgentVoice(created.agent, voice: voice) }
+            if draft.imageGeneration { try imageGeneration?.assign(true, to: created.agent.id) }
             access.setOwner(user, ofBot: created.agent.id)
         } catch {
             try? repository.deleteAgent(created.agent)
@@ -338,6 +343,7 @@ import NoodleRuntime
         try repository.updateAgentHarnessProfile(updated, profile: draft.profile)
         // A device from before voices sends none, which keeps the one the bot has.
         if draft.voice != nil { try repository.updateAgentVoice(updated, voice: validVoice(draft.voice, on: provider)) }
+        try imageGeneration?.assign(draft.imageGeneration, to: updated.id)
         // As Edit Bot does in Noodle, whose runtime runs the bot when this only watches.
         if running || watching { runtime.restart(agent: updated, repository: repository) }
         onChange?(user.id, .botsChanged)
@@ -1199,6 +1205,7 @@ import NoodleRuntime
 
     /// Deletes a bot, and any group left without bots. Returns whether it was in a group.
     private func remove(_ agent: AgentRecord) throws -> Bool {
+        try? imageGeneration?.assign(false, to: agent.id)
         let joined = (try? repository.loadConversations().filter { $0.participantIDs.contains(agent.id) }) ?? []
         let conversations = joined.filter { $0.kind == .direct || $0.participantIDs == [agent.id] }.map(\.id)
         defer {
@@ -1398,6 +1405,7 @@ import NoodleRuntime
             avatarColorIndex: agent.avatarColorIndex ?? agent.accentSeed, avatarImageData: agent.avatarImageData)
         draft.avatarImageDigest = agent.avatarImageData.map(LinkPicture.digest)
         draft.voice = try repository.loadAgentVoice(agent)
+        draft.imageGeneration = imageGeneration?.isAssigned(agent.id) ?? false
         return LinkBot(id: agent.id, conversationID: conversation.id, draft: draft, createdAt: agent.createdAt,
                        phase: LinkBotPhase(rawValue: phase(of: agent.id).rawValue), readUpTo: readMarks[conversation.id],
                        status: agent.status, archivedAt: agent.archivedAt, background: background(of: conversation.id),

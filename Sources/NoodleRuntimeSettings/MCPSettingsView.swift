@@ -3,6 +3,8 @@ import NoodleCore
 
 public struct MCPSettingsView: View {
     let store: any BotSettingsHost
+    /// Tools the app has built in, listed above the connections and never removed.
+    private let builtIn: AnyView?
     @State private var showingAdd = false
     @State private var editing: MCPConnectionRecord?
     @State private var removing: MCPConnectionRecord?
@@ -11,7 +13,11 @@ public struct MCPSettingsView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 0) {
-                    if store.mcp.registry.connections.isEmpty {
+                    if let builtIn {
+                        builtIn
+                        if !store.mcp.registry.connections.isEmpty { Divider().padding(.leading, 58) }
+                    }
+                    if store.mcp.registry.connections.isEmpty && builtIn == nil {
                         Label("No connections", systemImage: "puzzlepiece.extension")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 80)
@@ -105,6 +111,12 @@ public struct MCPSettingsView: View {
 
     public init(store: any BotSettingsHost) {
         self.store = store
+        builtIn = nil
+    }
+
+    public init(store: any BotSettingsHost, @ViewBuilder builtIn: () -> some View) {
+        self.store = store
+        self.builtIn = AnyView(builtIn())
     }
 }
 

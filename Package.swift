@@ -60,6 +60,7 @@ let package = Package(
         .library(name: "NoodleCalendarTools", targets: ["NoodleCalendarTools"]),
         .library(name: "NoodleComputerTools", targets: ["NoodleComputerTools"]),
         .library(name: "NoodleRemindersTools", targets: ["NoodleRemindersTools"]),
+        .library(name: "NoodleImagesTools", targets: ["NoodleImagesTools"]),
         .library(name: "NoodleVisionTools", targets: ["NoodleVisionTools"]),
         .library(name: "NoodleMapsTools", targets: ["NoodleMapsTools"]),
         .executable(name: "Noodle", targets: ["Noodle"]),
@@ -77,6 +78,8 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.4"),
         // The macOS 27 Foundation Models adapter is not in an MLX release yet.
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "3e6ea1ede1596f05c1715d6b82567619276e98f0"),
+        // Stable Diffusion XL in MLX, for the Images tool. Not released as a version.
+        .package(url: "https://github.com/ml-explore/mlx-swift-examples", revision: "378f2449c257788c5067b9f8b086731d76b39b33"),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.4"),
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk", exact: "0.12.1")
     ],
@@ -87,6 +90,7 @@ let package = Package(
         .target(name: "NoodleAppleRuntime", dependencies: ["NoodleCore",
             .product(name: "MLXFoundationModels", package: "mlx-swift-lm"),
             .product(name: "MLXLLM", package: "mlx-swift-lm"),
+            .product(name: "StableDiffusion", package: "mlx-swift-examples"),
             .product(name: "Tokenizers", package: "swift-transformers")],
             exclude: ["FoundationModelsUtilities/AGENTS.md", "FoundationModelsUtilities/CLAUDE.md"]),
         .executableTarget(name: "NoodleAppleAgent", dependencies: ["NoodleAppleRuntime", "NoodleCore"],
@@ -104,7 +108,7 @@ let package = Package(
         /// The Harness, Heartbeat and Sandbox settings, shared by the apps that run bots.
         .target(name: "NoodleHubClient", dependencies: ["NoodleCore", .product(name: "HubLink", package: "HubLink")]),
         /// What serves paired devices: Noodle Hub for the people it lends to, and Noodle for its own owner.
-        .target(name: "HubCore", dependencies: ["NoodleCore", "NoodleRuntime", "NoodleMCP", "NoodleAppletTools", "NoodleComputerTools", "NoodleBrowserTools",
+        .target(name: "HubCore", dependencies: ["NoodleCore", "NoodleRuntime", "NoodleMCP", "NoodleAppletTools", "NoodleComputerTools", "NoodleBrowserTools", "NoodleImagesTools",
                                                 .product(name: "ComputerBridge", package: "Bridge"),
                                                 .product(name: "BrowserBridge", package: "BrowserProtocol"),
                                                 .product(name: "AppletBridge", package: "Protocol"),
@@ -123,7 +127,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Noodle",
-            dependencies: [.product(name: "BrowserBridge", package: "BrowserProtocol"), "NoodleCore", "NoodleAppletTools", "NoodleBrowserTools", "NoodleCalendarTools", "NoodleComputerTools", "NoodleRemindersTools", "NoodleMCP", "NoodleSharing", "NoodleRuntime", "NoodleRuntimeSettings", "NoodleAgentBridge", "NoodleAudioCapture", "HubCore", .product(name: "NoodleLaunchChecks", package: "LaunchChecks"), .product(name: "NoodleSettingsUI", package: "SettingsUI"), .product(name: "NoodleWallpaper", package: "Wallpaper"), .product(name: "NoodleBrand", package: "Brand"), .product(name: "Sparkle", package: "Sparkle"), .product(name: "ComputerBridge", package: "Bridge"), .product(name: "HubLink", package: "HubLink"), "NoodleHubClient", .product(name: "NoodletRuntime", package: "Protocol")],
+            dependencies: [.product(name: "BrowserBridge", package: "BrowserProtocol"), "NoodleCore", "NoodleAppletTools", "NoodleBrowserTools", "NoodleCalendarTools", "NoodleComputerTools", "NoodleImagesTools", "NoodleRemindersTools", "NoodleMCP", "NoodleSharing", "NoodleRuntime", "NoodleRuntimeSettings", "NoodleAgentBridge", "NoodleAudioCapture", "HubCore", .product(name: "NoodleLaunchChecks", package: "LaunchChecks"), .product(name: "NoodleSettingsUI", package: "SettingsUI"), .product(name: "NoodleWallpaper", package: "Wallpaper"), .product(name: "NoodleBrand", package: "Brand"), .product(name: "Sparkle", package: "Sparkle"), .product(name: "ComputerBridge", package: "Bridge"), .product(name: "HubLink", package: "HubLink"), "NoodleHubClient", .product(name: "NoodletRuntime", package: "Protocol")],
             swiftSettings: [
                 .unsafeFlags([
                     "-emit-const-values",
@@ -179,6 +183,7 @@ package.targets += tool("Vision")
     + builtInTool("Calendar")
     + builtInTool("Applet", dependencies: [.product(name: "AppletBridge", package: "Protocol")])
     + builtInTool("Reminders")
+    + builtInTool("Images")
     + tool("Browser", dependencies: [.product(name: "BrowserBridge", package: "BrowserProtocol")])
     + tool("Computer", dependencies: [.product(name: "ComputerBridge", package: "Bridge")])
 

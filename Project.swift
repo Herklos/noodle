@@ -193,6 +193,7 @@ let project = Project(
                 .package(product: "NoodleCalendarTools"),
                 .package(product: "NoodleComputerTools"),
                 .package(product: "NoodleRemindersTools"),
+                .package(product: "NoodleImagesTools"),
                 .package(product: "NoodleMCP"),
                 .package(product: "NoodleSharing"),
                 .package(product: "NoodleRuntime"),

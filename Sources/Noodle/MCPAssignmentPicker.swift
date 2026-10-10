@@ -2,6 +2,7 @@ import SwiftUI
 import HubLink
 import NoodleCore
 import NoodleHubClient
+import NoodleRuntime
 import NoodleRuntimeSettings
 
 struct MCPAssignmentPicker: View {
@@ -15,6 +16,8 @@ struct MCPAssignmentPicker: View {
     /// A built-in tool stays in the list while it is on, even before anything is chosen,
     /// so this lives in the sheet: switching tabs rebuilds this view.
     @Binding var builtIn: Set<EventKitAssignments.Kind>
+    let images: ImageGenerationController
+    @Binding var imageGeneration: Bool
     @State private var showingAdd = false
     @State private var search = ""
     @State private var wantsNewTool = false
@@ -43,6 +46,7 @@ struct MCPAssignmentPicker: View {
                     .popover(isPresented: $showingAdd, arrowEdge: .bottom) {
                         MCPConnectionChooser(controller: controller, selectedIDs: $selectedIDs, search: $search,
                             builtIn: $builtIn, missingBuiltIn: missingBuiltIn,
+                            imageGeneration: $imageGeneration,
                             onNewTool: { wantsNewTool = true; showingAdd = false })
                             .onDisappear {
                                 // Wait for the popover to close before presenting a sheet
@@ -51,7 +55,7 @@ struct MCPAssignmentPicker: View {
                             }
                     }
             }
-            if selectedIDs.isEmpty && shownBuiltIn.isEmpty {
+            if selectedIDs.isEmpty && shownBuiltIn.isEmpty && !imageGeneration {
                 Button { search = ""; showingAdd = true } label: {
                     VStack(spacing: 10) {
                         Image(systemName: "puzzlepiece.extension").font(.largeTitle)
@@ -85,6 +89,9 @@ struct MCPAssignmentPicker: View {
                                                 if kind == .calendar { calendarIDs = [] } else { reminderIDs = [] }
                                             })
                         }
+                        if imageGeneration {
+                            ImageGenerationToolRow(controller: images, onRemove: { imageGeneration = false })
+                        }
                     }
                 }.frame(height: Self.listHeight)
                     .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
@@ -113,6 +120,7 @@ struct MCPConnectionChooser: View {
     @Binding var search: String
     var builtIn: Binding<Set<EventKitAssignments.Kind>>? = nil
     var missingBuiltIn: [EventKitAssignments.Kind] = []
+    var imageGeneration: Binding<Bool>? = nil
     let onNewTool: () -> Void
     var body: some View {
         VStack(spacing: 10) {
@@ -136,6 +144,20 @@ struct MCPConnectionChooser: View {
                                 }.padding(8).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                         }
+                    }
+                    if let imageGeneration, !imageGeneration.wrappedValue,
+                       search.isEmpty || "Image Generation".localizedCaseInsensitiveContains(search) {
+                        Button { imageGeneration.wrappedValue = true } label: {
+                            HStack(spacing: 10) {
+                                ImageGenerationIcon(size: 28)
+                                VStack(alignment: .leading) {
+                                    Text("Image Generation").foregroundStyle(Color.primary)
+                                    Text("Images made on this Mac").font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                            }.padding(8).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
                     ForEach(controller.registry.connections.filter {
                         !selectedIDs.contains($0.id) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search))
@@ -173,6 +195,8 @@ struct MCPConnectionChooser: View {
 struct HubConnectionPicker: View {
     let mirror: HubMirror
     @Binding var selectedIDs: Set<UUID>
+    /// The Hub's own image models, for this bot; they are managed on the Hub.
+    @Binding var imageGeneration: Bool
     @State private var showingAdd = false
     @State private var search = ""
     @State private var wantsNewTool = false
@@ -193,7 +217,7 @@ struct HubConnectionPicker: View {
                 Button { search = ""; showingAdd = true } label: { Label("Add Tools…", systemImage: "plus") }
                     .popover(isPresented: $showingAdd, arrowEdge: .bottom) { chooser }
             }
-            if selectedIDs.isEmpty {
+            if selectedIDs.isEmpty && !imageGeneration {
                 Button { search = ""; showingAdd = true } label: {
                     VStack(spacing: 10) {
                         Image(systemName: "puzzlepiece.extension").font(.largeTitle)
@@ -208,6 +232,7 @@ struct HubConnectionPicker: View {
                         ForEach(connections.filter { selectedIDs.contains($0.link.id) }, id: \.link.id) { connection in
                             row(connection.link, connection.record)
                         }
+                        if imageGeneration { imageRow }
                     }
                 }.frame(height: Self.listHeight)
                     .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
@@ -247,11 +272,41 @@ struct HubConnectionPicker: View {
         }.padding(8)
     }
 
+    private var imageRow: some View {
+        HStack(spacing: 10) {
+            ImageGenerationIcon(size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Image Generation").lineLimit(1)
+                HStack(spacing: 4) {
+                    if mirror.imageModel == nil { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                    Text(mirror.imageModel ?? "No model on the Hub yet").foregroundStyle(.secondary).lineLimit(1)
+                }.font(.caption)
+            }
+            Spacer()
+            Button { imageGeneration = false } label: {
+                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+            }.buttonStyle(.plain).help("Remove Image Generation from this bot")
+        }.padding(8)
+    }
+
     private var chooser: some View {
         VStack(spacing: 10) {
             TextField("Search connections", text: $search).textFieldStyle(.roundedBorder).autocorrectionDisabled()
             ScrollView {
                 LazyVStack(spacing: 4) {
+                    if !imageGeneration, search.isEmpty || "Image Generation".localizedCaseInsensitiveContains(search) {
+                        Button { imageGeneration = true } label: {
+                            HStack(spacing: 10) {
+                                ImageGenerationIcon(size: 28)
+                                VStack(alignment: .leading) {
+                                    Text("Image Generation").foregroundStyle(Color.primary)
+                                    Text("Images made on the Hub").font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                            }.padding(8).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
                     ForEach(connections.filter {
                         !selectedIDs.contains($0.link.id) && (search.isEmpty || $0.record.name.localizedCaseInsensitiveContains(search))
                     }, id: \.link.id) { connection in

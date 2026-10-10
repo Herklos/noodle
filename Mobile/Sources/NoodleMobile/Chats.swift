@@ -2294,6 +2294,14 @@ struct AgentEditor: View {
                         }
                     }
                 }
+                Section {
+                    Toggle(isOn: $draft.imageGeneration) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Image Generation")
+                            Text(chats.pairing.status?.imageModel ?? "No model on the Hub yet").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if let problem {
                     Section { Text(problem).foregroundStyle(.red) }
                 }

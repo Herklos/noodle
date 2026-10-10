@@ -64,6 +64,7 @@ struct NewBotSheet: View {
     @State private var calendarIDs: Set<String> = []
     @State private var reminderListIDs: Set<String> = []
     @State private var builtInTools: Set<EventKitAssignments.Kind> = []
+    @State private var imageGeneration = false
     @State private var folders: [AgentFolder] = []
     @State private var selectedProfileID: UUID?
     @State private var selectedTab = BotEditorTab.general
@@ -154,12 +155,13 @@ struct NewBotSheet: View {
                     )
                 case .mcp:
                     if let mirror = store.hubMirror(forHarness: selectedHarnessIdentifier) {
-                        HubConnectionPicker(mirror: mirror, selectedIDs: $mcpConnectionIDs)
+                        HubConnectionPicker(mirror: mirror, selectedIDs: $mcpConnectionIDs, imageGeneration: $imageGeneration)
                     } else {
                         MCPAssignmentPicker(controller: store.mcp, selectedIDs: $mcpConnectionIDs,
                                             calendars: store.calendars, reminders: store.reminders,
                                             calendarIDs: $calendarIDs, reminderIDs: $reminderListIDs,
-                                            builtIn: $builtInTools)
+                                            builtIn: $builtInTools,
+                                            images: store.imageGeneration, imageGeneration: $imageGeneration)
                     }
                 case .browsers:
                     if let mirror = store.hubMirror(forHarness: selectedHarnessIdentifier) {
@@ -239,7 +241,7 @@ struct NewBotSheet: View {
             publicDescription: publicDescription,
             backstory: backstory,
             mcpConnectionIDs: mcpConnectionIDs,
-            computerIDs: computerIDs, browserIDs: browserIDs, calendarIDs: calendarIDs, reminderListIDs: reminderListIDs, folders: folders,
+            computerIDs: computerIDs, browserIDs: browserIDs, calendarIDs: calendarIDs, reminderListIDs: reminderListIDs, imageGeneration: imageGeneration, folders: folders,
             harnessProfile: selectedProfileID,
             voice: selectedVoice.nilIfEmpty
         )
@@ -294,6 +296,7 @@ struct EditBotSheet: View {
     @State private var calendarIDs: Set<String> = []
     @State private var reminderListIDs: Set<String> = []
     @State private var builtInTools: Set<EventKitAssignments.Kind> = []
+    @State private var imageGeneration = false
     @State private var folders: [AgentFolder] = []
     @State private var selectedProfileID: UUID?
     @State private var sharedWith: Set<UUID> = []
@@ -402,12 +405,13 @@ struct EditBotSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case .mcp:
                     if let mirror = store.hubMirror(forHarness: selectedHarnessIdentifier) {
-                        HubConnectionPicker(mirror: mirror, selectedIDs: $mcpConnectionIDs)
+                        HubConnectionPicker(mirror: mirror, selectedIDs: $mcpConnectionIDs, imageGeneration: $imageGeneration)
                     } else {
                         MCPAssignmentPicker(controller: store.mcp, selectedIDs: $mcpConnectionIDs,
                                             calendars: store.calendars, reminders: store.reminders,
                                             calendarIDs: $calendarIDs, reminderIDs: $reminderListIDs,
-                                            builtIn: $builtInTools)
+                                            builtIn: $builtInTools,
+                                            images: store.imageGeneration, imageGeneration: $imageGeneration)
                     }
                 case .browsers:
                     if let mirror = store.hubMirror(forHarness: selectedHarnessIdentifier) {
@@ -436,6 +440,7 @@ struct EditBotSheet: View {
             browserIDs = store.browsers.selectedIDs(for: agent)
             calendarIDs = store.calendars.selectedIDs(for: agent)
             reminderListIDs = store.reminders.selectedIDs(for: agent)
+            imageGeneration = store.imageGeneration.isAssigned(agent)
             builtInTools = Set(EventKitAssignments.Kind.allCases.filter {
                 !($0 == .calendar ? calendarIDs : reminderListIDs).isEmpty
             })
@@ -449,6 +454,7 @@ struct EditBotSheet: View {
                 mcpConnectionIDs = mirror.connectionIDs(forAgent: agent.id)
                 computerIDs = mirror.computerIDs(forAgent: agent.id)
                 browserIDs = mirror.browserIDs(forAgent: agent.id)
+                imageGeneration = mirror.imageGeneration(forAgent: agent.id)
                 sharedWith = Set(mirror.sharedWith(agent: agent.id))
             }
             for hub in store.sharingHubs(forLocalAgent: agent.id) {
@@ -534,7 +540,7 @@ struct EditBotSheet: View {
                 publicDescription: publicDescription,
                 backstory: backstory,
                 mcpConnectionIDs: mcpConnectionIDs,
-                computerIDs: computerIDs, browserIDs: browserIDs, calendarIDs: calendarIDs, reminderListIDs: reminderListIDs, folders: folders,
+                computerIDs: computerIDs, browserIDs: browserIDs, calendarIDs: calendarIDs, reminderListIDs: reminderListIDs, imageGeneration: imageGeneration, folders: folders,
                 harnessProfile: .some(selectedProfileID),
                 sharedWith: sharingHub == nil ? nil : sharedWith,
                 sharedOnHubs: localSharingHubs.isEmpty ? nil : sharedOnHubs,

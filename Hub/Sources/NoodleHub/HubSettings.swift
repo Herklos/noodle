@@ -64,9 +64,20 @@ enum HubSettingsTab: Hashable {
     }
 }
 
+/// The Hub's built-in tools, shared by every person's bots. Connections are each person's own,
+/// added from their devices, so they are not listed here.
+struct HubToolsSettingsView: View {
+    let hub: Hub
+    var body: some View {
+        ImageGenerationSettingsRow(controller: hub.imageGeneration)
+            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+            .padding(20)
+    }
+}
+
 struct HubSettingsView: View {
     /// Tools configures connections the way Noodle does, but the Hub's bots use the ones their
-    /// owners add from Noodle, so its tab stays out of Settings.
+    /// owners add from Noodle, so the Hub's tab shows only its built-in tools.
     static let showsAgentSettings = false
 
     @Bindable var host: HubSettingsHost
@@ -125,6 +136,11 @@ struct HubSettingsView: View {
                 .tag(HubSettingsTab.conversation)
             if Self.showsAgentSettings {
                 MCPSettingsView(store: host)
+                    .hubSettingsSize()
+                    .tabItem { Label("Tools", systemImage: "puzzlepiece.extension") }
+                    .tag(HubSettingsTab.tools)
+            } else {
+                HubToolsSettingsView(hub: host.hub)
                     .hubSettingsSize()
                     .tabItem { Label("Tools", systemImage: "puzzlepiece.extension") }
                     .tag(HubSettingsTab.tools)

@@ -15,6 +15,8 @@ import Observation
     var isOn: Bool { hub != nil }
     /// Its key, once it has served its owner's devices, who name this Mac's bots and groups by it; so do spaces.
     var key: String? = ThisMacHub.savedKey()
+    /// Noodle's image models and grants, which the owner's devices change for its bots.
+    @ObservationIgnored var imageGeneration: ImageGenerationController?
     /// Runs after a device made, changed or deleted a bot, so Noodle reloads its bots.
     @ObservationIgnored var onBotsEdited: (() -> Void)?
     /// Runs after a device changed tools, computers or browsers, so Noodle reads them again.
@@ -75,6 +77,7 @@ import Observation
             // Copies of bots kept on joined Hubs are those Hubs', not this Mac's.
             hub.bots.isHidden = { [runtime] in runtime.remoteAgentIDs.contains($0) }
             hub.bots.onBotsEdited = { [weak self] in self?.onBotsEdited?() }
+            hub.imageGeneration = imageGeneration
             hub.onRead = { [weak self] in self?.onRead?($0, $1) }
             hub.bots.onBackgroundChanged = { [weak self] in self?.onBackgroundChanged?($0) }
             hub.onToolsEdited = { [weak self] in self?.onToolsEdited?() }

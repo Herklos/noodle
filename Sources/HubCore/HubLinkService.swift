@@ -982,7 +982,7 @@ import os
         return LinkStatus(hubName: hubName, userName: user?.name ?? "", planName: plan?.name ?? "",
                           harnesses: harnesses, endpoints: endpoints, canPairDevices: user?.canPairDevices ?? false,
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
-                          userID: user?.id, avatar: user?.avatar)
+                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel)
     }
 
     /// Opens the port on the router, then renews it halfway through each lease, or every

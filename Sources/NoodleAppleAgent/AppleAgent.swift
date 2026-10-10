@@ -20,7 +20,18 @@ import NoodleAppleRuntime
             return
         }
         if args == ["--version"] { print(version); return }
-        if args == ["--help"] { print("Usage: NoodleAppleAgent --serve | --inspect [--models-directory PATH] | --build-capabilities | --version"); return }
+        if args == ["--help"] { print("Usage: NoodleAppleAgent --serve | --inspect [--models-directory PATH] | --generate-image | --build-capabilities | --version"); return }
+        // One image for the Images tool: the request as JSON on standard input, the PNG on standard output.
+        if args == ["--generate-image"] {
+            do {
+                let request = try JSONDecoder().decode(ImageGenerationRequest.self, from: FileHandle.standardInput.readToEnd() ?? Data())
+                try FileHandle.standardOutput.write(contentsOf: ImageGeneration.png(request))
+            } catch {
+                fputs(error.localizedDescription + "\n", stderr)
+                exit(1)
+            }
+            return
+        }
         guard args == ["--serve"] else { fputs("Use --serve or --inspect.\n", stderr); exit(2) }
         signal(SIGPIPE, SIG_IGN)
         signal(SIGTERM, SIG_IGN)

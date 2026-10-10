@@ -27,6 +27,8 @@ import Observation
         var canCall: Bool?
         /// When this Mac's user pinned it, as the Hub last said, so pins show before the Hub answers.
         var pinnedAt: Date?
+        /// Whether it may make images with the Hub's image models.
+        var imageGeneration: Bool?
     }
 
     /// A group of bots on the Hub and its local copy.
@@ -284,6 +286,12 @@ import Observation
     }
 
     /// Whom a bot of this Mac's user is shared with on the Hub.
+    /// Whether a bot may make images with the Hub's image models.
+    public func imageGeneration(forAgent id: UUID) -> Bool { entries.first { $0.agent == id }?.imageGeneration ?? false }
+
+    /// The Hub's default image model, which its bots with Image Generation use. Nil while it has none.
+    public var imageModel: String? { pairing.status?.imageModel }
+
     public func sharedWith(agent id: UUID) -> [UUID] { entries.first { $0.agent == id }?.sharedWith ?? [] }
 
     /// The names of the people a bot of this Mac's user is shared with on the Hub.
@@ -879,7 +887,8 @@ import Observation
             avatarImageData: draft.avatarImageData, backstory: draft.backstory)
         entries.append(Entry(remote: bot.id, remoteConversation: bot.conversationID, agent: created.agent.id,
                              conversation: created.conversation.id, synced: 0, profile: draft.profile, owner: bot.owner,
-                             sharedWith: bot.sharedWith, canCall: bot.canCall, pinnedAt: bot.pinnedAt))
+                             sharedWith: bot.sharedWith, canCall: bot.canCall, pinnedAt: bot.pinnedAt,
+                             imageGeneration: draft.imageGeneration))
         save()
         var agent = created.agent
         // Shown in the bot's editor here; the Hub calls with it.
@@ -908,6 +917,7 @@ import Observation
             $0.sharedWith = bot.sharedWith
             $0.canCall = bot.canCall
             $0.pinnedAt = bot.pinnedAt
+            $0.imageGeneration = draft.imageGeneration
         }
         let unchanged = agent.displayName == draft.name && agent.harnessIdentifier == draft.provider
             && agent.modelIdentifier == draft.model && agent.reasoningEffort == draft.reasoningEffort

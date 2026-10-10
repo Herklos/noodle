@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 import NoodleCore
+import NoodleRuntime
 @testable import Noodle
 @testable import NoodleRuntimeSettings
 
@@ -159,7 +160,8 @@ import NoodleCore
         XCTAssertFalse(hasControl("Done", in: chooser), "Clicking outside the popover closes it")
         let picker = host(MCPAssignmentPicker(controller: f.controller, selectedIDs: selection.idsBinding,
             calendars: eventKit(f, kind: .calendar), reminders: eventKit(f, kind: .reminderList),
-            calendarIDs: .constant([]), reminderIDs: .constant([]), builtIn: .constant([])))
+            calendarIDs: .constant([]), reminderIDs: .constant([]), builtIn: .constant([]),
+            images: ImageGenerationController(repository: f.repository), imageGeneration: .constant(false)))
         let window = try XCTUnwrap(picker.window)
         func confirmation() async throws -> NSView {
             press(try await control("Remove Work from this bot", in: picker))
@@ -178,6 +180,24 @@ import NoodleCore
         XCTAssertEqual(f.controller.selectedIDs(for: f.a), [first.id])
     }
 
+    func testImageGenerationIsOfferedOnceAndSaysWhenNoModelIsDownloaded() async throws {
+        let f = try mcpFixture(), selection = MemberSelection()
+        let images = ImageGenerationController(repository: f.repository)
+        var enabled = false
+        let on = Binding(get: { enabled }, set: { enabled = $0 })
+        let chooser = host(MCPConnectionChooser(controller: f.controller, selectedIDs: selection.idsBinding,
+            search: selection.searchBinding, imageGeneration: on, onNewTool: {}))
+        press(try await control("Image Generation", in: chooser))
+        XCTAssertTrue(enabled)
+        let picker = host(MCPAssignmentPicker(controller: f.controller, selectedIDs: selection.idsBinding,
+            calendars: eventKit(f, kind: .calendar), reminders: eventKit(f, kind: .reminderList),
+            calendarIDs: .constant([]), reminderIDs: .constant([]), builtIn: .constant([]),
+            images: images, imageGeneration: on))
+        _ = try await control("No model downloaded yet", in: picker)
+        press(try await control("Remove Image Generation from this bot", in: picker))
+        XCTAssertFalse(enabled)
+    }
+
     func testEmptyChooserCanRequestCreationAndPickerShowsNoAssignments() async throws {
         let f = try mcpFixture(), selection = MemberSelection()
         var newTool = 0
@@ -187,7 +207,8 @@ import NoodleCore
         press(try await control("New Tool", in: chooser)); XCTAssertEqual(newTool, 1)
         let picker = host(MCPAssignmentPicker(controller: f.controller, selectedIDs: selection.idsBinding,
             calendars: eventKit(f, kind: .calendar), reminders: eventKit(f, kind: .reminderList),
-            calendarIDs: .constant([]), reminderIDs: .constant([]), builtIn: .constant([])))
+            calendarIDs: .constant([]), reminderIDs: .constant([]), builtIn: .constant([]),
+            images: ImageGenerationController(repository: f.repository), imageGeneration: .constant(false)))
         // With nothing assigned the list is one button that opens the chooser.
         let empty = try await control("Add tools to this bot", in: picker)
         XCTAssertTrue(enabled(empty))

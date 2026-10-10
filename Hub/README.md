@@ -41,3 +41,5 @@ them with their heartbeat, access and archived switches; click a bot's picture f
 activity and New Session, which starts it with a fresh context. Settings > Groups lists every group
 with its owner and bots, and can archive one. Settings >
 Conversation chooses how messages reach busy bots and when idle bots start a new session.
+Settings > Tools keeps the Hub's image models: download them, pick the default and remove them
+there. Every person's bots share them; each bot gets Image Generation from its owner's device.

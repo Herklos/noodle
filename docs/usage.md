@@ -123,6 +123,13 @@ leave unassigned stays invisible to it. macOS asks for access the first time —
 calendars and reminders are separate permissions — and you can withdraw either in
 System Settings.
 
+**Image Generation** makes pictures on this Mac, with nothing sent anywhere. Download
+a model in **Settings → Tools → Image Generation → Edit…**, then add the tool in a
+bot's **Tools** tab. Every bot with the tool shares the downloaded models and uses
+the one marked **Default** unless you ask for another. Models are about 7 GB each,
+need around 16 GB of memory, and come with their own licences; follow **Details**
+to read them.
+
 ## Heartbeats
 
 Heartbeats let idle bots check for useful follow-ups on existing work. They are on

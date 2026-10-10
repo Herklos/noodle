@@ -26,6 +26,12 @@ import NoodleRuntime
     /// The only user: this Mac's owner, on every device they join.
     public var owner: HubUser { access.users[0] }
 
+    /// Noodle's image models and grants, which devices change for the owner's bots.
+    public var imageGeneration: ImageGenerationController? {
+        get { bots.imageGeneration }
+        set { bots.imageGeneration = newValue }
+    }
+
     /// Runs after a device changed tools, computers or browsers, or signed a tool in, so Noodle reads them again.
     public var onToolsEdited: (() -> Void)?
 

@@ -993,10 +993,12 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     public var userID: UUID?
     /// The user's picture, its image left out. Nil while they show their initials.
     public var avatar: LinkAvatar?
+    /// The image model bots with Image Generation use. Nil while the Hub has none downloaded.
+    public var imageModel: String?
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
-                canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil) {
+                canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1008,10 +1010,11 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.canShareBots = canShareBots
         self.userID = userID
         self.avatar = avatar
+        self.imageModel = imageModel
     }
 
     private enum CodingKeys: String, CodingKey {
-        case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar
+        case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -1027,6 +1030,7 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         canShareBots = try c.decode(.canShareBots, or: false)
         userID = try c.decodeIfPresent(UUID.self, forKey: .userID)
         avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
+        imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel)
     }
 }
 
@@ -1125,6 +1129,8 @@ public struct LinkBotDraft: Codable, Equatable, Sendable {
     public var avatarImageDigest: String?
     /// The voice it speaks with on calls. Nil leaves it to the Hub, which picks one for its name.
     public var voice: String?
+    /// Whether it may make images with the Hub's image models.
+    public var imageGeneration = false
 
     public init(name: String, provider: String, profile: UUID? = nil, model: String? = nil, reasoningEffort: String? = nil,
                 publicDescription: String = "", backstory: String = "", avatarSymbolName: String? = nil,
@@ -1143,7 +1149,7 @@ public struct LinkBotDraft: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case name, provider, profile, model, reasoningEffort, publicDescription, backstory, avatarSymbolName, avatarColorIndex, avatarImageData,
-             avatarImageDigest, voice
+             avatarImageDigest, voice, imageGeneration
     }
 
     public init(from decoder: Decoder) throws {
@@ -1160,6 +1166,7 @@ public struct LinkBotDraft: Codable, Equatable, Sendable {
         avatarImageData = try c.decodeIfPresent(Data.self, forKey: .avatarImageData)
         avatarImageDigest = try c.decodeIfPresent(String.self, forKey: .avatarImageDigest)
         voice = try c.decodeIfPresent(String.self, forKey: .voice)
+        imageGeneration = try c.decode(.imageGeneration, or: false)
     }
 
     /// Puts the bot on `model` of `harness`. Its effort stays while that model offers it; otherwise it

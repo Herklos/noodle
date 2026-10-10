@@ -6,6 +6,7 @@ import NoodleAppletTools
 import NoodleCalendarTools
 import NoodleCore
 import NoodleHubClient
+import NoodleImagesTools
 import NoodleRemindersTools
 import UniformTypeIdentifiers
 import NoodleRuntime
@@ -150,6 +151,7 @@ final class NoodleStore {
     let browsers: BrowserController
     let calendars: EventKitController
     let reminders: EventKitController
+    let imageGeneration: ImageGenerationController
     let applets: AppletController
     let harnessProfiles: HarnessProfilesController
     let runtime: AgentRuntimeCoordinator
@@ -263,6 +265,15 @@ final class NoodleStore {
         }
         try? toolProviders.register(CalendarToolProvider(store: calendarStore))
         try? toolProviders.register(ReminderToolProvider(store: reminderStore))
+        // Built in because it reads the models in Noodle's own storage and runs them in the Apple helper.
+        imageGeneration = ImageGenerationController(repository: self.repository)
+        imageGeneration.onAssignmentsChange = { [toolAssignments, tools] assigned in
+            toolAssignments.replace(ImageGenerationSettings.kind, with: assigned)
+            tools.synchronizeSkills()
+        }
+        let imageHelper = ImageGenerationHelper(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NoodleAppleAgent"))
+        try? toolProviders.register(ImageToolProvider(library: { [root = self.repository.rootURL] in ImageLibrary.load(root: root) },
+                                                      generate: { try await imageHelper.png($0) }))
         applets = AppletController()
         applets.onGrantsChange = { [toolAssignments, tools] granted in
             toolAssignments.replace(AppletToolGrant.kind, with: granted)
@@ -273,6 +284,7 @@ final class NoodleStore {
         harnessProfiles = HarnessProfilesController(store: self.repository.harnessProfiles)
         thisMac = ThisMacHub(repository: self.repository, runtime: self.runtime, applets: applets, profiles: harnessProfiles,
                              service: mcp.service)
+        thisMac.imageGeneration = imageGeneration
         // Before any bot starts, so bots on a Hub never run here.
         refreshHubMirrors()
         reload()
@@ -928,6 +940,7 @@ final class NoodleStore {
         browserIDs: Set<UUID> = [],
         calendarIDs: Set<String> = [],
         reminderListIDs: Set<String> = [],
+        imageGeneration: Bool = false,
         folders: [AgentFolder] = [],
         harnessProfile: UUID? = nil,
         voice: String? = nil
@@ -940,6 +953,7 @@ final class NoodleStore {
                 backstory: backstory, avatarSymbolName: avatarSymbolName, avatarColorIndex: avatarColorIndex,
                 avatarImageData: avatarImageData)
             draft.voice = validVoice(voice, harnessIdentifier: choice.provider)
+            draft.imageGeneration = imageGeneration
             return createHubAgent(on: choice, draft: draft, connectionIDs: mcpConnectionIDs, computerIDs: computerIDs, browserIDs: browserIDs)
         }
         guard runtime.availableInstallations.contains(where: { $0.provider.rawValue == harnessIdentifier }) else {
@@ -974,12 +988,13 @@ final class NoodleStore {
             try browsers.assign(browserIDs, to: result.agent, synchronizeWorkspace: false)
             try calendars.assign(calendarIDs, to: result.agent, synchronizeWorkspace: false)
             try reminders.assign(reminderListIDs, to: result.agent, synchronizeWorkspace: false)
+            try self.imageGeneration.assign(imageGeneration, to: result.agent)
             try repository.synchronizeAgentWorkspace(result.agent)
         } catch {
             var detail = error.localizedDescription
             do {
                 try checkpoint?.restore()
-                try mcp.reloadAssignments(); try computers.reloadAssignments(); try browsers.reloadAssignments(); try calendars.reloadAssignments(); try reminders.reloadAssignments()
+                try mcp.reloadAssignments(); try computers.reloadAssignments(); try browsers.reloadAssignments(); try calendars.reloadAssignments(); try reminders.reloadAssignments(); try self.imageGeneration.reloadAssignments()
                 if let created {
                     try repository.deleteConversation(id: created.conversation.id)
                     try FileManager.default.removeItem(at: repository.storage(for: created.agent.id).package)
@@ -1021,6 +1036,7 @@ final class NoodleStore {
         browserIDs: Set<UUID>? = nil,
         calendarIDs: Set<String>? = nil,
         reminderListIDs: Set<String>? = nil,
+        imageGeneration: Bool? = nil,
         folders: [AgentFolder]? = nil,
         harnessProfile: UUID?? = nil,
         sharedWith: Set<UUID>? = nil,
@@ -1036,6 +1052,7 @@ final class NoodleStore {
                                      avatarColorIndex: avatarColorIndex, avatarImageData: avatarImageData)
             // Nil keeps the voice the Hub has.
             draft.voice = voice.flatMap { validVoice($0, harnessIdentifier: draft.provider) } ?? self.voice(for: agent)
+            draft.imageGeneration = imageGeneration ?? mirror.imageGeneration(forAgent: agent.id)
             agentBeingEdited = nil
             Task {
                 do {
@@ -1095,13 +1112,14 @@ final class NoodleStore {
             if let browserIDs { try browsers.assign(browserIDs, to: updated, synchronizeWorkspace: false) }
             if let calendarIDs { try calendars.assign(calendarIDs, to: updated, synchronizeWorkspace: false) }
             if let reminderListIDs { try reminders.assign(reminderListIDs, to: updated, synchronizeWorkspace: false) }
+            if let imageGeneration { try self.imageGeneration.assign(imageGeneration, to: updated) }
             try repository.synchronizeAgentWorkspace(updated)
         } catch {
             var detail = error.localizedDescription
             if let checkpoint {
                 do {
                     try checkpoint.restore()
-                    try mcp.reloadAssignments(); try computers.reloadAssignments(); try browsers.reloadAssignments(); try calendars.reloadAssignments(); try reminders.reloadAssignments()
+                    try mcp.reloadAssignments(); try computers.reloadAssignments(); try browsers.reloadAssignments(); try calendars.reloadAssignments(); try reminders.reloadAssignments(); try self.imageGeneration.reloadAssignments()
                     // Generated skills derive from the restored settings. A damaged
                     // workspace may still need repair before it can be synchronized.
                     try repository.synchronizeAgentWorkspace(agent)

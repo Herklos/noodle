@@ -80,6 +80,29 @@ import XCTest
         XCTAssertEqual(listed, .bots([bot]))
     }
 
+    /// A device turns Image Generation on and off for its bot; the Hub grants the tool and says whether it has a model.
+    func testADeviceGivesItsBotImageGenerationOnTheHub() async throws {
+        let f = try await fixture()
+        var draft = LinkBotDraft(name: "Alfred", provider: "claude-code")
+        draft.imageGeneration = true
+        guard case .bot(let bot) = try await f.device.request(.createBot(draft)) else { return XCTFail("unexpected answer") }
+        XCTAssertTrue(bot.draft.imageGeneration)
+        XCTAssertTrue(f.hub.imageGeneration.isAssigned(bot.id))
+        XCTAssertEqual(try ImageGenerationSettings.load(root: f.hub.repository.rootURL).toolAssignments(readable: true), [bot.id: ["default"]])
+        guard case .status(let status) = try await f.device.request(.status) else { return XCTFail("no status") }
+        XCTAssertNil(status.imageModel, "No model is downloaded on this Hub")
+
+        draft.imageGeneration = false
+        guard case .bot(let updated) = try await f.device.request(.updateBot(id: bot.id, draft)) else { return XCTFail("unexpected answer") }
+        XCTAssertFalse(updated.draft.imageGeneration)
+        XCTAssertFalse(f.hub.imageGeneration.isAssigned(bot.id))
+
+        draft.imageGeneration = true
+        _ = try await f.device.request(.updateBot(id: bot.id, draft))
+        _ = try await f.device.request(.deleteBot(id: bot.id))
+        XCTAssertFalse(f.hub.imageGeneration.isAssigned(bot.id), "A deleted bot keeps no grant")
+    }
+
     /// The list leaves a bot's picture out; a device fetches it once, and an edit keeps it without sending it back.
     func testBotPicturesTravelApartFromTheList() async throws {
         let f = try await fixture()

@@ -65,7 +65,7 @@ struct NoodleSettingsView: View {
                 .settingsContentSize(width: Self.width)
                 .tabItem { Label("Groups", systemImage: "person.3") }
                 .tag(NoodleSettingsTab.groups)
-            MCPSettingsView(store: store)
+            MCPSettingsView(store: store) { ImageGenerationSettingsRow(controller: store.imageGeneration) }
                 .settingsContentSize(width: Self.width)
                 .tabItem { Label("Tools", systemImage: "puzzlepiece.extension") }
                 .tag(NoodleSettingsTab.mcps)
