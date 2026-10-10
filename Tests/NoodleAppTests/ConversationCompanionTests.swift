@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 import AppletBridge
 import BrowserBridge
@@ -63,5 +65,22 @@ final class ConversationCompanionTests: XCTestCase {
                         "noodlebrowser://\(browser)?tab=\(tab)&extra=1", "noodlecomputer://\(computer)/path"] {
             XCTAssertNil(CompanionLink(URL(string: foreign)!), foreign)
         }
+    }
+
+    @MainActor func testScrollbarClearsThePopoverCorners() throws {
+        let fixture = try StoreFixture()
+        defer { fixture.cleanUp() }
+        let rows = (0..<10).map { attachment("\($0).webloc", url: NoodletLink.url(for: UUID())) }
+        let host = NSHostingView(rootView: CompanionList(companions: rows) {}.environment(fixture.store))
+        host.frame = NSRect(x: 0, y: 0, width: 340, height: 460)
+        host.layoutSubtreeIfNeeded()
+        let scroll = try XCTUnwrap(find(NSScrollView.self, in: host))
+        XCTAssertGreaterThanOrEqual(scroll.scrollerInsets.top, 16)
+        XCTAssertGreaterThanOrEqual(scroll.scrollerInsets.bottom, 16)
+    }
+
+    @MainActor private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+        if let view = view as? T { return view }
+        return view.subviews.lazy.compactMap { self.find(type, in: $0) }.first
     }
 }

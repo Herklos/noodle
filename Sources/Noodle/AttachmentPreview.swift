@@ -115,23 +115,35 @@ struct ConversationCompanionsMenu: View {
             }
             .help("Shared Computers, Browsers and Noodlets")
             .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(companions) { attachment in
-                            CompanionRow(attachment: attachment) {
-                                isPresented = false
-                                Task { @MainActor in
-                                    do { try await store.openCompanion(attachment) }
-                                    catch { store.errorMessage = error.localizedDescription }
-                                }
-                            }
-                        }
-                    }
-                    .padding(6)
-                }
-                .frame(width: 340, height: min(CGFloat(companions.count) * CompanionRow.height + 12, 460))
+                CompanionList(companions: companions) { isPresented = false }
             }
         }
+    }
+}
+
+struct CompanionList: View {
+    @Environment(NoodleStore.self) private var store
+    let companions: [ConversationAttachment]
+    let dismiss: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                ForEach(companions) { attachment in
+                    CompanionRow(attachment: attachment) {
+                        dismiss()
+                        Task { @MainActor in
+                            do { try await store.openCompanion(attachment) }
+                            catch { store.errorMessage = error.localizedDescription }
+                        }
+                    }
+                }
+            }
+            .padding(6)
+        }
+        // Keep the scrollbar clear of the popover's rounded corners.
+        .contentMargins(.vertical, 16, for: .scrollIndicators)
+        .frame(width: 340, height: min(CGFloat(companions.count) * CompanionRow.height + 12, 460))
     }
 }
 
