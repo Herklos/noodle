@@ -308,6 +308,7 @@ private struct HubArchivedSheet: View {
             .formStyle(.grouped)
         }
         .frame(width: 420, height: 360)
+        .noodleSheetSizing()
     }
 }
 
@@ -369,6 +370,7 @@ private struct HubUsersSheet: View {
             .padding(16)
         }
         .frame(width: 460, height: 420)
+        .noodleSheetSizing()
         // Loads when opened, and again whenever the Hub says its users changed.
         .task(id: mirror?.usersChanges) { await users.load() }
         .alert(namingTitle, isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
@@ -542,7 +544,7 @@ struct HubJoinSheet: View {
             .padding(.horizontal, 24).padding(.vertical, 16)
         }
         .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+        .noodleSheetSizing()
         .overlay {
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 3).padding(4)

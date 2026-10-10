@@ -1,5 +1,6 @@
 import AppKit
 import NoodleExternalTools
+import NoodleSettingsUI
 import SwiftUI
 
 /// Asks the person in a small window of its own, in front of other apps. A question nobody
@@ -261,6 +262,7 @@ struct ExternalCallerSheet: View {
             .padding([.horizontal, .bottom], 20)
         }
         .frame(width: 440)
+        .noodleSheetSizing()
     }
 }
 

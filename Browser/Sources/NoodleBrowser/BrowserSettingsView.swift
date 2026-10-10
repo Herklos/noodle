@@ -19,7 +19,7 @@ struct BrowserSettingsView: View {
     var body: some View {
         SettingsTabView(selection: $selection) {
             BrowserGeneralSettingsView()
-                .frame(width: 580).fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(BrowserSettingsTab.general)
             if let external = runtime.external {
                 ExternalToolsSettingsView(gate: external, noun: "browser",
@@ -27,11 +27,11 @@ struct BrowserSettingsView: View {
                     command: Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/noodle-browser").path,
                     server: BrowserBuildIdentity.current == .development ? "noodle-browser-dev" : "noodle-browser",
                     delete: { ids in Task { for id in ids { try? await runtime.removeBrowser(id) } } })
-                    .frame(width: 580).fixedSize(horizontal: false, vertical: true)
+                    .settingsContentSize(width: 580)
                     .tabItem { Label("Agents", systemImage: "point.3.connected.trianglepath.dotted") }.tag(BrowserSettingsTab.external)
             }
             BrowserUpdatesSettingsView()
-                .frame(width: 580).fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("Update", systemImage: "arrow.triangle.2.circlepath") }.tag(BrowserSettingsTab.updates)
         }
         .background(SettingsTabBadge(counts: ["Update": updater.availableVersion == nil ? 0 : 1]))

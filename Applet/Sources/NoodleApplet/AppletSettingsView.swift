@@ -14,28 +14,23 @@ struct AppletSettingsView: View {
     var body: some View {
         SettingsTabView(selection: $selection) {
             AppletGeneralSettingsView(background: background)
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(AppletSettingsTab.general)
             AppletPermissionsSettingsView(library: library)
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("Permissions", systemImage: "hand.raised") }
                 .tag(AppletSettingsTab.permissions)
             AppletSecretsSettingsView(library: library)
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("Secrets", systemImage: "key") }
                 .tag(AppletSettingsTab.secrets)
             AppletStorageSettingsView(library: library, runtime: runtime)
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("Storage", systemImage: "internaldrive") }
                 .tag(AppletSettingsTab.storage)
             AppletUpdatesSettingsView()
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("Update", systemImage: "arrow.triangle.2.circlepath") }
                 .tag(AppletSettingsTab.updates)
         }

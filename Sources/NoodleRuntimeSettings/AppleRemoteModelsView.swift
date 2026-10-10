@@ -395,6 +395,7 @@ private struct AccountFormView: View {
         }
         .padding(20)
         .frame(width: 380)
+        .noodleSheetSizing()
         .onAppear { if case .rename(let account) = form { name = account.name } }
     }
 
@@ -553,6 +554,7 @@ private struct ModelFormView: View {
         }
         .padding(20)
         .frame(width: 460)
+        .noodleSheetSizing()
         .onAppear {
             guard let model = form.model else { return }
             id = model.id

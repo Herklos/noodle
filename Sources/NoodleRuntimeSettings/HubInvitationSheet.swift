@@ -35,7 +35,7 @@ public struct HubInvitationSheet: View {
             .padding(.horizontal, 24).padding(.vertical, 16)
         }
         .frame(width: 400)
-        .fixedSize(horizontal: false, vertical: true)
+        .noodleSheetSizing()
     }
 }
 

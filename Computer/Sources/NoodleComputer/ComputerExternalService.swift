@@ -141,8 +141,7 @@ struct ComputerExternalSettingsView: View {
             if let store, let service = ComputerExternalService.shared { Content(store: store, gate: service.gate) }
             else { Form { ProgressView() }.formStyle(.grouped) }
         }
-        .frame(width: 580)
-        .fixedSize(horizontal: false, vertical: true)
+        .settingsContentSize(width: 580)
         .task { store = try? ComputerAppDelegate.loadLibrary() }
     }
 

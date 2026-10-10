@@ -223,6 +223,7 @@ struct NewBrowserSheet: View {
             }.formStyle(.grouped).disabled(making)
         }
         .frame(width: 420)
+        .noodleSheetSizing()
     }
 
     private func make() {

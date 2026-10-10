@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Sheets that change size hide their content while they resize, animate to the new size and fade the content back in, as Settings does, and never grow taller than the screen; taller content scrolls.
+- Settings never grows taller than the screen; a tall tab scrolls.
+
 ## [0.15.0] - 2026-10-10
 
 ### Changed

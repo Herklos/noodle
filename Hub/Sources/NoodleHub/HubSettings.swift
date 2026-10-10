@@ -161,7 +161,7 @@ struct HubSettingsView: View {
 private extension View {
     /// The same pane width as Noodle's settings.
     func hubSettingsSize() -> some View {
-        frame(width: 680).fixedSize(horizontal: false, vertical: true)
+        settingsContentSize(width: 680)
     }
 }
 

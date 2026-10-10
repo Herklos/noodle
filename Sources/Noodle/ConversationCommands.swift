@@ -223,6 +223,7 @@ struct SpaceEditorSheet: View {
             .frame(minHeight: 160, idealHeight: 260)
         }
         .frame(width: 360)
+        .noodleSheetSizing()
         .onChange(of: store.customSpaces.isEmpty) { _, isEmpty in
             if isEmpty { dismiss() }
         }

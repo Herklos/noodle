@@ -46,13 +46,14 @@ struct SettingsContentHeight: Layout {
     }
 }
 
-private struct SettingsScreenObserver: NSViewRepresentable {
+struct SettingsScreenObserver: NSViewRepresentable {
     let onChange: (CGFloat?) -> Void
 
-    /// The screen's visible height minus the window's title bar and toolbar.
+    /// The screen's visible height minus the window's title bar and toolbar;
+    /// a sheet hangs below its parent's.
     @MainActor static func availableHeight(in window: NSWindow?) -> CGFloat? {
         guard let screen = window?.screen ?? NSScreen.main else { return nil }
-        let chrome = window.map { $0.frame.height - $0.contentLayoutRect.height } ?? 0
+        let chrome = (window?.sheetParent ?? window).map { $0.frame.height - $0.contentLayoutRect.height } ?? 0
         return max(screen.visibleFrame.height - chrome, 200)
     }
 

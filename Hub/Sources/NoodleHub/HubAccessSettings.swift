@@ -253,7 +253,7 @@ struct HubPlanEditor: View {
             .padding(.horizontal, 24).padding(.vertical, 16)
         }
         .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
+        .noodleSheetSizing()
         .onAppear {
             name = plan?.name ?? ""
             host.runtime.refreshCapabilities()

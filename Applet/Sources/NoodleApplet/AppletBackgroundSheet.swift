@@ -47,7 +47,7 @@ struct AppletBackgroundSheet: View {
             }
         }
         .padding(24).frame(width: 520).controlSize(.regular)
-        .fixedSize(horizontal: false, vertical: true).presentationSizing(.fitted)
+        .noodleSheetSizing()
         .interactiveDismissDisabled(busy)
     }
 }

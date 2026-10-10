@@ -200,6 +200,6 @@ struct BookmarkEditor: View {
                     } catch { failure = error.localizedDescription }
                 }.keyboardShortcut(.defaultAction)
             }
-        }.padding(24).frame(width: 380)
+        }.padding(24).frame(width: 380).noodleSheetSizing()
     }
 }

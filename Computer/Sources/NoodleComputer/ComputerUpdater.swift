@@ -66,8 +66,7 @@ struct ComputerSettingsView: View {
     var body: some View {
         SettingsTabView(selection: $selection) {
             ComputerGeneralSettingsView()
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(ComputerSettingsTab.general)
             StorageSettingsView()
@@ -77,8 +76,7 @@ struct ComputerSettingsView: View {
                 .tabItem { Label("Agents", systemImage: "point.3.connected.trianglepath.dotted") }
                 .tag(ComputerSettingsTab.external)
             ComputerUpdatesSettingsView()
-                .frame(width: 580)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsContentSize(width: 580)
                 .tabItem { Label("Update", systemImage: "arrow.triangle.2.circlepath") }
                 .tag(ComputerSettingsTab.updates)
         }

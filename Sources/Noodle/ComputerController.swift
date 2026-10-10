@@ -369,6 +369,7 @@ struct NewComputerSheet: View {
             }.formStyle(.grouped).disabled(making)
         }
         .frame(width: 420)
+        .noodleSheetSizing()
         .task {
             do {
                 available = try await templates()

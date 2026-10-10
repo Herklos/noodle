@@ -1,6 +1,7 @@
 // Adapted from ChatBotKit Studio's StorageView.
 // Copyright 2026 CBK.AI LTD. Licensed under Apache-2.0.
 import Combine
+import NoodleSettingsUI
 import SwiftUI
 
 struct StorageSettingsView: View {
@@ -17,8 +18,7 @@ struct StorageSettingsView: View {
                 }.formStyle(.grouped)
             }
         }
-        .frame(width: 580)
-        .fixedSize(horizontal: false, vertical: true)
+        .settingsContentSize(width: 580)
         .task { load() }
     }
 

@@ -11,9 +11,11 @@ let package = Package(
         .library(name: "NoodleExternalTools", targets: ["NoodleExternalTools"]),
         .library(name: "NoodleExternalToolsUI", targets: ["NoodleExternalToolsUI"]),
     ],
+    dependencies: [.package(path: "../SettingsUI")],
     targets: [
         .target(name: "NoodleExternalTools"),
-        .target(name: "NoodleExternalToolsUI", dependencies: ["NoodleExternalTools"]),
+        .target(name: "NoodleExternalToolsUI", dependencies: [
+            "NoodleExternalTools", .product(name: "NoodleSettingsUI", package: "SettingsUI")]),
         .testTarget(name: "NoodleExternalToolsTests", dependencies: ["NoodleExternalTools"]),
         .testTarget(name: "NoodleExternalToolsUITests", dependencies: ["NoodleExternalToolsUI"]),
     ],

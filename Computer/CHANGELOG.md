@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Sheets that change size hide their content while they resize, animate to the new size and fade the content back in, as Settings does, and never grow taller than the screen; taller content scrolls.
+- Settings never grows taller than the screen; a tall tab scrolls.
+
 ### Fixed
 
 - Stopping the Local Mac signs its account out in the Mac's login records too, so `who` and `last` no longer show it as still logged in.
