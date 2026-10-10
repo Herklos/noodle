@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Settings > Downloaded Noodlets lists the noodlets kept on the phone with their sizes, to delete one or all of them and free up space. A deleted noodlet downloads again the next time it opens.
+
 ### Changed
 
 - Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
@@ -18,6 +22,7 @@
 - Open a noodlet game with sound and check you hear it.
 - Play a noodlet game with a controller and check every button and both sticks do what the game shows.
 - Open a noodlet that runs on the Hub and check it says "Packing files" while the Hub prepares it.
+- In Settings, open Downloaded Noodlets, check the sizes look right, delete a game by swiping, then open it again and check it downloads and plays.
 
 ## [0.28.0] - 2026-10-10
 

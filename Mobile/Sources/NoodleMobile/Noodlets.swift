@@ -486,3 +486,49 @@ extension AppDelegate {
         ScreenOrientation.allowed
     }
 }
+
+/// A noodlet whose files this phone keeps, from any Hub; deleting it frees the space, and it
+/// downloads again the next time it opens.
+struct DownloadedNoodlet: Identifiable, Sendable {
+    let folder: URL
+    /// From its manifest; none while it is still downloading, or if a download was cut short.
+    let title: String?
+    let byteCount: Int64
+
+    var id: URL { folder }
+
+    /// Where every Hub keeps its noodlets, each in a folder of its own; the system clears it when
+    /// space runs low.
+    static var root: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Noodlets")
+    }
+
+    /// Largest first.
+    static func all(in root: URL = root) -> [DownloadedNoodlet] {
+        let fm = FileManager.default
+        let noodlets = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []).flatMap { hub in
+            (try? fm.contentsOfDirectory(at: hub, includingPropertiesForKeys: nil)) ?? []
+        }
+        return noodlets.map { folder in
+            let manifest = ((try? fm.contentsOfDirectory(atPath: folder.path)) ?? []).lazy.filter { !$0.hasPrefix(".") }.compactMap {
+                (try? Data(contentsOf: folder.appendingPathComponent($0).appendingPathComponent("noodlet.json")))
+                    .flatMap { try? JSONDecoder().decode(NoodletManifest.self, from: $0) }
+            }.first
+            return DownloadedNoodlet(folder: folder, title: manifest?.title, byteCount: size(of: folder))
+        }
+        .sorted { $0.byteCount > $1.byteCount }
+    }
+
+    func delete() throws { try FileManager.default.removeItem(at: folder) }
+
+    private static func size(of folder: URL) -> Int64 {
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .isRegularFileKey]
+        guard let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: Array(keys)) else { return 0 }
+        var total: Int64 = 0
+        for case let file as URL in files {
+            guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            total += Int64(values.totalFileAllocatedSize ?? 0)
+        }
+        return total
+    }
+}

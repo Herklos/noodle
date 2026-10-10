@@ -155,11 +155,8 @@ extension HubChats {
         return resolved
     }
 
-    /// Where this Hub's noodlets are kept on this phone; the system clears it when space runs low.
-    var noodletCache: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Noodlets/\(pairing.directory.lastPathComponent)")
-    }
+    /// Where this Hub's noodlets are kept on this phone.
+    var noodletCache: URL { DownloadedNoodlet.root.appendingPathComponent(pairing.directory.lastPathComponent) }
 
     /// The latest picture of what a link points at, for a card that carries none, as a noodlet's.
     func picture(for attachment: LinkAttachment, in conversation: some HubConversation) async throws -> Data? {

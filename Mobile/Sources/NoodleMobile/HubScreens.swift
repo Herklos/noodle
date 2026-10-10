@@ -1054,6 +1054,7 @@ struct SettingsView: View {
     @AppStorage(WebLinkPreview.key) private var previewsLinks = true
     @AppStorage(ScreenControlHaptics.key) private var haptics = false
     @State private var noodlets = NoodletGrants().all
+    @State private var downloaded: Int64?
 
     var body: some View {
         NavigationStack {
@@ -1076,6 +1077,13 @@ struct SettingsView: View {
                 Section {
                     Toggle("Haptics for On-Screen Controls", isOn: $haptics)
                 }
+                Section {
+                    NavigationLink { DownloadedNoodletsView() } label: {
+                        LabeledContent("Downloaded Noodlets") {
+                            if let downloaded { Text(downloaded, format: .byteCount(style: .file)) }
+                        }
+                    }
+                }
                 if !noodlets.isEmpty {
                     Section("Noodlet Permissions") {
                         ForEach(noodlets) { grant in
@@ -1097,6 +1105,58 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+            // Again on coming back from the list, which may have deleted some.
+            .onAppear {
+                Task { downloaded = await Task.detached { DownloadedNoodlet.all().reduce(0) { $0 + $1.byteCount } }.value }
+            }
+        }
+    }
+}
+
+/// The noodlets this phone keeps, largest first, to delete when it needs the space.
+struct DownloadedNoodletsView: View {
+    @State private var noodlets: [DownloadedNoodlet]?
+    @State private var deletingAll = false
+
+    var body: some View {
+        List {
+            if let noodlets, !noodlets.isEmpty {
+                Section {
+                    ForEach(noodlets) { noodlet in
+                        LabeledContent(noodlet.title ?? "Incomplete Download") {
+                            Text(noodlet.byteCount, format: .byteCount(style: .file))
+                        }
+                    }
+                    .onDelete { rows in delete(rows.map { noodlets[$0] }) }
+                }
+                Section {
+                    Button("Delete All", role: .destructive) { deletingAll = true }
+                }
+            }
+        }
+        .overlay {
+            if noodlets?.isEmpty == true {
+                ContentUnavailableView("No Downloaded Noodlets", systemImage: "arrow.down.circle")
+            }
+        }
+        .navigationTitle("Downloaded Noodlets")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .confirmationDialog("Delete All Downloaded Noodlets?", isPresented: $deletingAll, titleVisibility: .visible) {
+            Button("Delete All", role: .destructive) { delete(noodlets ?? []) }
+        }
+    }
+
+    private func load() async {
+        noodlets = await Task.detached { DownloadedNoodlet.all() }.value
+    }
+
+    private func delete(_ chosen: [DownloadedNoodlet]) {
+        let gone = Set(chosen.map(\.id))
+        noodlets?.removeAll { gone.contains($0.id) }
+        Task {
+            await Task.detached { chosen.forEach { try? $0.delete() } }.value
+            await load()
         }
     }
 }
