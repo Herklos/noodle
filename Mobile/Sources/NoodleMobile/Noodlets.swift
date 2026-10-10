@@ -42,8 +42,9 @@ struct NoodletPlayer: View {
         choices.map { fetched[$0.id] ?? $0 }
     }
 
-    /// Controller presses are not touches, so iOS would dim and lock the phone mid-game.
-    static func keepsAwake(onTV: Bool, controllerConnected: Bool) -> Bool { onTV || controllerConnected }
+    /// Controller presses are not touches, so iOS would dim and lock the phone mid-game; nor is
+    /// waiting for a noodlet to download, which locking would stop.
+    static func keepsAwake(onTV: Bool, controllerConnected: Bool, loading: Bool = false) -> Bool { onTV || controllerConnected || loading }
 }
 
 /// A noodlet a bot shared: run on this phone, or watched live from the Hub, where the person last
@@ -306,7 +307,8 @@ struct NoodletDeviceScreen: View {
                 if onTV { lender.lend(to: page.web) { [gameMenu] in gameMenu.selected == nil } } else { lender.stop() }
             }
         }
-        .onChange(of: NoodletPlayer.keepsAwake(onTV: onTV, controllerConnected: hardware.hasController), initial: true) { _, awake in
+        .onChange(of: NoodletPlayer.keepsAwake(onTV: onTV, controllerConnected: hardware.hasController,
+                                               loading: !revealed && failure == nil), initial: true) { _, awake in
             KeepAwake.set(awake)
         }
         .onDisappear {

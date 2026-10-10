@@ -5,15 +5,19 @@
 ### Changed
 
 - Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
+- A noodlet the Hub is preparing says "Packing files" while it loads.
 
 ### Fixed
 
+- A noodlet downloading from the Hub keeps the phone awake, and if the connection drops, as when the phone is locked, it carries on from where it stopped instead of failing.
 - Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.
 
 ### What to Test
 
+- Start a large noodlet game, lock the phone while it downloads, unlock it, and check the download finishes.
 - Open a noodlet game with sound and check you hear it.
 - Play a noodlet game with a controller and check every button and both sticks do what the game shows.
+- Open a noodlet that runs on the Hub and check it says "Packing files" while the Hub prepares it.
 
 ## [0.28.0] - 2026-10-10
 

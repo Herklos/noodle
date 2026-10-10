@@ -100,7 +100,7 @@ public struct NoodletLoadingView: View {
 
     private var detail: String {
         switch stage {
-        case .preparing: "Packing its files"
+        case .preparing: "Packing files"
         case .arriving(.downloading(let received, let total)): "\(Self.size(received)) of \(Self.size(total))"
         case .arriving(.unpacking): size > 0 ? Self.size(size) : "Unpacking its files"
         case .starting: "Opening its page"
@@ -155,8 +155,11 @@ public struct NoodletCache: Sendable {
     public init(root: URL) { self.root = root }
 
     /// The noodlet's folder at `revision`, fetching its archive piece by piece from `offset` when
-    /// this device does not have it yet, and telling `progress` how far it has come.
+    /// this device does not have it yet, and telling `progress` how far it has come. A piece that
+    /// fails, as when a phone locks and its connection drops, is asked for again after each of
+    /// `pauses`, keeping what arrived.
     public func package(_ id: UUID, revision: String, byteCount: Int,
+                        pauses: [Duration] = [.seconds(1), .seconds(3), .seconds(10)],
                         progress: @Sendable (NoodletArrival) -> Void = { _ in },
                         fetch: @Sendable (_ offset: Int) async throws -> Data) async throws -> URL {
         guard !revision.isEmpty, revision.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
@@ -174,8 +177,17 @@ public struct NoodletCache: Sendable {
             var received = 0
             do {
                 progress(.downloading(received: 0, total: byteCount))
+                var tries = pauses[...]
                 while received < byteCount {
-                    let data = try await fetch(received)
+                    let data: Data
+                    do {
+                        data = try await fetch(received)
+                    } catch {
+                        guard !(error is CancellationError), let pause = tries.popFirst() else { throw error }
+                        try await Task.sleep(for: pause)
+                        continue
+                    }
+                    tries = pauses[...]
                     guard !data.isEmpty else { throw AppletError("The noodlet arrived incomplete.") }
                     try output.write(contentsOf: data)
                     received += data.count

@@ -9,9 +9,11 @@ All notable changes to Noodle are documented here, following
 ### Changed
 
 - Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
+- A noodlet the Hub is preparing says "Packing files" while it loads.
 
 ### Fixed
 
+- A noodlet downloading from the Hub carries on from where it stopped after a dropped connection, instead of failing.
 - Noodle no longer reads every conversation from disk several times a second, and checks what changed for its own devices without holding up the window, so it stays quieter while idle and while a chat is open.
 - A chat effect plays even when another conversation cannot be read.
 - A bot that stopped because its harness needed signing in comes back by itself once the harness is signed in again, keeping its session, instead of waiting for Kick.

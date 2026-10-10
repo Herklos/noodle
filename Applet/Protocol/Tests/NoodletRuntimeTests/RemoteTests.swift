@@ -123,6 +123,46 @@ final class RemoteTests: XCTestCase {
         XCTAssertEqual(arrivals.all, seen, "a noodlet it had arrived again")
     }
 
+    /// A piece that fails, as when the phone locks mid-download and its connection drops, is asked
+    /// for again from where it stopped, keeping what had arrived.
+    func testTheCacheTakesUpADownloadWhereItStopped() async throws {
+        let archive = try folder().appendingPathComponent("a")
+        try NoodletArchive.write(entries: [("noodlet.json", Data("{}".utf8)), ("index.html", Data(repeating: 7, count: 3000))], to: archive)
+        let bytes = try Data(contentsOf: archive)
+        let offsets = Offsets()
+        let failed = Arrivals()
+        let fetch: @Sendable (Int) async throws -> Data = { offset in
+            await offsets.add(offset)
+            if offset == 100, failed.all.isEmpty {
+                failed.add(.unpacking)
+                throw URLError(.networkConnectionLost)
+            }
+            return bytes.subdata(in: offset..<min(bytes.count, offset + 100))
+        }
+        let package = try await NoodletCache(root: try folder()).package(UUID(), revision: "abc1", byteCount: bytes.count, fetch: fetch)
+        XCTAssertEqual(try Data(contentsOf: package.appendingPathComponent("index.html")).count, 3000)
+        let asked = await offsets.all
+        XCTAssertEqual(Array(asked.prefix(3)), [0, 100, 100])
+    }
+
+    /// A download that keeps failing gives up after its tries, leaving nothing behind.
+    func testTheCacheGivesUpOnADownloadThatKeepsFailing() async throws {
+        let root = try folder()
+        let offsets = Offsets()
+        let fetch: @Sendable (Int) async throws -> Data = { offset in
+            await offsets.add(offset)
+            throw URLError(.networkConnectionLost)
+        }
+        let id = UUID()
+        do {
+            _ = try await NoodletCache(root: root).package(id, revision: "abc1", byteCount: 5000, pauses: [.zero, .zero], fetch: fetch)
+            XCTFail("a download that kept failing finished")
+        } catch {}
+        let asked = await offsets.all
+        XCTAssertEqual(asked, [0, 0, 0])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent(id.uuidString.lowercased()).path), [])
+    }
+
     /// Where the person ran a noodlet last is where it runs next time, for that noodlet alone.
     func testTheChoiceIsRememberedForEachNoodlet() throws {
         let suite = "NoodletPlaces." + UUID().uuidString

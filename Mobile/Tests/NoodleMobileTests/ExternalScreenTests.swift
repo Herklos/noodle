@@ -121,11 +121,13 @@ import XCTest
         XCTAssertEqual(shown.map(\.liveTitle), ["Liverpool Street", "Other"])
     }
 
-    /// Controller presses are not touches, so iOS would dim and lock the phone mid-game.
-    func testAGameWithAControllerOrOnTheTVKeepsThePhoneAwake() {
+    /// Controller presses are not touches, so iOS would dim and lock the phone mid-game; nor is
+    /// waiting for a noodlet to download, which locking would stop.
+    func testAGameWithAControllerOrOnTheTVOrLoadingKeepsThePhoneAwake() {
         XCTAssertFalse(NoodletPlayer.keepsAwake(onTV: false, controllerConnected: false))
         XCTAssertTrue(NoodletPlayer.keepsAwake(onTV: true, controllerConnected: false))
         XCTAssertTrue(NoodletPlayer.keepsAwake(onTV: false, controllerConnected: true))
+        XCTAssertTrue(NoodletPlayer.keepsAwake(onTV: false, controllerConnected: false, loading: true))
     }
 }
 
