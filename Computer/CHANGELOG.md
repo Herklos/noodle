@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopping the Local Mac signs its account out in the Mac's login records too, so `who` and `last` no longer show it as still logged in.
+
 ## [0.25.0] - 2026-10-10
 
 ### Changed

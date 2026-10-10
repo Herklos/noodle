@@ -406,6 +406,7 @@ private final class Service: NSObject, NSXPCListenerDelegate {
             Thread.sleep(forTimeInterval: 0.1)
         }
         guard !sessions().contains(where: { uid($0) == account.uid }) else { throw LocalMacError("The background session is still stopping. Its account has been retained.") }
+        LocalMacLoginRecords.close(user: account.name)
         try restoreConsole(original)
     }
     func restoreConsole(_ original: [String: Any]) throws {
