@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
+
 ### Fixed
 
 - Noodle Hub no longer reads every conversation from disk every second, and checks what changed for devices without holding up its window.

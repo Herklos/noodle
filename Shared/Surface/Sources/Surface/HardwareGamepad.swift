@@ -198,9 +198,7 @@ import Observation
 
     func set(_ source: String, _ keys: Set<String>) {
         if !keys.isEmpty, controller == nil { controller = connectedController }
-        var next = held
-        next[source] = keys
-        set(next)
+        GamepadKeyChange.changes(in: &held, setting: source, to: keys).forEach(onKey)
     }
 
     private func set(_ next: [String: Set<String>]) {

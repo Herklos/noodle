@@ -91,6 +91,14 @@ final class MemoryStore: NoodletStore, @unchecked Sendable {
         XCTAssertEqual(NoodletFiles.safeName(".hidden"), "download")
     }
 
+    /// A game that runs on Shift reads it as a keyboard reports the left one.
+    nonisolated func testModifierKeysArriveAsTheLeftOnes() throws {
+        let shift = try XCTUnwrap(PageKeys.script(for: .hold(key: "shift", pressed: true)))
+        XCTAssertTrue(shift.contains(#""key":"Shift""#) && shift.contains(#""code":"ShiftLeft""#) && shift.contains(#""keyCode":16"#), shift)
+        XCTAssertTrue(try XCTUnwrap(PageKeys.script(for: .hold(key: "control", pressed: true))).contains(#""code":"ControlLeft""#))
+        XCTAssertTrue(try XCTUnwrap(PageKeys.script(for: .hold(key: "alt", pressed: false))).contains(#""code":"AltLeft""#))
+    }
+
     nonisolated func testOnlyTheNoodletsOwnMainPageIsTrusted() {
         let inside = URL(string: "noodlet-package://noodlet/index.html")
 

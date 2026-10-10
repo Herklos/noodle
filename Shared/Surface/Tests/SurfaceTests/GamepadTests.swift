@@ -93,7 +93,8 @@ final class GamepadDeclarationTests: XCTestCase {
             ("three pads", Gamepad(pads: [Gamepad.arrows, Gamepad.wasd, Gamepad.Pad(left: "j", right: "l")])),
             ("a pad without directions", Gamepad(pads: [Gamepad.Pad()])),
             ("nine buttons", Gamepad(buttons: Gamepad.buttons(8) + [.init(key: "q")])),
-            ("a key twice", Gamepad(pads: [Gamepad.arrows], buttons: [.init(key: "up")])),
+            ("a key on two buttons", Gamepad(buttons: [.init(key: "z"), .init(key: "z")])),
+            ("a pad with a key twice", Gamepad(pads: [Gamepad.Pad(left: "a", right: "a")])),
             ("menu on a button's key", Gamepad(buttons: [.init(key: "space")], menu: "space")),
             ("an unknown key", Gamepad(buttons: [.init(key: "f1")])),
             ("a capital letter", Gamepad(buttons: [.init(key: "Z")])),
@@ -101,6 +102,14 @@ final class GamepadDeclarationTests: XCTestCase {
             ("an empty label", Gamepad(buttons: [.init(key: "z", label: " ")])),
         ]
         for (name, gamepad) in wrong { XCTAssertThrowsError(try gamepad.validate(), name) }
+    }
+
+    /// A racing game steers with the arrows and still gives the gas its own trigger, and PC
+    /// games run and crouch on the modifier keys.
+    func testAcceptsAPadKeyOnAButtonAndModifierKeys() {
+        let racer = Gamepad(pads: [Gamepad.arrows], buttons: [.init(key: "up", label: "Gas"), .init(key: "down", label: "Brake")])
+        XCTAssertNoThrow(try racer.validate())
+        XCTAssertNoThrow(try Gamepad(buttons: [.init(key: "shift"), .init(key: "control"), .init(key: "alt")]).validate())
     }
 }
 
@@ -160,6 +169,12 @@ final class GamepadControllerTests: XCTestCase {
         XCTAssertEqual(Gamepad.arrows.held(x: 0, y: 1), ["up"])
         XCTAssertEqual(Gamepad.arrows.held(x: -0.7, y: -0.7), ["left", "down"])
         XCTAssertEqual(Gamepad.Pad(left: "left", right: "right").held(x: 0.2, y: 1), [])
+    }
+
+    func testAPadSharingAKeyWithAButtonStillTakesItsStick() {
+        let racer = Gamepad(pads: [Gamepad.arrows], buttons: [.init(key: "space"), .init(key: "left")])
+        XCTAssertNil(racer.onScreen(with: .xbox))
+        XCTAssertEqual(racer.onScreen(with: .atari), Gamepad(buttons: [.init(key: "left")]))
     }
 
     func testMenuFallsBackToASpareButton() {
@@ -315,6 +330,15 @@ final class GamepadPadTests: XCTestCase {
         XCTAssertEqual(GamepadKeyChange.changes(from: ["right", "up"], to: ["left", "up"]),
                        [.init(key: "right", pressed: false), .init(key: "left", pressed: true)])
         XCTAssertEqual(GamepadKeyChange.changes(from: ["up"], to: ["up"]), [])
+    }
+
+    /// A trigger and the stick may press the same key: it stays down until both let go.
+    func testAKeyHeldFromTwoControlsStaysDownUntilBothLetGo() {
+        var held: [GamepadLayout.Control: Set<String>] = [:]
+        XCTAssertEqual(GamepadKeyChange.changes(in: &held, setting: .pad(0), to: ["up"]), [.init(key: "up", pressed: true)])
+        XCTAssertEqual(GamepadKeyChange.changes(in: &held, setting: .button(1), to: ["up"]), [])
+        XCTAssertEqual(GamepadKeyChange.changes(in: &held, setting: .pad(0), to: []), [])
+        XCTAssertEqual(GamepadKeyChange.changes(in: &held, setting: .button(1), to: []), [.init(key: "up", pressed: false)])
     }
 }
 

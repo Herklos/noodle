@@ -193,11 +193,18 @@ public enum AppletGuidance {
         pads (at most two) list only the directions the game uses, and show as a d-pad; add
         "stick":true for a thumbstick instead, for steering or aiming in any direction. buttons
         (at most eight) go from most to least important, labels up to 12 characters; menu is
-        the pause key.
+        the pause key. On a controller the first pad is the left stick and d-pad, the second
+        the right stick, and buttons go in order to the bottom, right, left and top face
+        buttons (A, B, X, Y on Xbox), then the left and right shoulders, then the left and
+        right triggers, so a racing game puts gas and brake seventh and eighth for the
+        triggers. Triggers and sticks press keys, all or nothing; read the Gamepad API for
+        analog throttle or steering.
         Controls are for one player: two pads mean one player moving and aiming, never a
         second player's keys, so a two-player game declares only the first player's.
-        Keys are left, right, up, down, space, enter, tab, escape, backspace, a lowercase
-        letter or a digit, each used once. Held buttons send a key down and, on release, a key
+        Keys are left, right, up, down, space, enter, tab, escape, backspace, shift, control,
+        alt, a lowercase letter or a digit. A button may press a key a pad also uses, as gas on
+        up while the stick steers with the arrows; buttons and menu each need their own key.
+        Held buttons send a key down and, on release, a key
         up: the page gets keydown and keyup events with key, code and keyCode (do not check
         isTrusted). A game controller connected to the device presses the same keys, so a game
         played with keys needs nothing more.

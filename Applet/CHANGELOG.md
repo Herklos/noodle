@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
+
 ### Fixed
 
 - Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.

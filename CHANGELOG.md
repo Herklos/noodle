@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
+
 ### Fixed
 
 - Noodle no longer reads every conversation from disk several times a second, and checks what changed for its own devices without holding up the window, so it stays quieter while idle and while a chat is open.

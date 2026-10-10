@@ -71,7 +71,7 @@ public struct Gamepad: Codable, Equatable, Sendable {
     }
 
     /// Named keys a live view can press, plus lowercase letters and digits.
-    public static let namedKeys = ["left", "right", "up", "down", "space", "enter", "tab", "escape", "backspace"]
+    public static let namedKeys = ["left", "right", "up", "down", "space", "enter", "tab", "escape", "backspace", "shift", "control", "alt"]
     /// As many as a modern controller has: four face buttons and four shoulders.
     public static let maxButtons = 8
 
@@ -98,23 +98,31 @@ public struct Gamepad: Codable, Equatable, Sendable {
                 throw fail("Unknown key \(key.prefix(20)). Use a lowercase letter, a digit or \(Self.namedKeys.joined(separator: ", ")).")
             }
         }
-        guard Set(keys).count == keys.count else { throw fail("Each key can be used only once.") }
+        // A pad may share keys with a button or the other pad, as a trigger giving gas while the stick steers.
+        for pad in pads where Set(pad.keys).count != pad.keys.count { throw fail("A pad needs a different key for each direction.") }
+        let pressed = buttons.map(\.key) + [menu].compactMap { $0 }
+        guard Set(pressed).count == pressed.count else { throw fail("Each button and the menu need their own key.") }
     }
 
-    /// Where each key goes on `controller`: pads to its sticks, buttons by position from the one
+    /// Where `control` goes on `controller`: pads to its sticks, buttons by position from the one
     /// under the thumb, and whatever it has no room for onto the screen.
+    public func slot(of control: GamepadLayout.Control, on controller: GamepadController) -> GamepadSlot {
+        switch control {
+        case .pad(let index): index < controller.pads ? .pad(index) : .screen
+        case .button(let index): index < controller.buttons.count ? .button(controller.buttons[index]) : .screen
+        case .menu:
+            controller.menu ? .menu : buttons.count < controller.buttons.count ? .button(controller.buttons[buttons.count]) : .screen
+        }
+    }
+
+    /// Where each key goes on `controller`; a key on both a pad and a button reads as the button.
     public func mapped(to controller: GamepadController) -> [String: GamepadSlot] {
         var slots: [String: GamepadSlot] = [:]
         for (index, pad) in pads.enumerated() {
-            for key in pad.keys { slots[key] = index < controller.pads ? .pad(index) : .screen }
+            for key in pad.keys { slots[key] = slot(of: .pad(index), on: controller) }
         }
-        for (index, button) in buttons.enumerated() {
-            slots[button.key] = index < controller.buttons.count ? .button(controller.buttons[index]) : .screen
-        }
-        if let menu {
-            slots[menu] = controller.menu ? .menu
-                : buttons.count < controller.buttons.count ? .button(controller.buttons[buttons.count]) : .screen
-        }
+        for (index, button) in buttons.enumerated() { slots[button.key] = slot(of: .button(index), on: controller) }
+        if let menu { slots[menu] = slot(of: .menu, on: controller) }
         return slots
     }
 }
@@ -123,9 +131,9 @@ extension Gamepad {
     /// What stays on the screen beside `controller`: the pads, buttons and menu it has no room
     /// for, or nil when it takes everything.
     public func onScreen(with controller: GamepadController) -> Gamepad? {
-        let slots = mapped(to: controller)
-        let rest = Gamepad(pads: pads.filter { slots[$0.keys[0]] == .screen }, buttons: buttons.filter { slots[$0.key] == .screen },
-                           menu: menu.flatMap { slots[$0] == .screen ? $0 : nil })
+        let rest = Gamepad(pads: pads.indices.filter { slot(of: .pad($0), on: controller) == .screen }.map { pads[$0] },
+                           buttons: buttons.indices.filter { slot(of: .button($0), on: controller) == .screen }.map { buttons[$0] },
+                           menu: slot(of: .menu, on: controller) == .screen ? menu : nil)
         return rest == Gamepad() ? nil : rest
     }
 }
@@ -159,6 +167,14 @@ public struct GamepadKeyChange: Equatable, Sendable {
     /// Releases come first, so sliding a thumb across never holds opposite directions at once.
     public static func changes(from old: Set<String>, to new: Set<String>) -> [Self] {
         old.subtracting(new).sorted().map { Self(key: $0, pressed: false) } + new.subtracting(old).sorted().map { Self(key: $0, pressed: true) }
+    }
+
+    /// What changes as `source` goes to holding `keys` among everything `held`: a key two
+    /// controls hold stays down until both let go.
+    public static func changes<Source: Hashable>(in held: inout [Source: Set<String>], setting source: Source, to keys: Set<String>) -> [Self] {
+        let before = held.values.reduce(into: Set<String>()) { $0.formUnion($1) }
+        held[source] = keys
+        return changes(from: before, to: held.values.reduce(into: Set<String>()) { $0.formUnion($1) })
     }
 }
 
@@ -376,13 +392,10 @@ public struct GamepadControls: View {
     }
 
     private func hold(_ control: GamepadLayout.Control, _ keys: Set<String>) {
-        let changes = GamepadKeyChange.changes(from: held[control] ?? [], to: keys)
-        guard !changes.isEmpty else { return }
         if let feedback = Self.feel(for: control, from: held[control] ?? [], to: keys, enabled: haptics) {
             felt = Felt(count: felt.count + 1, feedback: feedback)
         }
-        held[control] = keys
-        changes.forEach(onKey)
+        GamepadKeyChange.changes(in: &held, setting: control, to: keys).forEach(onKey)
     }
 }
 

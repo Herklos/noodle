@@ -41,6 +41,7 @@ public enum PageKeys {
       "space": (" ", "Space", 32), "enter": ("Enter", "Enter", 13), "tab": ("Tab", "Tab", 9), "escape": ("Escape", "Escape", 27),
       "backspace": ("Backspace", "Backspace", 8), "left": ("ArrowLeft", "ArrowLeft", 37), "up": ("ArrowUp", "ArrowUp", 38),
       "right": ("ArrowRight", "ArrowRight", 39), "down": ("ArrowDown", "ArrowDown", 40),
+      "shift": ("Shift", "ShiftLeft", 16), "control": ("Control", "ControlLeft", 17), "alt": ("Alt", "AltLeft", 18),
     ]
     if let (key, code, keyCode) = named[name] { return ["type": type, "key": key, "code": code, "keyCode": keyCode] }
     if name.count == 1, let scalar = name.unicodeScalars.first, scalar.isASCII {
