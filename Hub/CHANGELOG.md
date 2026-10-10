@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Noodle Hub no longer holds up its window while devices load conversations, and no longer re-reads every attachment each time.
+- Opening Settings no longer reads every installed harness in full again to check its signature; a harness is checked again once it changes.
+
 ## [0.27.0] - 2026-10-10
 
 ### Changed

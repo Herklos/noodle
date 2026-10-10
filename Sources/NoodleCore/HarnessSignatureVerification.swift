@@ -4,6 +4,10 @@ import Security
 /// Keep the vendor requirement enforced while preserving the reason a check failed.
 enum HarnessSignatureVerification {
     static func verify(_ url: URL, requirement rule: String, signatureName: String) throws {
+        try VerifiedExecutables.verify(url, requirement: rule) { try check(url, requirement: rule, signatureName: signatureName) }
+    }
+
+    private static func check(_ url: URL, requirement rule: String, signatureName: String) throws {
         var code: SecStaticCode?
         let loadStatus = SecStaticCodeCreateWithPath(url as CFURL, [], &code)
         guard loadStatus == errSecSuccess, let code else {

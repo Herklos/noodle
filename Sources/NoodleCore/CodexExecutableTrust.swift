@@ -47,14 +47,16 @@ public enum CodexExecutableTrust {
     }
 
     public static func verifySignature(_ url: URL, identifier: String) throws {
-        var code: SecStaticCode?
-        var requirement: SecRequirement?
         let rule = "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"2DC432GLL2\""
-        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
-              SecRequirementCreateWithString(rule as CFString, [], &requirement) == errSecSuccess,
-              let code, let requirement,
-              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), requirement) == errSecSuccess else {
-            throw HarnessSetupError("Codex’s OpenAI signature could not be verified.")
+        try VerifiedExecutables.verify(url, requirement: rule) {
+            var code: SecStaticCode?
+            var requirement: SecRequirement?
+            guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
+                  SecRequirementCreateWithString(rule as CFString, [], &requirement) == errSecSuccess,
+                  let code, let requirement,
+                  SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), requirement) == errSecSuccess else {
+                throw HarnessSetupError("Codex’s OpenAI signature could not be verified.")
+            }
         }
     }
 }

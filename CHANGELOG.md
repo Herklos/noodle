@@ -9,6 +9,8 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - The scrollbar in the Shared menu of a conversation's toolbar stays clear of the menu's rounded corners instead of looking cut off.
+- Noodle no longer holds up its window while your phone loads conversations from it, and no longer re-reads every attachment each time.
+- Opening Settings or a bot's sheet no longer reads every installed harness in full again to check its signature; a harness is checked again once it changes.
 
 ## [0.55.0] - 2026-10-10
 

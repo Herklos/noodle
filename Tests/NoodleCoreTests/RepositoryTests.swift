@@ -622,6 +622,33 @@ final class RepositoryTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: repository.attachmentFileURL(attachment)), imageData)
     }
 
+    /// A device reading a conversation lists its attachments each time; an unchanged one is not
+    /// read or checked again, but one whose type is wrong since is still repaired.
+    func testUnchangedAttachmentsAreNotCheckedAgainButChangesAreSeen() throws {
+        let created = try repository.createAgent(named: "Pictures")
+        let png = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP438DwHwAGgAJ/EEwb4QAAAABJRU5ErkJggg=="))
+        let imported = try repository.importAttachment(data: png, originalFilename: "dot.png", into: created.conversation.id,
+                                                       mediaType: "image/png")
+        XCTAssertEqual(try repository.loadAttachments(conversationID: created.conversation.id).map(\.id), [imported.id])
+        let reads = repository.attachmentRecords.reads
+        _ = try repository.loadAttachments(conversationID: created.conversation.id)
+        _ = try repository.loadAttachments(conversationID: created.conversation.id)
+        XCTAssertEqual(repository.attachmentRecords.reads, reads)
+
+        let metadataURL = repository.attachmentFileURL(imported).deletingLastPathComponent()
+            .appendingPathComponent("\(imported.id.uuidString.lowercased()).json")
+        var record = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: metadataURL)) as? [String: Any])
+        record["mediaType"] = "application/octet-stream"
+        try JSONSerialization.data(withJSONObject: record).write(to: metadataURL)
+        XCTAssertEqual(try repository.loadAttachments(conversationID: created.conversation.id).first?.mediaType, "image/png")
+
+        let second = try repository.importAttachment(data: png, originalFilename: "again.png", into: created.conversation.id,
+                                                     mediaType: "image/png")
+        XCTAssertEqual(Set(try repository.loadAttachments(conversationID: created.conversation.id).map(\.id)), [imported.id, second.id])
+        try repository.removeAttachment(second)
+        XCTAssertEqual(try repository.loadAttachments(conversationID: created.conversation.id).map(\.id), [imported.id])
+    }
+
     func testImageContentRepairsIncorrectAttachmentMediaType() throws {
         let created = try repository.createAgent(named: "Image Bot")
         let source = root.appendingPathComponent("mislabeled.png")

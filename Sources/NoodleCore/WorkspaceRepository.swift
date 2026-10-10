@@ -60,6 +60,7 @@ public struct WorkspaceRepository: Sendable {
     public let launcherExecutableURL: URL?
     let agentRecords = FileRecordCache<AgentRecord>()
     let conversationRecords = FileRecordCache<BotConversation>()
+    let attachmentRecords = FileRecordCache<ConversationAttachment>()
 
     public init(rootURL: URL, launcherExecutableURL: URL? = nil) {
         self.rootURL = AgentStorageLayout.canonicalURL(rootURL)
@@ -1032,21 +1033,34 @@ public struct WorkspaceRepository: Sendable {
         }
     }
 
+    /// Each check opens the attachment's file, and devices list a conversation's attachments with
+    /// every page, so an attachment is read and checked again only when its files changed.
     public func loadAttachments(conversationID: UUID) throws -> [ConversationAttachment] {
         let directory = attachmentsDirectory(conversationID: conversationID)
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(
+        let folder = directory.path
+        let entries = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         )
         .filter { $0.pathExtension == "json" }
-        .map { metadataURL in
+        let attachments = try entries.map { metadataURL in
+            let metadata = metadataURL.path
+            if let cached = attachmentRecords.value(at: metadata, matching: { [folder] in
+                FileRecordCache<ConversationAttachment>.stamp(directories: [folder], files: [metadata, folder + "/" + $0.storedFilename])
+            }) {
+                return cached
+            }
+            let metadataStamp = FileRecordCache<ConversationAttachment>.stamp(directories: [folder], files: [metadata])
+            attachmentRecords.read()
             let attachment = try read(ConversationAttachment.self, from: metadataURL)
-            if attachment.url != nil { return attachment }
+            let fileStamp = FileRecordCache<ConversationAttachment>.stamp(directories: [], files: [folder + "/" + attachment.storedFilename])
+            let remember = { if let metadataStamp, let fileStamp { attachmentRecords.store(attachment, at: metadata, stamp: metadataStamp + fileStamp) } }
+            if attachment.url != nil { remember(); return attachment }
             let fileURL = attachmentFileURL(attachment)
             guard let detectedMediaType = detectedImageMediaType(at: fileURL),
-                  detectedMediaType != attachment.mediaType else { return attachment }
+                  detectedMediaType != attachment.mediaType else { remember(); return attachment }
 
             let repaired = ConversationAttachment(
                 id: attachment.id,
@@ -1060,10 +1074,12 @@ public struct WorkspaceRepository: Sendable {
                 card: attachment.card,
                 annotation: attachment.annotation
             )
+            // The rewrite changes the stamp, so the repaired copy is read once more next time.
             try? write(repaired, to: metadataURL)
             return repaired
         }
-        .sorted { $0.createdAt < $1.createdAt }
+        attachmentRecords.keep(entries.map(\.path), within: folder + "/")
+        return attachments.sorted { $0.createdAt < $1.createdAt }
     }
 
     private func detectedImageMediaType(at url: URL) -> String? {
@@ -1588,9 +1604,22 @@ final class FileRecordCache<Value: Sendable>: @unchecked Sendable {
         lock.withLock { records[folder] = (stamp, value) }
     }
 
+    /// A stamp that depends on what was read, taken again from the remembered copy.
+    func value(at folder: String, matching stamp: (Value) -> [Int64]?) -> Value? {
+        guard let record = lock.withLock({ records[folder] }), let current = stamp(record.value),
+              current == record.stamp else { return nil }
+        return record.value
+    }
+
     func keep(_ folders: [String]) {
         let folders = Set(folders)
         lock.withLock { records = records.filter { folders.contains($0.key) } }
+    }
+
+    /// Forgets what is gone from one folder, leaving the others' entries.
+    func keep(_ entries: [String], within folder: String) {
+        let entries = Set(entries)
+        lock.withLock { records = records.filter { !$0.key.hasPrefix(folder) || entries.contains($0.key) } }
     }
 
     /// The identity and type of each entry, without following links, and for files also

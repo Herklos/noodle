@@ -498,14 +498,27 @@ import NoodleRuntime
 
     /// Part of a conversation, small enough for the link however long its messages are. Card
     /// pictures are left out: devices ask for each as its card comes into view.
-    public func page(_ request: LinkMessagePage, for user: HubUser) throws -> LinkMessages {
+    /// Read off the main actor: a device opening the app pages every conversation at once.
+    public func page(_ request: LinkMessagePage, for user: HubUser) async throws -> LinkMessages {
         _ = try ownedConversation(request.conversationID, by: user)
-        return try page(request)
+        let repository = repository, known = pixelSizes
+        let (page, measured) = try await Task.detached(priority: .userInitiated) {
+            var sizes = known
+            return (try Self.page(request, from: repository, pixelSizes: &sizes), sizes)
+        }.value
+        pixelSizes.merge(measured) { _, new in new }
+        return page
     }
 
     private func page(_ request: LinkMessagePage) throws -> LinkMessages {
+        try Self.page(request, from: repository, pixelSizes: &pixelSizes)
+    }
+
+    nonisolated private static func page(_ request: LinkMessagePage, from repository: WorkspaceRepository,
+                                         pixelSizes: inout [UUID: LinkPixelSize?]) throws -> LinkMessages {
         let messages = try repository.loadMessages(conversationID: request.conversationID)
-        let files = try attachments(in: request.conversationID)
+        let files = Dictionary(try repository.loadAttachments(conversationID: request.conversationID).map { ($0.id, $0) },
+                               uniquingKeysWith: { first, _ in first })
         let limit = min(max(1, request.limit), 200)
         let encoder = JSONEncoder()
         var page: [LinkMessage] = [], bytes = 0
@@ -519,7 +532,7 @@ import NoodleRuntime
         if let after = request.after {
             start = min(max(0, after), messages.count)
             for message in messages[start...] {
-                let linked = linkMessage(message, files: files, pictures: false)
+                let linked = linkMessage(message, files: files, pictures: false) { pixelSize(of: $0, in: repository, sizes: &pixelSizes) }
                 guard fits(linked) else { break }
                 page.append(linked)
             }
@@ -527,7 +540,7 @@ import NoodleRuntime
             let end = min(max(0, request.before ?? messages.count), messages.count)
             start = end
             for message in messages[..<end].reversed() {
-                let linked = linkMessage(message, files: files, pictures: false)
+                let linked = linkMessage(message, files: files, pictures: false) { pixelSize(of: $0, in: repository, sizes: &pixelSizes) }
                 guard fits(linked) else { break }
                 page.insert(linked, at: 0)
                 start -= 1
@@ -537,7 +550,7 @@ import NoodleRuntime
     }
 
     /// Most of the link's message limit, leaving room for what surrounds the page.
-    private static let pageBytes = 700_000
+    nonisolated private static let pageBytes = 700_000
 
     /// Keeps one piece of a file; the file joins the conversation when its last piece lands.
     public func receive(_ data: Data, at offset: Int, of attachment: LinkAttachment, in conversationID: UUID,
@@ -1412,14 +1425,24 @@ import NoodleRuntime
     private var pixelSizes: [UUID: LinkPixelSize?] = [:]
 
     private func pixelSize(of file: ConversationAttachment) -> LinkPixelSize? {
+        Self.pixelSize(of: file, in: repository, sizes: &pixelSizes)
+    }
+
+    nonisolated private static func pixelSize(of file: ConversationAttachment, in repository: WorkspaceRepository,
+                                              sizes: inout [UUID: LinkPixelSize?]) -> LinkPixelSize? {
         guard file.mediaType.hasPrefix("image/") else { return nil }
-        if let known = pixelSizes[file.id] { return known }
+        if let known = sizes[file.id] { return known }
         let size = LinkPixelSize(pictureAt: repository.attachmentFileURL(file))
-        pixelSizes[file.id] = size
+        sizes[file.id] = size
         return size
     }
 
     private func linkMessage(_ message: ChatMessage, files: [UUID: ConversationAttachment], pictures: Bool = true) -> LinkMessage {
+        Self.linkMessage(message, files: files, pictures: pictures) { pixelSize(of: $0) }
+    }
+
+    nonisolated private static func linkMessage(_ message: ChatMessage, files: [UUID: ConversationAttachment], pictures: Bool,
+                                                pixelSize: (ConversationAttachment) -> LinkPixelSize?) -> LinkMessage {
         let author: LinkMessage.Author = switch message.author {
         case .user: .you
         case .agent(let id): .bot(id)
@@ -1432,7 +1455,7 @@ import NoodleRuntime
                            url: $0.url,
                            card: $0.card.map { LinkCardInfo(title: $0.title, detail: $0.detail, image: pictures ? $0.image : nil, symbol: $0.symbol,
                                                             colour: $0.colour, icon: $0.icon, capturedAt: $0.capturedAt) },
-                           pixelSize: pixelSize(of: $0))
+                           pixelSize: pixelSize($0))
         }
         let reactions = (message.reactions ?? []).compactMap { reaction -> LinkReaction? in
             switch reaction.author {

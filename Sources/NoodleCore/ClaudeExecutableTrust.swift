@@ -27,18 +27,20 @@ public enum ClaudeExecutableTrust {
     }
 
     public static func verifySignature(_ url: URL) throws {
-        var code: SecStaticCode?
-        var requirement: SecRequirement?
         let rule = "anchor apple generic and identifier \"com.anthropic.claude-code\" and certificate leaf[subject.OU] = \"Q6L2SF6YDW\""
-        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
-              SecRequirementCreateWithString(rule as CFString, [], &requirement) == errSecSuccess,
-              let code, let requirement,
-              SecStaticCodeCheckValidity(
-                code,
-                SecCSFlags(rawValue: kSecCSCheckAllArchitectures),
-                requirement
-              ) == errSecSuccess else {
-            throw HarnessSetupError("Claude Code’s Anthropic signature could not be verified.")
+        try VerifiedExecutables.verify(url, requirement: rule) {
+            var code: SecStaticCode?
+            var requirement: SecRequirement?
+            guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
+                  SecRequirementCreateWithString(rule as CFString, [], &requirement) == errSecSuccess,
+                  let code, let requirement,
+                  SecStaticCodeCheckValidity(
+                    code,
+                    SecCSFlags(rawValue: kSecCSCheckAllArchitectures),
+                    requirement
+                  ) == errSecSuccess else {
+                throw HarnessSetupError("Claude Code’s Anthropic signature could not be verified.")
+            }
         }
     }
 }
