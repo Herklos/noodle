@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Kling can be added as a tool.
+
 ### Fixed
 
 - The scrollbar in the Shared menu of a conversation's toolbar stays clear of the menu's rounded corners instead of looking cut off.

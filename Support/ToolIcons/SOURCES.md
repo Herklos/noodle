@@ -56,6 +56,7 @@ under a uniform `.icon` extension. They are bundled, never remotely fetched by t
 | jam.icon | https://framerusercontent.com/images/PJzGWvCk8HH9Ho4kUWVsQtYI.png |
 | jotform.icon | https://cdn.jotfor.ms/assets/img/favicons/favicon-2021-light.png |
 | klaviyo.icon (2026-09-29) | https://www.klaviyo.com/icons/icon-144x144.png |
+| kling.icon (2026-10-11) | https://s16-kling.klingai.com/kos/s101/nlav112918/kling-homepage-aio/logo-180x180.png |
 | linear.icon | https://linear.app/favicon.ico?v=2 |
 | lucid.icon (2026-10-06) | https://lucid.co/favicon.ico |
 | mapbox.icon | https://cdn.prod.website-files.com/6050a76fa6a633d5d54ae714/6050ac000ff99b5cdba92d07_mapbox_favicon_32x32%202.png |

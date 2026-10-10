@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Kling can be added as a tool.
+
 ### Fixed
 
 - Noodle Hub no longer holds up its window while devices load conversations, and no longer re-reads every attachment each time.
