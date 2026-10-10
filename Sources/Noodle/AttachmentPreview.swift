@@ -1,3 +1,4 @@
+import CryptoKit
 import QuickLookThumbnailing
 import AppletBridge
 import ComputerBridge
@@ -474,7 +475,7 @@ struct AttachmentInlinePreview: View {
 
         if displaysAsImage,
            let generated = await Task.detached(priority: .utility, operation: {
-               AttachmentThumbnailCache.generateImageThumbnail(for: fileURL)
+               AttachmentThumbnailCache.thumbnail(for: fileURL)
            }).value {
             guard !Task.isCancelled else { return }
             AttachmentThumbnailCache.shared.setObject(generated, forKey: key)
@@ -512,23 +513,79 @@ struct AttachmentInlinePreview: View {
 enum AttachmentThumbnailCache {
     static let shared = NSCache<NSURL, NSImage>()
     private static var previewSizes: [URL: CGSize] = [:]
+    private static let counts = Counts()
 
+    /// Full decodes of an original and reads of its header, for tests.
+    nonisolated static var decodes: Int { counts.value(\.decodes) }
+    static var headerReads: Int { counts.value(\.headerReads) }
+
+    private static var imageChecks: [URL: Bool] = [:]
+
+    /// Bubbles are rebuilt many times while scrolling; an attachment's file does not change.
     static func isImage(_ url: URL) -> Bool {
-        guard let source = imageSource(for: url),
-              let identifier = CGImageSourceGetType(source) as String?,
-              let type = UTType(identifier) else { return false }
-        return type.conforms(to: .image)
+        if let known = imageChecks[url] { return known }
+        counts.add(\.headerReads)
+        let isImage: Bool
+        if let source = imageSource(for: url),
+           let identifier = CGImageSourceGetType(source) as String?,
+           let type = UTType(identifier) {
+            isImage = type.conforms(to: .image)
+        } else {
+            isImage = false
+        }
+        imageChecks[url] = isImage
+        return isImage
     }
 
-    nonisolated static func generateImageThumbnail(for url: URL) -> NSImage? {
-        guard let source = imageSource(for: url),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 1_040,
-                kCGImageSourceShouldCacheImmediately: true
-              ] as CFDictionary) else { return nil }
+    /// The widest a preview is shown, in pixels on a Retina display.
+    nonisolated static let thumbnailPixels = 600
+
+    /// Memory is reclaimed under pressure, and decoding the original again is the expensive
+    /// part of scrolling back to a picture, so a small copy is also kept in the Caches folder,
+    /// which macOS may empty. A changed original has a different key and gets a new copy.
+    nonisolated static func thumbnail(for url: URL, cacheDirectory: URL? = nil) -> NSImage? {
+        guard let directory = cacheDirectory ?? defaultCacheDirectory, let key = cacheKey(for: url) else {
+            return generateImageThumbnail(for: url).map { NSImage(cgImage: $0, size: .zero) }
+        }
+        let copy = directory.appendingPathComponent(key + ".png")
+        if let source = CGImageSourceCreateWithURL(copy as CFURL, nil),
+           let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) {
+            return NSImage(cgImage: image, size: .zero)
+        }
+        guard let image = generateImageThumbnail(for: url) else { return nil }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let partial = directory.appendingPathComponent(key + "-" + UUID().uuidString + ".partial")
+        if let destination = CGImageDestinationCreateWithURL(partial as CFURL, UTType.png.identifier as CFString, 1, nil) {
+            CGImageDestinationAddImage(destination, image, nil)
+            if CGImageDestinationFinalize(destination), rename(partial.path, copy.path) == 0 { return NSImage(cgImage: image, size: .zero) }
+        }
+        try? FileManager.default.removeItem(at: partial)
         return NSImage(cgImage: image, size: .zero)
+    }
+
+    nonisolated private static var defaultCacheDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Noodle", isDirectory: true)
+            .appendingPathComponent("Thumbnails", isDirectory: true)
+    }
+
+    /// The original's path and the file it is now: a replaced or edited one gets a new key.
+    nonisolated private static func cacheKey(for url: URL) -> String? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        let identity = "\(url.path)|\(info.st_dev)|\(info.st_ino)|\(info.st_size)|\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)|\(thumbnailPixels)"
+        return SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    nonisolated private static func generateImageThumbnail(for url: URL) -> CGImage? {
+        counts.add(\.decodes)
+        guard let source = imageSource(for: url) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailPixels,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary)
     }
 
     static func previewSize(for url: URL) -> CGSize {
@@ -550,6 +607,14 @@ enum AttachmentThumbnailCache {
         }
         previewSizes[url] = size
         return size
+    }
+
+    private final class Counts: @unchecked Sendable {
+        struct Values { var decodes = 0, headerReads = 0 }
+        private let lock = NSLock()
+        private var values = Values()
+        func add(_ key: WritableKeyPath<Values, Int>) { lock.withLock { values[keyPath: key] += 1 } }
+        func value(_ key: KeyPath<Values, Int>) -> Int { lock.withLock { values[keyPath: key] } }
     }
 
     nonisolated private static func imageSource(for url: URL) -> CGImageSource? {
