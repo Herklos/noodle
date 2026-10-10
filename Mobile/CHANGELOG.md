@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-10
+
 ### Added
 
 - Settings > Downloaded Noodlets lists the noodlets kept on the phone with their sizes, to delete one or all of them and free up space. A deleted noodlet downloads again the next time it opens.
