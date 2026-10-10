@@ -301,6 +301,13 @@ final class NoodleStore {
             guard let self, self.connectsServices, let agent = self.agents.first(where: { $0.id == id }) else { return }
             NoodleNotifications.postSignInRequired(for: agent)
         }
+        self.runtime.checkSignIn = { [weak self] agent in
+            guard let self, let installation = self.runtime.installation(for: agent) else { return nil }
+            guard let profile = try? self.repository.loadAgentHarnessProfile(agent) else {
+                return await self.harnessSetup.signedIn(installation)
+            }
+            return await self.harnessProfiles.signedIn(profile, installation: installation)
+        }
         if connectsServices {
             spaceSync = SpaceCloudSync.ifEntitled(list: spaceList, stateFile: self.repository.rootURL.appendingPathComponent("spaces-sync.json"))
         }

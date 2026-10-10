@@ -155,6 +155,13 @@ public final class AgentRuntimeCoordinator {
     @ObservationIgnored public var onSignInRequired: (@MainActor (UUID) -> Void)?
     /// Retries before a turn finishes fail the same way, so they stay quiet.
     @ObservationIgnored private var signInAnnounced: Set<UUID> = []
+    /// Whether a bot's harness login works now, asked without starting the bot or a turn;
+    /// nil when it could not be told.
+    @ObservationIgnored public var checkSignIn: (@MainActor (AgentRecord) async -> Bool?)?
+    @ObservationIgnored private var signInChecks: Set<UUID> = []
+    @ObservationIgnored private var nextSignInCheck: [UUID: Date] = [:]
+    /// Restarts since the bot was last seen signed out or finished a turn.
+    @ObservationIgnored private var signInRetries: [UUID: Int] = [:]
     @ObservationIgnored private var usageMeters: [UUID: UsageMeter] = [:]
     private var lifecycleID = UUID()
     private var transitionIDs: [UUID: UUID] = [:]
@@ -511,7 +518,7 @@ public final class AgentRuntimeCoordinator {
             : "\(provider.displayName) is turned off. Turn it on in Settings → Harness."
     }
 
-    func installation(for agent: AgentRecord) -> HarnessInstallation? {
+    public func installation(for agent: AgentRecord) -> HarnessInstallation? {
         guard let identifier = agent.harnessIdentifier,
               let provider = HarnessProvider(rawValue: identifier) else { return nil }
         return installations.first { $0.provider == provider && $0.isAvailable }
@@ -555,6 +562,7 @@ public final class AgentRuntimeCoordinator {
             lastInteractionDates[id] = nil
             heartbeatTurns.remove(id)
             signInAnnounced.remove(id)
+            forgetSignInRetries(id)
             saveSessionDates()
         }
 
@@ -757,6 +765,7 @@ public final class AgentRuntimeCoordinator {
     public func kick(agent: AgentRecord, repository: WorkspaceRepository) -> AgentKickRequest? {
         guard !isStoppingAll, !changingAccess.contains(agent.id), snapshot(for: agent.id).canKick else { return nil }
         connectionRecoveryAttempts[agent.id] = nil
+        forgetSignInRetries(agent.id)
         if let failure = snapshot(for: agent.id).failure, failure != .recoveryFailed {
             return AgentKickRequest(agent: agent, failure: failure, runtimeID: runtimeIDs[agent.id],
                 lifecycleID: lifecycleID, extendedAccess: accessConfiguration.isExtended(for: agent))
@@ -954,6 +963,7 @@ public final class AgentRuntimeCoordinator {
         blockedRestarts.remove(agentID)
         snapshots.removeValue(forKey: agentID)
         signInAnnounced.remove(agentID)
+        forgetSignInRetries(agentID)
         heartbeatScheduler.remove(agentID)
         saveHeartbeatActivityDates()
         lastHeartbeatDates.removeValue(forKey: agentID)
@@ -998,7 +1008,8 @@ public final class AgentRuntimeCoordinator {
         for agent in agents where installation(for: agent) != nil && !neverStarts(agent.id) {
             // A bot waiting on the person for a reported failure keeps it until Kick;
             // restarting cannot sign in, restore usage or answer a safety stop.
-            if let process = processes[agent.id], process.snapshot.phase == .failed, process.snapshot.failure != nil {
+            if let process = processes[agent.id], process.snapshot.phase == .failed, let failure = process.snapshot.failure {
+                if failure == .authenticationRequired { retryOnceSignedIn(agent, repository: repository) }
                 continue
             }
             if let process = processes[agent.id], process.isAlive {
@@ -1030,6 +1041,39 @@ public final class AgentRuntimeCoordinator {
             scheduleRestart(agent: agent, repository: repository, detail: "Runtime connection was lost", immediately: immediately)
         }
         checkSessionRollovers(agents: agents, repository: repository)
+    }
+
+    /// A bot parked on sign-in restarts by itself, as Kick would, once its harness reports a
+    /// working login. The check runs no turn. A login that looks valid yet still fails is
+    /// retried a few times with growing gaps, then only after the harness was seen signed out.
+    private func retryOnceSignedIn(_ agent: AgentRecord, repository: WorkspaceRepository) {
+        guard let checkSignIn, !signInChecks.contains(agent.id), let runtimeID = runtimeIDs[agent.id],
+              processes[agent.id]?.configuration == agent else { return }
+        if let next = nextSignInCheck[agent.id], now() < next { return }
+        nextSignInCheck[agent.id] = now().addingTimeInterval(Self.signInCheckInterval)
+        signInChecks.insert(agent.id)
+        let lifecycle = lifecycleID
+        Task { [weak self] in
+            let signedIn = await checkSignIn(agent)
+            guard let self else { return }
+            self.signInChecks.remove(agent.id)
+            guard !self.isStoppingAll, self.lifecycleID == lifecycle, self.runtimeIDs[agent.id] == runtimeID,
+                  self.snapshot(for: agent.id).failure == .authenticationRequired else { return }
+            if signedIn == false { self.signInRetries[agent.id] = nil }
+            let retries = self.signInRetries[agent.id, default: 0]
+            guard signedIn == true, retries < Self.signInRetryLimit else { return }
+            self.signInRetries[agent.id] = retries + 1
+            self.nextSignInCheck[agent.id] = self.now().addingTimeInterval(Self.signInCheckInterval * pow(2, Double(retries)))
+            self.restart(agent: agent, repository: repository, sessionRecovery: self.sessionRecovery(.retry, for: agent))
+        }
+    }
+
+    private static let signInCheckInterval: TimeInterval = 2 * 60
+    private static let signInRetryLimit = 4
+
+    private func forgetSignInRetries(_ agentID: UUID) {
+        nextSignInCheck[agentID] = nil
+        signInRetries[agentID] = nil
     }
 
     private func runtimeTerminated(
@@ -1103,6 +1147,7 @@ public final class AgentRuntimeCoordinator {
                 if self.heartbeatTurns.remove(agentID) == nil { self.recordInteraction(for: agentID) }
                 self.connectionRecoveryAttempts[agentID] = nil
                 self.signInAnnounced.remove(agentID)
+                self.forgetSignInRetries(agentID)
             }
             if snapshot.failure == .authenticationRequired, self.signInAnnounced.insert(agentID).inserted {
                 self.onSignInRequired?(agentID)

@@ -170,6 +170,16 @@ public final class HarnessSetupController {
         providers[id]?.installationGuide
     }
 
+    /// A sign-in check without the Checking state, so a bot waiting on sign-in can ask in the background.
+    public func signedIn(_ installation: HarnessInstallation) async -> Bool? {
+        let id = installation.provider
+        guard installation.isAvailable, operations[id] == nil, let provider = providers[id],
+              let status = try? await provider.status(for: installation),
+              operations[id] == nil else { return nil }
+        record(installation, authentication: status)
+        return status != .unauthenticated
+    }
+
     public func signIn(_ installation: HarnessInstallation) {
         let id = installation.provider
         guard operations[id] == nil, let provider = providers[id] else { return }

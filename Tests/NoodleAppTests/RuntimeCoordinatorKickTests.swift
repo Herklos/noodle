@@ -253,6 +253,67 @@ import XCTest
         process.transition(.failed, failure: .authenticationRequired)
         XCTAssertEqual(announced, [agent.id, agent.id], "A finished turn proves sign-in worked")
     }
+    func testBotWaitingForSignInComesBackByItselfOnceItsHarnessIsSignedIn() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
+        let url = f.repository.storage(for: agent.id).sessionState(provider: .claudeCode, extendedAccess: false)
+        let session = Data("saved session".utf8)
+        try session.write(to: url)
+        var signedIn: Bool? = false, checks = 0
+        f.runtime.checkSignIn = { _ in checks += 1; return signedIn }
+        process.transition(.failed, failure: .authenticationRequired)
+
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { checks == 1 }
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        await Task.yield()
+        XCTAssertEqual(checks, 1, "Checks are spaced out")
+        XCTAssertEqual(f.factory.processes.count, 1, "Still signed out: the bot keeps waiting")
+
+        signedIn = true
+        f.clock.date += 120
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { f.factory.processes.count == 2 }
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
+        XCTAssertEqual(try Data(contentsOf: url), session, "The session is resumed, not replaced")
+        XCTAssertFalse(f.factory.processes.last!.launch.recoverInterruptedWork, "Nothing was interrupted, so no turn is started")
+    }
+
+    func testLoginThatLooksValidButStillFailsIsRetriedOnlyAFewTimes() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode)
+        var signedIn: Bool? = true, checks = 0
+        f.runtime.checkSignIn = { _ in checks += 1; return signedIn }
+        try f.start(agent).transition(.failed, failure: .authenticationRequired)
+        for _ in 0..<12 {
+            f.clock.date += 60 * 60
+            let before = checks
+            f.runtime.reconcile(agents: [agent], repository: f.repository)
+            try await f.clock.waitUntil { checks == before + 1 }
+            await Task.yield()
+            f.factory.processes.last!.transition(.failed, failure: .authenticationRequired)
+        }
+        XCTAssertEqual(f.factory.processes.count, 5, "Four automatic retries, then it waits for a new sign-in")
+
+        signedIn = nil
+        f.clock.date += 60 * 60
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { checks == 13 }
+        signedIn = true
+        f.clock.date += 60 * 60
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { checks == 14 }
+        await Task.yield()
+        XCTAssertEqual(f.factory.processes.count, 5, "A failed check is not a new sign-in")
+
+        signedIn = false
+        f.clock.date += 60 * 60
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { checks == 15 }
+        signedIn = true
+        f.clock.date += 60 * 60
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { f.factory.processes.count == 6 }
+    }
+
     func testMessageToABotWaitingForSignInReachesItsHarness() throws {
         let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
         process.transition(.failed, failure: .authenticationRequired)

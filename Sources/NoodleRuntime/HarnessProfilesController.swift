@@ -71,6 +71,17 @@ public final class HarnessProfilesController {
         }
     }
 
+    /// A sign-in check for one profile, so a bot waiting on sign-in can ask in the background.
+    public func signedIn(_ id: UUID, installation: HarnessInstallation) async -> Bool? {
+        guard installation.isAvailable, operations[id] == nil, let profile = profile(id),
+              let provider = setupProvider(for: profile),
+              let status = try? await provider.status(for: installation),
+              operations[id] == nil, self.profile(id) != nil else { return nil }
+        authentication[id] = status
+        if status != .unauthenticated { terminalSignIns[id] = nil }
+        return status != .unauthenticated
+    }
+
     public func signIn(_ profile: HarnessProfile, installation: HarnessInstallation) {
         guard operations[profile.id] == nil, installation.isAvailable, let provider = setupProvider(for: profile) else { return }
         let id = profile.id, token = UUID()
