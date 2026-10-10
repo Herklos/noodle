@@ -114,7 +114,6 @@ struct ConversationWindowView: View {
         .sheet(item: $backgroundBeingEdited) { conversation in
             ConversationBackgroundSheet(conversation: conversation).environment(store).noodleSheetSizing()
         }
-        .modifier(ConversationErrorAlert())
         // A window opened or brought back for a conversation starts in its input.
         .onAppear { composerFocusRequest = UUID() }
         .onReceive(NotificationCenter.default.publisher(for: .focusConversationComposer)) { notification in
@@ -143,18 +142,52 @@ struct ConversationWindowView: View {
     }
 }
 
-struct ConversationErrorAlert: ViewModifier {
-    @Environment(NoodleStore.self) private var store
-    @Environment(\.controlActiveState) private var activeState
+/// Shows the store's error over the window in front, on top of any sheet it has, until OK.
+/// A SwiftUI alert cannot: the window under a sheet is never key, and showing an alert
+/// takes key from its own window, which dismissed it before anyone saw it.
+@MainActor final class StoreErrorAlert {
+    private let store: NoodleStore
+    private let window: () -> NSWindow?
+    private var alert: NSAlert?
+    private var keyObserver: NSObjectProtocol?
 
-    func body(content: Content) -> some View {
-        content.alert("Noodle", isPresented: Binding(
-            get: { store.errorMessage != nil && activeState == .key },
-            set: { if !$0, activeState == .key { store.errorMessage = nil } }
-        )) {
-            Button("OK") { store.errorMessage = nil }
-        } message: {
-            Text(store.errorMessage ?? "An unexpected error occurred.")
+    /// The window in front, even while Noodle is in the background.
+    init(store: NoodleStore, window: @escaping () -> NSWindow? = {
+        NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.orderedWindows.first { $0.isVisible && $0.canBecomeMain }
+    }) {
+        self.store = store
+        self.window = window
+        // An error that arrived with no window open is shown once one is.
+        keyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.show(self?.store.errorMessage) }
+        }
+        observe()
+    }
+
+    private func observe() {
+        let message = withObservationTracking { store.errorMessage } onChange: { [weak self] in
+            Task { @MainActor in self?.observe() }
+        }
+        show(message)
+    }
+
+    private func show(_ message: String?) {
+        guard let message else {
+            if let sheet = alert?.window, let parent = sheet.sheetParent { parent.endSheet(sheet) }
+            return
+        }
+        if let alert { alert.informativeText = message; return }
+        guard var parent = window() else { return }
+        while let sheet = parent.attachedSheet { parent = sheet }
+        let alert = NSAlert()
+        alert.messageText = "Noodle"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        self.alert = alert
+        alert.beginSheetModal(for: parent) { [weak self] _ in
+            guard let self else { return }
+            self.alert = nil
+            if store.errorMessage == alert.informativeText { store.errorMessage = nil } else { show(store.errorMessage) }
         }
     }
 }

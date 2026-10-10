@@ -21,6 +21,7 @@ import os
 struct NoodleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store: NoodleStore
+    @State private var errorAlert: StoreErrorAlert
 
     init() {
         #if NOODLE_DEV_HOOKS
@@ -67,6 +68,7 @@ struct NoodleApp: App {
         // The scenarios bundle opens a scripted store and never the app's own data; see Scenario.swift.
         if let store = ScenarioSession.launch(checks) {
             _store = State(initialValue: store)
+            _errorAlert = State(initialValue: StoreErrorAlert(store: store))
             return
         }
         #endif
@@ -99,6 +101,7 @@ struct NoodleApp: App {
         let store = NoodleStore()
         store.startMonitoring()
         _store = State(initialValue: store)
+        _errorAlert = State(initialValue: StoreErrorAlert(store: store))
     }
 
     var body: some Scene {
@@ -520,7 +523,6 @@ struct RootView: View {
                 .environment(store)
                 .noodleSheetSizing()
         }
-        .modifier(ConversationErrorAlert())
         .modifier(SpaceAlerts())
         .sheet(isPresented: $store.editsSpaces) {
             SpaceEditorSheet()

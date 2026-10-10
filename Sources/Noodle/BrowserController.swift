@@ -42,11 +42,12 @@ import SwiftUI
         let ids = selectedIDs(for: agent)
         return registry.browsers.filter { ids.contains($0.id) }
     }
-    func validate(_ ids: Set<UUID>) throws {
-        guard readable, ids.isSubset(of: Set(registry.browsers.map(\.id))) else { throw BrowserError("One of the selected browsers is unavailable.") }
+    /// Browsers the bot already has stay with it when Noodle Browser no longer lists them; only added ones must be listed.
+    func validate(_ ids: Set<UUID>, for agent: AgentRecord? = nil) throws {
+        guard readable, ids.subtracting(agent.map(selectedIDs) ?? []).isSubset(of: Set(registry.browsers.map(\.id))) else { throw BrowserError("One of the selected browsers is unavailable.") }
     }
     func assign(_ ids: Set<UUID>, to agent: AgentRecord, synchronizeWorkspace: Bool = true) throws {
-        try validate(ids)
+        try validate(ids, for: agent)
         var next = registry; next.agents[agent.id.uuidString] = ids
         try next.save(root: repository.rootURL); registry = next
         publishAssignments()

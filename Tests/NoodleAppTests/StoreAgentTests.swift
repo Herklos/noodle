@@ -328,4 +328,30 @@ import XCTest
         XCTAssertEqual(try ComputerAssignments.load(root: f.repository.rootURL).assigned(to: saved.id), [computerID])
     }
 
+    /// A browser or computer that is no longer listed stays with the bot and must not block saving its other
+    /// settings (issue #21); only a newly added one has to be listed.
+    func testUnlistedBrowsersAndComputersTheBotAlreadyHasDoNotBlockSaving() throws {
+        let f = try fixture()
+        let goneBrowser = UUID(), goneComputer = UUID()
+        var browsers = BrowserAssignments(); browsers.agents[f.a.id.uuidString] = [goneBrowser]
+        try browsers.save(root: f.repository.rootURL); try f.store.browsers.reloadAssignments()
+        var computers = ComputerAssignments(); computers.agents[f.a.id.uuidString] = [goneComputer]
+        try computers.save(root: f.repository.rootURL); try f.store.computers.reloadAssignments()
+        func save(effort: String, browsers: Set<UUID>, computers: Set<UUID>) -> Bool {
+            f.store.updateAgent(f.a, name: f.a.displayName, harnessIdentifier: HarnessProvider.codex.rawValue, modelIdentifier: nil,
+                reasoningEffort: effort, avatarSymbolName: nil, avatarColorIndex: 0, avatarImageData: nil,
+                publicDescription: "", backstory: "Backstory", computerIDs: computers, browserIDs: browsers)
+        }
+        XCTAssertTrue(save(effort: "low", browsers: f.store.browsers.selectedIDs(for: f.a),
+                           computers: f.store.computers.selectedIDs(for: f.a)), f.store.errorMessage ?? "")
+        XCTAssertEqual(try f.repository.loadAgents().first { $0.id == f.a.id }?.reasoningEffort, "low")
+        XCTAssertEqual(f.store.browsers.selectedIDs(for: f.a), [goneBrowser])
+        XCTAssertEqual(f.store.computers.selectedIDs(for: f.a), [goneComputer])
+
+        XCTAssertFalse(save(effort: "high", browsers: [goneBrowser, UUID()], computers: [goneComputer]))
+        XCTAssertNotNil(f.store.errorMessage); f.store.errorMessage = nil
+        XCTAssertFalse(save(effort: "high", browsers: [goneBrowser], computers: [goneComputer, UUID()]))
+        XCTAssertNotNil(f.store.errorMessage)
+        XCTAssertEqual(try f.repository.loadAgents().first { $0.id == f.a.id }?.reasoningEffort, "low")
+    }
 }

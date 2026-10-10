@@ -18,6 +18,8 @@ All notable changes to Noodle are documented here, following
 - A chat effect plays even when another conversation cannot be read.
 - A bot that stopped because its harness needed signing in comes back by itself once the harness is signed in again, keeping its session, instead of waiting for Kick.
 - Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.
+- Edit Bot saves again for a bot that has a browser or computer that Noodle Browser or Computer no longer lists. Before, Save did nothing and the sheet stayed open.
+- Error messages stay on screen until OK, including over Edit Bot and other sheets. Before, most closed before they could be seen.
 
 ## [0.54.0] - 2026-10-10
 

@@ -1065,8 +1065,8 @@ final class NoodleStore {
         var updatedConversations = conversations
         do {
             if let mcpConnectionIDs { try mcp.validateAssignment(mcpConnectionIDs) }
-            if let computerIDs { try computers.validate(computerIDs) }
-            if let browserIDs { try browsers.validate(browserIDs) }
+            if let computerIDs { try computers.validate(computerIDs, for: agent) }
+            if let browserIDs { try browsers.validate(browserIDs, for: agent) }
             if let calendarIDs { try calendars.validate(calendarIDs) }
             if let reminderListIDs { try reminders.validate(reminderListIDs) }
             previousBackstory = try repository.loadAgentBackstory(agent)

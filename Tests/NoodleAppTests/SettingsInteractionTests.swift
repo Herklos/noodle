@@ -45,4 +45,36 @@ import NoodleCore
         press(try await control("Cancel", in: editor))
         XCTAssertEqual(try f.repository.loadAgents().first { $0.id == f.a.id }?.displayName, f.a.displayName)
     }
+
+    /// A failed save in Edit Bot is shown over the sheet and stays until OK (issue #21).
+    func testAnErrorIsShownOverTheOpenSheetUntilOK() async throws {
+        let f = try fixture()
+        let window = try XCTUnwrap(host(Color.clear.frame(width: 300, height: 200)).window)
+        window.orderFront(nil) // Offscreen; sheets need an ordered window.
+        let sheet = NSWindow(contentRect: .init(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        window.beginSheet(sheet, completionHandler: nil)
+        try await wait { window.attachedSheet == sheet }
+        let presenter = StoreErrorAlert(store: f.store, window: { window })
+        f.store.errorMessage = "One of the selected browsers is unavailable."
+        try await wait { sheet.attachedSheet != nil }
+        let alert = try XCTUnwrap(sheet.attachedSheet)
+        XCTAssertTrue(labels(of: alert).contains("One of the selected browsers is unavailable."))
+        // Losing and regaining attention must not dismiss it.
+        window.resignKey(); sheet.resignKey(); window.makeKey()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNotNil(sheet.attachedSheet); XCTAssertNotNil(f.store.errorMessage)
+        let ok = try XCTUnwrap(views(in: alert.contentView).compactMap { $0 as? NSButton }.first { $0.title == "OK" })
+        ok.performClick(nil)
+        try await wait { sheet.attachedSheet == nil && f.store.errorMessage == nil }
+        window.endSheet(sheet)
+        withExtendedLifetime(presenter) {}
+    }
+
+    private func views(in root: NSView?) -> [NSView] {
+        guard let root else { return [] }
+        return [root] + root.subviews.flatMap { views(in: $0) }
+    }
+    private func labels(of window: NSWindow) -> [String] {
+        views(in: window.contentView).compactMap { ($0 as? NSTextField)?.stringValue }
+    }
 }
