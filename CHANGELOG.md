@@ -11,6 +11,7 @@ All notable changes to Noodle are documented here, following
 - Noodle no longer reads every conversation from disk several times a second, and checks what changed for its own devices without holding up the window, so it stays quieter while idle and while a chat is open.
 - A chat effect plays even when another conversation cannot be read.
 - A bot that stopped because its harness needed signing in comes back by itself once the harness is signed in again, keeping its session, instead of waiting for Kick.
+- Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.
 
 ## [0.54.0] - 2026-10-10
 

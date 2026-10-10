@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.
+
 ## [0.29.0] - 2026-10-10
 
 ### Added

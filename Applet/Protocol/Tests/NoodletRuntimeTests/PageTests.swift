@@ -217,6 +217,21 @@ final class MemoryStore: NoodletStore, @unchecked Sendable {
         XCTAssertEqual(threads, #"[true,"function",true,true,0,1]"#)
     }
 
+    /// An audio worklet's scope has no `self`, yet its module from the package still registers.
+    func testAnAudioWorkletFromThePackageRegisters() async throws {
+        let (page, _, _) = try page(files: [
+            "index.html": "<title>Game</title>",
+            "tone.js": "registerProcessor('tone', class extends AudioWorkletProcessor { process() { return true; } });",
+        ])
+        try await page.load()
+        let node = try await page.evaluate("""
+            const context = new AudioContext();
+            await context.audioWorklet.addModule('tone.js');
+            return new AudioWorkletNode(context, 'tone') instanceof AudioNode
+            """)
+        XCTAssertEqual(node, "true")
+    }
+
     #if os(macOS)
     /// WebKit downloads outside the page, where the package is out of reach, so a package file the
     /// page downloads goes to the save panel from the app, under the name its link gives.

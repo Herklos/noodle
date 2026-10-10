@@ -13,9 +13,9 @@ import WebKit
     /// still load: WebKit does not hold them to it on a scheme of the app's own.
     nonisolated static let isolation = ["Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp"]
     /// WebKit isolates such a page but leaves out the SharedArrayBuffer constructor, which engines'
-    /// scripts look for by name. Shared memory's own buffer has it.
-    nonisolated static let sharedArrayBuffer = "if (typeof SharedArrayBuffer == 'undefined' && self.crossOriginIsolated)"
-        + " self.SharedArrayBuffer = new WebAssembly.Memory({initial: 0, maximum: 0, shared: true}).buffer.constructor;"
+    /// scripts look for by name. Shared memory's own buffer has it. An audio worklet has no `self`.
+    nonisolated static let sharedArrayBuffer = "if (typeof SharedArrayBuffer == 'undefined' && globalThis.crossOriginIsolated)"
+        + " globalThis.SharedArrayBuffer = new WebAssembly.Memory({initial: 0, maximum: 0, shared: true}).buffer.constructor;"
     private nonisolated static let chunk = 1 << 20
 
     private let root: URL
