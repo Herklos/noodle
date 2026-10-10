@@ -240,6 +240,28 @@ final class MemoryStore: NoodletStore, @unchecked Sendable {
         XCTAssertEqual(node, "true")
     }
 
+    /// WebKit leaves SharedArrayBuffer out of audio worklets too, where an engine's sound thread
+    /// shares its memory; the scope has no crossOriginIsolated to ask.
+    func testAnAudioWorkletFromThePackageHasSharedArrayBuffer() async throws {
+        let (page, _, _) = try page(files: [
+            "index.html": "<title>Game</title>",
+            "tone.js": """
+                registerProcessor('tone', class extends AudioWorkletProcessor {
+                  constructor() { super(); this.port.postMessage(typeof SharedArrayBuffer); }
+                  process() { return true; }
+                });
+                """,
+        ])
+        try await page.load()
+        let found = try await page.evaluate("""
+            const context = new AudioContext();
+            await context.audioWorklet.addModule('tone.js');
+            const node = new AudioWorkletNode(context, 'tone');
+            return await new Promise(resolve => { node.port.onmessage = event => resolve(event.data); });
+            """)
+        XCTAssertEqual(found, #""function""#)
+    }
+
     #if os(macOS)
     /// WebKit downloads outside the page, where the package is out of reach, so a package file the
     /// page downloads goes to the save panel from the app, under the name its link gives.

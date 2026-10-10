@@ -9,6 +9,7 @@
 ### Fixed
 
 - Noodle Hub no longer reads every conversation from disk every second, and checks what changed for devices without holding up its window.
+- Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.
 
 ## [0.26.0] - 2026-10-10
 
