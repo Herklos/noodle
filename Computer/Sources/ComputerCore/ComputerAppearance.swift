@@ -6,7 +6,6 @@ public struct ComputerAppearance: Codable, Equatable, Sendable {
     public var iconColour = 0
     public var iconImage: Data?
     public var backgroundPreset: String?
-    public var backgroundImage: Data?
     public var backgroundFilename: String?
     public var backgroundMediaKind: BackgroundMediaKind?
     /// Owned temporary import, retained across nested appearance/create sheets.
@@ -19,23 +18,22 @@ public struct ComputerAppearance: Codable, Equatable, Sendable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case iconSymbol, iconColour, iconImage, backgroundPreset, backgroundImage
+        case iconSymbol, iconColour, iconImage, backgroundPreset
         case backgroundFilename, backgroundMediaKind
         case terminalForeground, terminalBackground, terminalOpacity
     }
 
     public var background: ConversationBackground {
         ConversationBackground(preset: backgroundPreset.flatMap(ConversationBackgroundPreset.init(rawValue:)),
-            imageFilename: backgroundFile?.url.lastPathComponent ?? backgroundFilename ?? (backgroundImage == nil ? nil : "legacy"),
+            imageFilename: backgroundFile?.url.lastPathComponent ?? backgroundFilename,
             mediaKind: backgroundFile?.kind ?? backgroundMediaKind)
     }
 
-    /// Choosing a preset or an imported file replaces the committed media and
-    /// any legacy inline image.
+    /// Choosing a preset or an imported file replaces the committed media.
     public mutating func chooseBackground(preset: ConversationBackgroundPreset?, file: PreparedBackgroundFile?) {
         backgroundFile = file
         backgroundPreset = file == nil ? preset?.rawValue : nil
-        backgroundImage = nil; backgroundFilename = nil; backgroundMediaKind = nil
+        backgroundFilename = nil; backgroundMediaKind = nil
     }
 
     public func backgroundURL(in directory: URL?) -> URL? {
@@ -55,8 +53,7 @@ public struct ComputerAppearance: Codable, Equatable, Sendable {
               (0...1).contains(terminalOpacity),
               Self.validColour(terminalForeground), Self.validColour(terminalBackground),
               backgroundPreset.map({ ConversationBackgroundPreset(rawValue: $0) != nil }) ?? true,
-              (iconImage?.count ?? 0) <= 2 * 1024 * 1024,
-              (backgroundImage?.count ?? 0) <= 8 * 1024 * 1024 else {
+              (iconImage?.count ?? 0) <= 2 * 1024 * 1024 else {
             throw ComputerError("Invalid computer appearance settings.")
         }
         if let name = backgroundFilename, !Self.validBackgroundFilename(name) {

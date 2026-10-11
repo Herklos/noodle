@@ -239,13 +239,7 @@ final class RepositoryTests: XCTestCase {
         let created = try repository.createAgent(named: "Story Bot", backstory: "Original backstory")
         let directory = repository.directory(for: created.agent)
         let agentsFile = directory.appendingPathComponent("AGENTS.md")
-        let legacyFile = directory.appendingPathComponent("instructions.md")
         try FileManager.default.removeItem(at: agentsFile)
-        try "Stale legacy backstory".write(
-            to: legacyFile,
-            atomically: true,
-            encoding: .utf8
-        )
 
         try repository.synchronizeAgentWorkspace(created.agent)
 
@@ -253,7 +247,6 @@ final class RepositoryTests: XCTestCase {
             try repository.loadAgentBackstory(created.agent),
             "Original backstory"
         )
-        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyFile.path))
         XCTAssertTrue(
             try String(contentsOf: agentsFile, encoding: .utf8)
                 .contains("Original backstory")

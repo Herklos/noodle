@@ -272,22 +272,8 @@ private func copyScript(_ source: URL, to destination: URL) throws {
         port.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: guest, fileHandleForWriting: guest)
         let console = VZVirtioConsoleDeviceConfiguration()
         console.ports[0] = port
-        var gpu: WindowsGPU?
-        #if NOODLE_DEV_HOOKS
-        // `-WindowsInstallScreen YES`: the install's screen, every 20 seconds, as base64 PNG lines on stdout.
-        if UserDefaults.standard.bool(forKey: "WindowsInstallScreen") {
-            let screen = WindowsGPU(accelerated: false)
-            screen.servesFirmware = true
-            let last = LastFrameTime()
-            screen.onFrame = { image in
-                guard last.due(), let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
-                print("WINDOWS SCREEN \(png.base64EncodedString())")
-            }
-            gpu = screen
-        }
-        #endif
         let configuration = try WindowsComputer.configuration(cpus: min(4, ProcessInfo.processInfo.processorCount), memoryGiB: 4,
-                                                              directory: directory, media: media, network: false, gpu: gpu, consoles: [console])
+                                                              directory: directory, media: media, network: false, gpu: nil, consoles: [console])
         let machine = VZVirtualMachine(configuration: configuration)
         machine.delegate = self
         self.machine = machine
@@ -343,14 +329,6 @@ private func copyScript(_ source: URL, to destination: URL) throws {
         Task { @MainActor in self.stopped?.resume(returning: error); self.stopped = nil }
     }
 }
-
-#if NOODLE_DEV_HOOKS
-private final class LastFrameTime: @unchecked Sendable {
-    private let lock = NSLock()
-    private var last = Date.distantPast
-    func due() -> Bool { lock.withLock { guard Date().timeIntervalSince(last) > 20 else { return false }; last = Date(); return true } }
-}
-#endif
 
 /// libwim, the library half of wimlib (LGPL), which the build puts in the app's Frameworks.
 private final class Wimlib: @unchecked Sendable {

@@ -206,7 +206,6 @@ public struct ComputerLibrary: Sendable {
                 computer.appearance?.backgroundFilename = name
                 computer.appearance?.backgroundMediaKind = file.kind
                 computer.appearance?.backgroundFile = nil
-                computer.appearance?.backgroundImage = nil
                 computer.appearance?.backgroundPreset = nil
             }
             let encoder = JSONEncoder()

@@ -118,19 +118,17 @@ enum ComputerLaunchCheck {
   static let overlay = "093126f40abeca909f38764a45026f341ab650542637529e04ac147aa8ad39b3"  // --overlay-test
   static let selfTest = "eaf0760032ad43d55e3bbcf4d5153069c67652bdeb968530d47be859a94ef5df"  // --self-test
   static let offline = "aff7d00b56394f5a96dca22be6856e0950b37524abb5b2ef434d27981a0586f1"  // --offline
-  static let windows = "c562e5dea2f17ee2f2ee86b14c618a6cc35bcd5e86c1a1a00c7c875c1b8bd4b1"  // --windows-test
-  static let virgl = "ffbd426929bff23cd83980b77dc29a3ebbda84f9990726ab2cd4c6f20c869db8"  // --virgl-test
   /// A failure of any of these ends the process with an error instead of showing it in the window.
   static let exitOnFailure = [
     updaterUI, emptyLibrary, libraryLayout, providerIntegration, creationForm,
-    localMacCreationPreview, desktopSmoke, selfTest, overlay, latestImages, configuration, downloadProgress, windows, virgl
+    localMacCreationPreview, desktopSmoke, selfTest, overlay, latestImages, configuration, downloadProgress
   ]
   static var keepsTestWindow: Bool { requested(keepTestWindow) }
   /// Every check that runs in place of the app; the rest only modify one of these.
   private static let verificationRuns = [
     updaterUI, files, providerIntegration, providerSnapshot, libraryLayout, emptyLibrary,
     appearancePreview, localMacCreationPreview, creationForm, desktopSmoke, downloadProgress,
-    linuxBoot, configuration, overlayUI, latestImages, overlay, selfTest, windows, virgl
+    linuxBoot, configuration, overlayUI, latestImages, overlay, selfTest
   ]
   #else
   static let exitOnFailure = [updaterUI]
@@ -373,17 +371,6 @@ struct ComputerRootView: View {
           NSApplication.shared.terminate(nil)
           return
         }
-        if ComputerLaunchCheck.requested(ComputerLaunchCheck.virgl) {
-          if VirglCheck.isInteractive {
-            let model = try await VirglCheck.interactive()
-            store = model
-            ComputerAppDelegate.store = model
-            return
-          }
-          try await VirglCheck.run()
-          NSApplication.shared.terminate(nil)
-          return
-        }
         if ComputerLaunchCheck.requested(ComputerLaunchCheck.downloadProgress) {
           try await ComputerSmokeTest.checkDownloadProgressAndCancellation()
           NSApplication.shared.terminate(nil)
@@ -393,14 +380,6 @@ struct ComputerRootView: View {
           let model = try await ComputerSmokeTest.linuxBootFixture()
           store = model
           ComputerAppDelegate.store = model
-          return
-        }
-        if ComputerLaunchCheck.requested(ComputerLaunchCheck.windows) {
-          guard #available(macOS 27, *) else { throw ComputerError("Windows computers need macOS 27.") }
-          let model = try WindowsCheck.fixture()
-          store = model
-          ComputerAppDelegate.store = model
-          WindowsCheck.start(model)
           return
         }
         if ComputerLaunchCheck.requested(ComputerLaunchCheck.configuration) {

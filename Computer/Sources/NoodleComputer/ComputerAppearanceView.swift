@@ -54,8 +54,7 @@ struct ComputerWallpaper: View {
     var directory: URL?
     var body: some View {
         ConversationBackgroundView(background: appearance.background,
-            imageURL: appearance.backgroundURL(in: directory),
-            previewImage: appearance.backgroundImage.flatMap { NSImage(data: $0) })
+            imageURL: appearance.backgroundURL(in: directory))
     }
 }
 
@@ -68,8 +67,7 @@ struct ComputerWindowWallpaper: View {
     @State private var selection = Selection()
     var body: some View {
         ConversationWallpaper(background: selection.appearance.background,
-            imageURL: selection.appearance.backgroundURL(in: selection.directory),
-            imageData: selection.appearance.backgroundImage)
+            imageURL: selection.appearance.backgroundURL(in: selection.directory))
             .overlay(alignment: .top) {
                 ConversationWindowHeaderShade()
             }

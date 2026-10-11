@@ -304,7 +304,6 @@ public struct WorkspaceRepository: Sendable {
             try workspaceFiles.writeData(Data(Self.initialAgentPreferences.utf8), named: "preferences.md", replaceExisting: false)
         }
         try workspaceFiles.writeData(Data((Self.renderedAgentInstructions(backstory: backstory, owner: configuration.owner) + folderInstructions + ToolProviderSkills.instructions(workspace: directory)).utf8), named: "AGENTS.md")
-        workspaceFiles.remove("instructions.md")
         try workspaceFiles.symlink("CLAUDE.md", destination: "AGENTS.md")
         try AgentTips.synchronize(workspace: directory)
         _ = try synchronizeClaudeSkillLinks(in: directory)

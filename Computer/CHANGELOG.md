@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Backgrounds stored inside a computer by versions before 0.3.0 are no longer shown; choose the background again in Appearance.
+
 ## [0.26.0] - 2026-10-10
 
 ### Changed

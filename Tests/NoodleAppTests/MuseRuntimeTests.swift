@@ -261,21 +261,4 @@ import XCTest
         try await f.waitUntil { relaunched.snapshot.phase == .failed }
         XCTAssertEqual(next.count("session/start"), 0)
     }
-
-    /// An old session pointer has no workspace. A session bound elsewhere is replaced by a fresh one here,
-    /// which is told how to recover its context.
-    func testLegacySessionFromAnotherWorkspaceIsReplaced() async throws {
-        let f = try fixture()
-        try FileManager.default.createDirectory(at: f.state().deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: ["sessionID": UUID().uuidString]).write(to: f.state())
-        let (process, wire) = f.make()
-        wire.resumedWorkspace = f.root.path
-        wire.finishBeforeAcknowledgement = true
-        process.start()
-        try await f.waitUntil { process.snapshot.phase == .ready && !process.hasInterruptedWork && wire.count("turn/start") == 1 }
-        XCTAssertEqual(wire.count("session/resume"), 1)
-        XCTAssertEqual(wire.count("session/start"), 1)
-        let inputs = try XCTUnwrap(wire.calls.first { $0.0 == "turn/start" }?.1["input"] as? [[String: String]])
-        XCTAssertTrue(inputs.first?["text"]?.contains(MessengerDocumentation.recoveredModelContext) == true)
-    }
 }

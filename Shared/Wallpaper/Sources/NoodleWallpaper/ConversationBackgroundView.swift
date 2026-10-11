@@ -8,9 +8,8 @@ import SwiftUI
 public struct ConversationWallpaper: View {
     let background: ConversationBackground
     var imageURL: URL?
-    var imageData: Data?
-    public init(background: ConversationBackground, imageURL: URL? = nil, imageData: Data? = nil) {
-        self.background = background; self.imageURL = imageURL; self.imageData = imageData
+    public init(background: ConversationBackground, imageURL: URL? = nil) {
+        self.background = background; self.imageURL = imageURL
     }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var displayed = Layer(request: Request(background: ConversationBackground()))
@@ -18,7 +17,6 @@ public struct ConversationWallpaper: View {
     private struct Request: Equatable {
         let background: ConversationBackground
         var imageURL: URL?
-        var imageData: Data?
     }
 
     private struct Layer: Identifiable {
@@ -28,7 +26,7 @@ public struct ConversationWallpaper: View {
     }
 
     public var body: some View {
-        let request = Request(background: background, imageURL: imageURL, imageData: imageData)
+        let request = Request(background: background, imageURL: imageURL)
         ZStack {
             systemCanvas
             ConversationBackgroundView(background: displayed.request.background,
@@ -47,9 +45,6 @@ public struct ConversationWallpaper: View {
                 let kind = request.background.mediaKind
                 let poster = await Task.detached { await BackgroundMedia.poster(at: url, kind: kind) }.value
                 image = poster.map { NSImage(cgImage: $0, size: .zero) }
-            } else if let data = request.imageData {
-                let decoded = await Task.detached { BackgroundMedia.image(data: data) }.value
-                image = decoded.map { NSImage(cgImage: $0, size: .zero) }
             } else {
                 image = nil
             }

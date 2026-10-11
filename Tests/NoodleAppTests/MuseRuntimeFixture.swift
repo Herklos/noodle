@@ -17,7 +17,6 @@ import XCTest
     var invalidAcknowledgement = false
     var invalidWorkspace = false
     /// The workspace a resumed session reports, when it is not this one.
-    var resumedWorkspace: String?
     /// Rejects every turn/start with a JSON-RPC error.
     var failTurn = false
     var terminalErrors: [String] = []
@@ -47,7 +46,7 @@ import XCTest
                 result = ["schema": ["version": 1], "serverInfo": ["name": "muse"], "sessionDurability": "durable"]
             case "session/start", "session/resume":
                 session = method == "session/resume" ? try XCTUnwrap(params["sessionId"] as? String) : UUID().uuidString
-                let root = method == "session/resume" ? resumedWorkspace ?? workspace.path : workspace.path
+                let root = workspace.path
                 result = ["session": ["sessionId": session, "workspaceRoot": invalidWorkspace ? "/wrong/workspace" : root,
                     "activeTurnId": NSNull()], "pendingRequests": []]
             case "session/setModel", "approval/decide": result = ["status": "accepted"]

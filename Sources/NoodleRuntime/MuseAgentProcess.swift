@@ -307,15 +307,6 @@ public final class MuseAgentProcess: AgentRuntimeProcess {
             send(["jsonrpc": "2.0", "method": "initialized", "params": [:]])
             openSession()
         case .open:
-            if openingExistingSession, let session = result["session"] as? [String: Any],
-               session["sessionId"] as? String == sessionID,
-               session["workspaceRoot"] as? String == workspaceURL.deletingLastPathComponent().path {
-                // Muse sessions are bound to their original working directory.
-                // Preserve the old pointer and recover from Noodle's chat history
-                // in a fresh session after the flat-workspace migration.
-                recoverModelContext()
-                return
-            }
             guard let session = result["session"] as? [String: Any], let returned = session["sessionId"] as? String,
                   UUID(uuidString: returned) != nil, sessionID == nil || sessionID == returned,
                   session["workspaceRoot"] as? String == workspaceURL.path else {

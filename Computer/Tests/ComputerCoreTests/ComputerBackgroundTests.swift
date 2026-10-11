@@ -22,16 +22,14 @@ final class ComputerBackgroundTests: XCTestCase {
         return try library.commit(computer)
     }
 
-    func testChoosingABackgroundReplacesCommittedAndLegacyMedia() async throws {
+    func testChoosingABackgroundReplacesCommittedMedia() async throws {
         var appearance = ComputerAppearance()
-        appearance.backgroundImage = Data([1])
         appearance.backgroundFilename = "\(UUID().uuidString).jpg"
         appearance.backgroundMediaKind = .image
         appearance.terminalOpacity = 0.5
 
         appearance.chooseBackground(preset: .ocean, file: nil)
         XCTAssertEqual(appearance.background, ConversationBackground(preset: .ocean))
-        XCTAssertNil(appearance.backgroundImage)
         XCTAssertNoThrow(try appearance.validate())
 
         let source = root.appendingPathComponent("chosen.png")
@@ -46,21 +44,6 @@ final class ComputerBackgroundTests: XCTestCase {
         appearance.chooseBackground(preset: nil, file: nil)
         XCTAssertEqual(appearance.background, ConversationBackground())
         XCTAssertEqual(appearance.terminalOpacity, 0.5)
-    }
-
-    func testLegacyEmbeddedImageAndPresetStillDecode() throws {
-        var computer = try commit()
-        let url = root.appendingPathComponent("legacy.png")
-        try imageFixture(url, type: .png, count: 1)
-        computer.appearance?.backgroundImage = try Data(contentsOf: url)
-        computer.appearance?.backgroundPreset = "ocean"
-        computer = try library.save(computer)
-        let decoded = try XCTUnwrap(library.load().first)
-        XCTAssertEqual(decoded, computer)
-        XCTAssertNil(decoded.appearance?.backgroundFilename)
-        XCTAssertNil(decoded.appearance?.backgroundMediaKind)
-        XCTAssertNotNil(decoded.appearance?.background.imageFilename)
-        XCTAssertNotNil(BackgroundMedia.image(data: try XCTUnwrap(decoded.appearance?.backgroundImage)))
     }
 
     func testDroppedMultiFrameHEICCommitReloadReplaceAndCleanup() async throws {
