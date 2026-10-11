@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-12
+
 ### Changed
 
 - The chosen effort in Edit Bot is shown at the same size as its Effort label.
