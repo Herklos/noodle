@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-10-11
+
 ### Added
 
 - While a changed noodlet downloads again, Play Previous Version plays the one already on the phone; the new one keeps downloading, says when it is ready, and opens next time.

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-10-11
+
+### Fixed
+
+- **Choose Harnesses** turns harnesses on and off again when you press Done; the choices were being dropped.
+
 ## [0.28.0] - 2026-10-11
 
 ### Added
