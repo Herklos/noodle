@@ -12,6 +12,8 @@ public extension View {
 extension View {
     func settingsContentSize(width: CGFloat, maxHeight: CGFloat?) -> some View {
         SettingsContentHeight(maxHeight: maxHeight) { frame(width: width) }
+            // Content that fits must not bounce as if it scrolled.
+            .scrollBounceBehavior(.basedOnSize)
     }
 }
 

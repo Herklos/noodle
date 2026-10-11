@@ -6,6 +6,10 @@
 
 - Backgrounds stored inside a computer by versions before 0.3.0 are no longer shown; choose the background again in Appearance.
 
+### Fixed
+
+- Settings and sheets no longer bounce when you scroll them while everything already fits; only content taller than the window scrolls.
+
 ## [0.26.0] - 2026-10-10
 
 ### Changed

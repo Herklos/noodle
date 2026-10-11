@@ -22,6 +22,13 @@ import XCTest
         XCTAssertEqual(short.width, 400)
     }
 
+    func testContentThatFitsDoesNotBounce() throws {
+        let host = NSHostingView(rootView: form(rows: 2).settingsContentSize(width: 400, maxHeight: 2000))
+        host.frame.size = host.fittingSize
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(try XCTUnwrap(find(host, type: NSScrollView.self)).verticalScrollElasticity, .none)
+    }
+
     private func form(rows: Int) -> some View {
         Form { ForEach(0..<rows, id: \.self) { Text("Setting \($0)") } }.formStyle(.grouped)
     }

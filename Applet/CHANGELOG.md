@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings and sheets no longer bounce when you scroll them while everything already fits; only content taller than the window scrolls.
+
 ## [0.30.0] - 2026-10-10
 
 ### Changed

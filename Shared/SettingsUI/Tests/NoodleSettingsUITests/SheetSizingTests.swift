@@ -35,6 +35,13 @@ import NoodleSettingsUI
         XCTAssertGreaterThanOrEqual(insets.bottom, 16)
     }
 
+    func testContentThatFitsDoesNotBounce() async throws {
+        let fixture = try await sheet(Form { Text("Row") }.formStyle(.grouped).frame(width: 300))
+        try await wait { self.find(NSScrollView.self, in: fixture.host) != nil }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(try XCTUnwrap(find(NSScrollView.self, in: fixture.host)).verticalScrollElasticity, .none)
+    }
+
     private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
         if let view = view as? T { return view }
         return view.subviews.lazy.compactMap { self.find(type, in: $0) }.first

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Settings and sheets no longer bounce when you scroll them while everything already fits; only content taller than the window scrolls.
 - A bot no longer stops partway through its work when the Mac runs low on memory. macOS was closing the helper that runs bots, which ended the bot's current reply.
 
 ## [0.28.1] - 2026-10-11

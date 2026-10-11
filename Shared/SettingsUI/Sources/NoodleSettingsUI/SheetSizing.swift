@@ -52,6 +52,7 @@ private struct SheetSizing: ViewModifier {
             }
             // Scoped to the opacity: hiding is instant, revealing fades.
             .animation(shown ? .easeOut(duration: 0.15) : nil) { $0.opacity(shown ? 1 : 0) }
+            .scrollBounceBehavior(.basedOnSize)
             .settingsScrollIndicators(selection: 0)
             // Keep the scrollbar clear of the sheet's rounded corners.
             .contentMargins(.vertical, 16, for: .scrollIndicators)
