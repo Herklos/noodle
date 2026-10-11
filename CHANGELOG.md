@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- **Choose Harnesses** turns harnesses on and off again when you press Done; the choices were being dropped.
+
 ## [0.56.0] - 2026-10-11
 
 ### Added
