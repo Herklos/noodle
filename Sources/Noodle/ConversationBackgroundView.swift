@@ -1,5 +1,6 @@
 import SwiftUI
 import NoodleCore
+import NoodleWallpaper
 
 struct ConversationBackgroundSheet: View {
     @Environment(NoodleStore.self) private var store

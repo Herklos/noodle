@@ -4,6 +4,7 @@ import PhotosUI
 import SwiftUI
 import NoodleCore
 import UniformTypeIdentifiers
+import NoodleWallpaper
 
 struct ChatView: View {
     @Environment(NoodleStore.self) private var store

@@ -5,6 +5,7 @@ import NoodleHubClient
 import NoodleRuntimeSettings
 import SwiftUI
 import UniformTypeIdentifiers
+import NoodleWallpaper
 
 /// Settings > Hub: this Mac serving its owner's devices, and the Noodle Hubs it joined.
 struct HubSettingsView: View {

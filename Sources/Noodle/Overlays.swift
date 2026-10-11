@@ -8,6 +8,7 @@ import NoodleCore
 import HubLink
 import NoodleHubClient
 import NoodleRuntimeSettings
+import NoodleWallpaper
 
 enum BotEditorTab: String, CaseIterable {
     case general = "General", runtime = "Harness", mcp = "Tools", computers = "Computers", browsers = "Browsers"

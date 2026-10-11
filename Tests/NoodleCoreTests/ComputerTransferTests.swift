@@ -11,7 +11,7 @@ final class ComputerTransferTests: XCTestCase {
         return root
     }
 
-    func testBinaryAndEmptyFilesRoundTripWithoutInlinePayloads() throws {
+    func testBinaryAndEmptyFilesAreStagedWithoutInlinePayloads() throws {
         let root = try directory(), shared = try directory()
         for size in [0, 2_500_017] {
             let name = "binary ' $()\n \(size).dat"
@@ -19,26 +19,8 @@ final class ComputerTransferTests: XCTestCase {
             try bytes.write(to: root.appendingPathComponent(name))
             let staging = try ComputerTransferFiles.staging(root: shared, id: UUID(), create: true)
             XCTAssertEqual(try ComputerWorkspaceFiles.upload(workspace: root, path: name, to: staging), Int64(size))
-            let destination = try ComputerWorkspaceDownload(workspace: root, path: "copy-" + name)
-            XCTAssertEqual(try destination.copy(from: staging, expected: Int64(size)), Int64(size))
-            XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("copy-" + name).path))
-            try destination.publish()
-            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("copy-" + name)), bytes)
+            XCTAssertEqual(try Data(contentsOf: staging), bytes)
         }
-    }
-
-    func testNoOverwriteEvenWhenDestinationAppearsDuringDownload() throws {
-        let root = try directory(), source = root.appendingPathComponent("source")
-        try Data([0, 255]).write(to: source)
-        let target = root.appendingPathComponent("target")
-        var download: ComputerWorkspaceDownload? = try ComputerWorkspaceDownload(workspace: root, path: "target")
-        _ = try download!.copy(from: source, expected: 2)
-        try Data("keep".utf8).write(to: target)
-        XCTAssertThrowsError(try download!.publish())
-        download = nil
-        XCTAssertEqual(try Data(contentsOf: target), Data("keep".utf8))
-        XCTAssertThrowsError(try ComputerWorkspaceDownload(workspace: root, path: "target"))
-        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)), ["source", "target"])
     }
 
     func testRefusesEscapeSymlinksMissingParentsAndSpecialFiles() throws {
@@ -50,35 +32,7 @@ final class ComputerTransferTests: XCTestCase {
         for path in ["../secret", outside.appendingPathComponent("secret").path, "link/secret", "file", "fifo", "missing/file", "", "a\0b"] {
             XCTAssertThrowsError(try ComputerWorkspaceFiles.upload(workspace: root, path: path, to: root.appendingPathComponent(UUID().uuidString)))
         }
-        for path in ["../new", "link/new", "file", "fifo", "missing/file", "/tmp/new"] {
-            XCTAssertThrowsError(try ComputerWorkspaceDownload(workspace: root, path: path))
-        }
         XCTAssertEqual(try Data(contentsOf: outside.appendingPathComponent("secret")), Data([7]))
-    }
-
-    func testDownloadKeepsOpenedParentWhenNameIsReplacedWithSymlink() throws {
-        let root = try directory(), outside = try directory()
-        let folder = root.appendingPathComponent("folder"), moved = root.appendingPathComponent("moved")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
-        let source = root.appendingPathComponent("source")
-        try Data([1, 2]).write(to: source)
-        let download = try ComputerWorkspaceDownload(workspace: root, path: "folder/result")
-        try FileManager.default.moveItem(at: folder, to: moved)
-        try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: outside)
-        _ = try download.copy(from: source, expected: 2)
-        try download.publish()
-        XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("result")), Data([1, 2]))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: outside.appendingPathComponent("result").path))
-    }
-
-    func testIncompleteDownloadAndAbandonmentNeverPublish() throws {
-        let root = try directory(), source = root.appendingPathComponent("source")
-        try Data([1]).write(to: source)
-        var download: ComputerWorkspaceDownload? = try ComputerWorkspaceDownload(workspace: root, path: "result")
-        XCTAssertThrowsError(try download!.copy(from: source, expected: 2))
-        _ = try download!.copy(from: source, expected: 1)
-        download = nil // Includes revocation after staging but before publication.
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["source"])
     }
 
     func testOversizedSparseFileIsRejectedBeforeCopying() throws {

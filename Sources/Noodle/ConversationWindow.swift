@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import NoodleCore
+import NoodleWallpaper
 
 /// A window holds an ID, so edits and new messages always come from the shared store.
 struct ConversationWindowView: View {

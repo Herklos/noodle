@@ -150,19 +150,3 @@ public final class MessengerBroker: @unchecked Sendable {
         mailbox.remove(stem + ".request"); mailbox.remove(stem + ".running")
     }
 }
-
-public struct MessengerClient: Sendable {
-    private let execute: @Sendable (MessengerAction) throws -> MessengerCommandResult
-    public init(workspace: URL) {
-        execute = { try MessengerBridgeClient.request($0, workspace: workspace) }
-    }
-    /// Explicit trusted injection for in-process tools and tests. Never selected
-    /// by an environment variable or by falling back after a bridge failure.
-    public init(execute: @escaping @Sendable (MessengerAction) throws -> MessengerCommandResult) { self.execute = execute }
-    public func call<T: Decodable>(_ action: MessengerAction, as: T.Type = T.self) throws -> T {
-        let result = try execute(action)
-        guard result.exitCode == 0 else { throw HarnessSetupError(result.standardError) }
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(T.self, from: Data(result.standardOutput.utf8))
-    }
-}
