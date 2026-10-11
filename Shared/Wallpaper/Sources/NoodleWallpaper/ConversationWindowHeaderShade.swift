@@ -5,6 +5,9 @@ private let conversationTopFadeHeight: CGFloat = 64
 /// Fade scrolling content beneath the toolbar to reveal the shaded wallpaper.
 /// Apply this mask to the detail scroll view, leaving the sidebar untouched.
 public struct ConversationContentTopFade: View {
+    /// Where the fade reaches full opacity, measured from the content's top.
+    public static let height = conversationTopFadeHeight
+
     public init() {}
 
     public var body: some View {

@@ -177,6 +177,8 @@ struct ChatView: View {
     private var topFadedTranscript: some View {
         ConversationTransition(conversationID: conversation.id) {
             transcript
+                // Start the scroller below the fade so it is never dimmed.
+                .contentMargins(.top, ConversationContentTopFade.height, for: .scrollIndicators)
                 .mask {
                     // Fade the transcript pixels themselves as they pass beneath
                     // the toolbar. The separate window-wide shade remains behind

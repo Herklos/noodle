@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - **Choose Harnesses** turns harnesses on and off again when you press Done; the choices were being dropped.
+- A conversation's scrollbar starts below the toolbar shade instead of fading out under it.
 
 ## [0.56.0] - 2026-10-11
 
