@@ -10,6 +10,7 @@ All notable changes to Noodle are documented here, following
 
 - Kling can be added as a tool.
 - Image Generation, a built-in tool that makes pictures on this Mac, from a description or by reworking a picture. Download Stable Diffusion XL models in Settings > Tools, pick the default, and add the tool to any bot. Bots kept on a Noodle Hub can use the Hub's image models too.
+- Remote Models: TensorFold, for the models a TensorFold server on this Mac serves, with the context it serves each one with. The API key is optional.
 
 ### Fixed
 
@@ -17,6 +18,10 @@ All notable changes to Noodle are documented here, following
 - Noodle no longer holds up its window while your phone loads conversations from it, and no longer re-reads every attachment each time.
 - Opening Settings or a bot's sheet no longer reads every installed harness in full again to check its signature; a harness is checked again once it changes.
 - Scrolling a conversation with pictures stays smoother: previews are made at the size they are shown and kept in Noodle's cache folder, so scrolling back to one no longer decodes the original again.
+
+### Changed
+
+- Remote Models: picking a model a Custom server lists, such as vLLM or TensorFold, in Add Model fills in its context and output limits from the context the server reports, instead of you typing them in.
 
 ## [0.55.0] - 2026-10-10
 

@@ -6,6 +6,7 @@
 
 - Kling can be added as a tool.
 - Image Generation, a built-in tool that makes pictures on the Hub, from a description or by reworking a picture. Download Stable Diffusion XL models and pick the default in Settings > Tools; people turn it on for their bots from their devices.
+- Apple Intelligence bots can use TensorFold on the Hub's Mac, added in Settings > Harness > Apple Intelligence > Remote Models. The API key is optional.
 
 ### Fixed
 

@@ -43,7 +43,7 @@ final class RemoteModelsTests: XCTestCase {
     }
 
     func testGatewaysOfferTheLatestGLMDeepSeekAndQwenOverChatCompletions() throws {
-        XCTAssertEqual(RemoteProviders.all.map(\.id), ["openai", "openrouter", "vercel", "ollama", "custom"])
+        XCTAssertEqual(RemoteProviders.all.map(\.id), ["openai", "openrouter", "vercel", "ollama", "tensorfold", "custom"])
         let openRouter = try XCTUnwrap(RemoteProviders.provider(id: "openrouter"))
         XCTAssertEqual(openRouter.displayName, "OpenRouter")
         XCTAssertEqual(openRouter.baseURL.absoluteString, "https://openrouter.ai/api/v1")
@@ -202,6 +202,33 @@ final class RemoteModelsTests: XCTestCase {
         XCTAssertNil(try store.access(for: luna).model, "Bots use Noodle's own list for listed providers")
     }
 
+    func testTensorFoldOffersTheModelsItServesWithTheirContext() async throws {
+        let tensorFold = try XCTUnwrap(RemoteProviders.provider(id: "tensorfold"))
+        XCTAssertEqual(tensorFold.displayName, "TensorFold")
+        XCTAssertEqual(tensorFold.baseURL.absoluteString, "http://127.0.0.1:8080/v1")
+        XCTAssertFalse(tensorFold.requiresKey)
+        XCTAssertTrue(tensorFold.acceptsKey, "A server started with --api-key needs one")
+        XCTAssertTrue(tensorFold.findsModels)
+        XCTAssertFalse(tensorFold.describesModels)
+
+        let transport = StubTransport(responses: [(200, #"{"object":"list","data":[{"id":"glm-5.3-flash","object":"model","created":1,"owned_by":"tensorfold","context_length":131072,"max_model_len":131072},{"id":"nemotron","object":"model","created":1,"owned_by":"tensorfold"}]}"#)])
+        let models = try await tensorFold.findModels(apiKey: "sk-tf", transport: transport)
+        XCTAssertEqual(transport.requests.first?.url?.absoluteString, "http://127.0.0.1:8080/v1/models")
+        XCTAssertEqual(transport.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer sk-tf")
+        XCTAssertEqual(models, [.custom(id: "glm-5.3-flash", contextSize: 131_072, maximumOutputTokens: 8_192), .custom(id: "nemotron")])
+        for model in models { XCTAssertTrue(tensorFold.api(for: model) is ChatCompletionsAPI, model.id) }
+
+        do {
+            _ = try await tensorFold.findModels(transport: UnreachableTransport())
+            XCTFail("A stopped server has no models")
+        } catch { XCTAssertEqual(error.localizedDescription, "TensorFold is not running on this Mac. Start it with tensorfold serve, then try again.") }
+
+        let account = try store.add(providerID: "tensorfold", name: "This Mac", apiKey: "sk-tf", models: models)
+        XCTAssertEqual(try store.apiKey(for: account.id), "sk-tf")
+        XCTAssertEqual(try store.accounts().first?.models, models)
+        XCTAssertNil(try store.accounts().first?.baseURL, "Always this Mac's own server")
+    }
+
     func testCustomServersAreCheckedAndSuggestModelsAtTheirOwnAddress() async throws {
         XCTAssertEqual(RemoteProviders.provider(id: "custom")?.displayName, "Custom")
         let lab = try XCTUnwrap(RemoteProviders.provider(id: "custom", baseURL: URL(string: "http://lab.local:8000/v1")))
@@ -214,6 +241,14 @@ final class RemoteModelsTests: XCTestCase {
         XCTAssertEqual(listed.requests.first?.url?.absoluteString, "http://lab.local:8000/v1/models")
         XCTAssertEqual(suggested.map(\.id), ["llama-3.3-70b", "qwen3:8b"])
         XCTAssertEqual(suggested.first, .custom(id: "llama-3.3-70b"), "Details start from defaults the person adjusts")
+
+        let described = StubTransport(responses: [(200, #"{"data":[{"id":"glm-5.3-flash","context_length":131072,"max_model_len":131072},{"id":"qwen3-4b","max_model_len":16384},{"id":"tiny","context_length":0}]}"#)])
+        let reported = try await lab.findModels(transport: described)
+        XCTAssertEqual(reported, [
+            .custom(id: "glm-5.3-flash", contextSize: 131_072, maximumOutputTokens: 8_192),
+            .custom(id: "qwen3-4b", contextSize: 16_384, maximumOutputTokens: 4_096),
+            .custom(id: "tiny"),
+        ], "A reported context replaces the default; output stays within it")
 
         let keyed = StubTransport(responses: [(200, "{}")])
         try await lab.checkKey("sk-lab", transport: keyed)
@@ -290,4 +325,8 @@ final class MemoryRemoteModelSecrets: RemoteModelSecrets, @unchecked Sendable {
     func read(_ account: UUID) throws -> String? { values[account] }
     func write(_ key: String, account: UUID) throws { values[account] = key }
     func delete(_ account: UUID) throws { values[account] = nil }
+}
+
+private struct UnreachableTransport: RemoteTransport {
+    func send(_ request: URLRequest) async throws -> RemoteHTTPResponse { throw URLError(.cannotConnectToHost) }
 }

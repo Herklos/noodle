@@ -116,6 +116,9 @@ open class RemoteProvider: @unchecked Sendable {
 
     open var requiresKey: Bool { true }
 
+    /// Whether the person can give a key, even when the server works without one.
+    open var acceptsKey: Bool { requiresKey }
+
     /// Whether the models come from the server rather than from `models`.
     open var findsModels: Bool { false }
 
@@ -284,6 +287,55 @@ public final class OllamaProvider: RemoteProvider, @unchecked Sendable {
     }
 }
 
+/// TensorFold on this Mac, with the models it serves and the context it serves them with.
+public final class TensorFoldProvider: RemoteProvider, @unchecked Sendable {
+    public init() {
+        super.init(id: "tensorfold", displayName: "TensorFold", baseURL: URL(string: "http://127.0.0.1:8080/v1")!, models: [])
+    }
+
+    public override var requiresKey: Bool { false }
+    public override var acceptsKey: Bool { true }
+    public override var findsModels: Bool { true }
+
+    public override func findModels(apiKey: String = "",
+                                    transport: any RemoteTransport = URLSessionRemoteTransport()) async throws -> [RemoteModelInfo] {
+        do {
+            return try await listedModels(CustomProvider.modelsRequest(baseURL: baseURL, apiKey: apiKey), transport: transport)
+        } catch let error as URLError where error.code == .cannotConnectToHost { throw notRunning }
+    }
+
+    public override func checkKey(_ apiKey: String, transport: any RemoteTransport = URLSessionRemoteTransport()) async throws {
+        do { try await super.checkKey(apiKey, transport: transport) } catch let error as URLError where error.code == .cannotConnectToHost {
+            throw notRunning
+        }
+    }
+
+    private var notRunning: HarnessSetupError {
+        HarnessSetupError("TensorFold is not running on this Mac. Start it with tensorfold serve, then try again.")
+    }
+}
+
+extension RemoteProvider {
+    /// The models an OpenAI-compatible server lists, with the context it reports where it does.
+    func listedModels(_ request: URLRequest, transport: any RemoteTransport) async throws -> [RemoteModelInfo] {
+        let response = try await transport.send(request)
+        var body = [String]()
+        for try await line in response.lines { body.append(line) }
+        let data = Data(body.joined(separator: "\n").utf8)
+        guard response.status == 200 else { throw ChatCompletionsAPI().error(status: response.status, body: data, headers: response.headers) }
+        let listed = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["data"] as? [[String: Any]] ?? []
+        return listed.compactMap { model -> RemoteModelInfo? in
+            guard let modelID = model["id"] as? String,
+                  RemoteModelID("remote/\(id)/\(UUID().uuidString.lowercased())/\(modelID)") != nil else { return nil }
+            // Servers such as TensorFold and vLLM report the context they actually serve.
+            guard let context = (model["context_length"] ?? model["max_model_len"]) as? Int, context > 0 else {
+                return .custom(id: modelID)
+            }
+            return .custom(id: modelID, contextSize: context, maximumOutputTokens: min(context / 4, 8_192))
+        }
+    }
+}
+
 /// Any server with an OpenAI-compatible Chat Completions API, at the account's
 /// own address. Such a server names its models but cannot say what they can
 /// do, so the person describes each one they add.
@@ -295,6 +347,7 @@ public final class CustomProvider: RemoteProvider, @unchecked Sendable {
     }
 
     public override var requiresKey: Bool { false }
+    public override var acceptsKey: Bool { true }
     public override var describesModels: Bool { true }
 
     /// An address requests can go to, or an error saying what is wrong with it.
@@ -308,15 +361,7 @@ public final class CustomProvider: RemoteProvider, @unchecked Sendable {
     /// The server's models with default details, to choose from rather than type.
     public override func findModels(apiKey: String = "",
                                     transport: any RemoteTransport = URLSessionRemoteTransport()) async throws -> [RemoteModelInfo] {
-        let response = try await transport.send(modelsRequest(apiKey: apiKey))
-        var body = [String]()
-        for try await line in response.lines { body.append(line) }
-        let data = Data(body.joined(separator: "\n").utf8)
-        guard response.status == 200 else { throw ChatCompletionsAPI().error(status: response.status, body: data, headers: response.headers) }
-        let listed = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["data"] as? [[String: Any]] ?? []
-        return listed.compactMap { $0["id"] as? String }
-            .filter { RemoteModelID("remote/\(id)/\(UUID().uuidString.lowercased())/\($0)") != nil }
-            .map { RemoteModelInfo.custom(id: $0) }
+        try await listedModels(modelsRequest(apiKey: apiKey), transport: transport)
     }
 
     /// A server without a model list is let through; only a refused key stops the account.
@@ -333,6 +378,10 @@ public final class CustomProvider: RemoteProvider, @unchecked Sendable {
     }
 
     private func modelsRequest(apiKey: String) -> URLRequest {
+        CustomProvider.modelsRequest(baseURL: baseURL, apiKey: apiKey)
+    }
+
+    static func modelsRequest(baseURL: URL, apiKey: String) -> URLRequest {
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 30
@@ -343,7 +392,7 @@ public final class CustomProvider: RemoteProvider, @unchecked Sendable {
 public enum RemoteProviders {
     /// The custom entry stands for every custom server; its address is only an example.
     public static let all: [RemoteProvider] = [OpenAIProvider(), OpenRouterProvider(), VercelAIGatewayProvider(), OllamaProvider(),
-                                               CustomProvider(baseURL: URL(string: "http://localhost:8000/v1")!)]
+                                               TensorFoldProvider(), CustomProvider(baseURL: URL(string: "http://localhost:8000/v1")!)]
     public static func provider(id: String) -> RemoteProvider? { all.first { $0.id == id } }
 
     /// The provider an account reaches: a custom one only at the account's own address.

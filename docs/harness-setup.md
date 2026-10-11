@@ -220,6 +220,8 @@ Intelligence to be turned on. Noodle offers:
   Pro, DeepSeek V4.1 Flash, Qwen3.8 Max Prime and Qwen3.8 Flash.
 - **Ollama:** the models you have downloaded in Ollama on this Mac that can use
   tools. It needs no API key.
+- **TensorFold:** the models a TensorFold server on this Mac serves, at its
+  default address. The API key is optional.
 - **Custom:** any server with an OpenAI-compatible Chat Completions API, such as
   vLLM, LM Studio, LiteLLM or llama.cpp, at the address you enter. The API key
   is optional.
@@ -232,7 +234,8 @@ Intelligence to be turned on. Noodle offers:
    **Add Model** in its menu instead and describe the model: its ID as the
    server names it, its context and output limits, whether it accepts images and
    which reasoning levels it supports. The ID can be picked from the models the
-   server lists. The model must be able to call tools.
+   server lists; if the server reports a model's context, as vLLM and TensorFold
+   do, picking it fills in the limits. The model must be able to call tools.
 4. Edit a bot, choose Apple Intelligence, and select the model. Each model shows
    its account as a tag, and its reasoning effort can be chosen.
 
@@ -240,6 +243,8 @@ Intelligence to be turned on. Noodle offers:
   another model. Noodle uses the context length set on the model, or at most
   32,768 tokens; set Ollama's context length at least that high, because Ollama
   drops the start of a longer conversation without saying so.
+- For a TensorFold account, choose **Refresh Models** in its menu after serving
+  another model. Noodle uses the context TensorFold reports for each model.
 - The key is passed only to the bots that use the account. Only the bot's
   harness reaches the provider; the commands the bot runs stay offline.
 - Usage is billed to the account by the provider.

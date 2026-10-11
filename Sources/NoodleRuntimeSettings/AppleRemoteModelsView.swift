@@ -173,7 +173,7 @@ public struct AppleRemoteModelsView: View {
                         Button("Refresh Models") { Task { await refreshModels(account) } }
                     }
                     Button("Rename…") { form = .rename(account) }
-                    if account.provider.map(AccountForm.takesKey) ?? true {
+                    if account.provider?.acceptsKey ?? true {
                         Button("Change API Key…") { form = .key(account) }
                     }
                     Divider()
@@ -263,10 +263,10 @@ public struct AppleRemoteModelsView: View {
     }
 
     /// What the server lists that the account does not have yet; nothing when it cannot be asked.
-    private func suggestions(for account: RemoteModelAccount) async -> [String] {
+    private func suggestions(for account: RemoteModelAccount) async -> [RemoteModelInfo] {
         guard let provider = account.provider, let key = try? storage.apiKey(for: account.id),
               let found = try? await findModels(provider, key) else { return [] }
-        return found.map(\.id).filter { id in !account.models.contains { $0.id == id } }
+        return found.filter { model in !account.models.contains { $0.id == model.id } }
     }
 
     private func refreshModels(_ account: RemoteModelAccount, quietly: Bool = false) async {
@@ -330,9 +330,6 @@ private enum AccountForm: Identifiable {
         case .rename(let account), .key(let account): account.provider
         }
     }
-
-    /// A custom server may or may not want a key.
-    static func takesKey(_ provider: RemoteProvider) -> Bool { provider.requiresKey || provider.describesModels }
 }
 
 private struct AccountFormView: View {
@@ -350,7 +347,7 @@ private struct AccountFormView: View {
     private var asksName: Bool { if case .key = form { false } else { true } }
     private var asksKey: Bool {
         if case .rename = form { return false }
-        return form.provider.map(AccountForm.takesKey) ?? true
+        return form.provider?.acceptsKey ?? true
     }
     private var needsKey: Bool { asksKey && form.provider?.requiresKey ?? true }
     private var asksAddress: Bool { form.isAdd && form.provider?.id == CustomProvider.id }
@@ -457,7 +454,7 @@ private enum ModelForm: Identifiable {
 /// A custom server's model, described by the person because the server cannot.
 private struct ModelFormView: View {
     let form: ModelForm
-    let suggestions: () async -> [String]
+    let suggestions: () async -> [RemoteModelInfo]
     let save: (RemoteModelInfo) throws -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var id = ""
@@ -467,7 +464,7 @@ private struct ModelFormView: View {
     @State private var supportsImages = false
     @State private var efforts: Set<String> = []
     @State private var defaultEffort = ""
-    @State private var found: [String] = []
+    @State private var found: [RemoteModelInfo] = []
     @State private var error: String?
 
     private static let levelNames = ["none": "None", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra High", "max": "Max"]
@@ -486,7 +483,13 @@ private struct ModelFormView: View {
                             TextField("Model ID", text: $id, prompt: Text("llama-3.3-70b")).labelsHidden()
                             if !found.isEmpty {
                                 Menu {
-                                    ForEach(found, id: \.self) { model in Button(model) { id = model } }
+                                    ForEach(found, id: \.id) { model in
+                                        Button(model.id) {
+                                            id = model.id
+                                            contextSize = model.contextSize
+                                            maximumOutputTokens = model.maximumOutputTokens
+                                        }
+                                    }
                                 } label: {
                                     Image(systemName: "chevron.down")
                                 }
