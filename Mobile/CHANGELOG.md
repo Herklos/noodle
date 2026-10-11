@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-11
+
 ### Added
 
 - Image Generation in a bot's settings lets it make pictures with the Hub's image models, and shows the model it would use.

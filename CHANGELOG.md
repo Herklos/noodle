@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-10-11
+
 ### Added
 
 - Kling can be added as a tool.

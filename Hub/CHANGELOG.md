@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-11
+
 ### Added
 
 - Kling can be added as a tool.
