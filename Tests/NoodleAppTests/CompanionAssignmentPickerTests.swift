@@ -82,6 +82,25 @@ import XCTest
         print("BROWSER_ASSIGNMENT_PREVIEW: \(output.path)")
     }
 
+    /// With no computers yet the tab looks as it does with some; the chooser offers New and Open App.
+    func testNoComputersShowsTheUsualAddButton() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = WorkspaceRepository(rootURL: root); try repository.prepare()
+        let computers = ComputerController(repository: repository, applicationLookup: { root }, connection: { _ in
+            var response = ComputerResponse(computers: []); response.capabilities = ComputerCapabilities(); return response
+        })
+        await computers.refresh()
+        let picker = host(ComputerAssignmentPicker(controller: computers, bot: "Fixture", selectedIDs: .constant([])))
+        _ = try await control("Add computers to this bot", in: picker)
+        XCTAssertFalse(hasControl("Open Noodle Computer to create one, then return here to add it.", in: picker))
+        let chooser = host(CompanionAssignmentChooser(title: "Computers", items: [], selectedIDs: .constant([]),
+            search: .constant(""), createPrompt: Text("No computers yet"), openLibraryButton: Button("Open App") {},
+            newTitle: "New Computer"))
+        _ = try await control("New Computer", in: chooser)
+        _ = try await control("Open App", in: chooser)
+    }
+
     /// A bot's profile offers the computers and browsers it is assigned, in catalogue order.
     func testAssignedComputersAndBrowsersAreListedForTheProfile() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

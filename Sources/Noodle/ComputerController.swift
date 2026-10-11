@@ -245,8 +245,8 @@ struct ComputerAssignmentPicker: View {
             items: controller.registry.computers.map {
                 CompanionAssignmentItem(id: $0.id, name: $0.name, state: controller.available ? $0.state : "Unavailable",
                     symbol: $0.symbol, colour: $0.colour, icon: $0.icon, detail: $0.description)
-            }, selectedIDs: $selectedIDs, createPrompt: createPrompt, openLibraryButton: openLibraryButton(compact: true),
-            notice: updateNotice, failure: controller.failure,
+            }, selectedIDs: $selectedIDs, createPrompt: createPrompt,
+            openLibraryButton: Group { if controller.installed { openLibraryButton(compact: true) } }, notice: updateNotice, failure: controller.failure,
             onNew: controller.installed ? { creating = true } : nil,
             onDelete: { item in
                 Task {
@@ -294,11 +294,7 @@ struct ComputerAssignmentPicker: View {
         VStack(spacing: 10) {
             Image(systemName: "desktopcomputer").font(.largeTitle)
             Text(controller.available ? "No computers yet" : "No computers available")
-            Text(controller.installed ? "Open Noodle Computer to create one, then return here to add it." :
-                    "Install Noodle Computer to create your first computer.")
-                .font(.caption).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            if controller.installed { openLibraryButton() }
-            else {
+            if !controller.installed {
                 Button("Get Noodle Computer") { NSWorkspace.shared.open(CompanionApp.computer.installURL) }
                 Text("Apple silicon · macOS 26 or later").font(.caption2)
             }

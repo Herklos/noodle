@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Changed
 
 - The chosen effort in Edit Bot is shown at the same size as its Effort label.
+- Edit Bot's Computers and Browsers tabs look the same when you have none yet: **Add** opens the list, which has **New** and **Open App**.
 
 ### Fixed
 

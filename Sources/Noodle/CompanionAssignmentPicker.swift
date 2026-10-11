@@ -73,16 +73,13 @@ struct CompanionAssignmentPicker<Prompt: View, LibraryButton: View, Notice: View
             notice
             ScrollView {
                 if selected.isEmpty {
-                    if items.isEmpty { createPrompt.padding(.vertical, 24) }
-                    else {
-                        Button { search = ""; showingAdd = true } label: {
-                            VStack(spacing: 10) {
-                                Image(systemName: symbol).font(.largeTitle)
-                                Text("Add \(title.lowercased()) to this bot")
-                            }.foregroundStyle(.secondary).frame(maxWidth: .infinity)
-                                .padding(.vertical, 32).contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityLabel("Add \(title.lowercased()) to this bot")
-                    }
+                    Button { search = ""; showingAdd = true } label: {
+                        VStack(spacing: 10) {
+                            Image(systemName: symbol).font(.largeTitle)
+                            Text("Add \(title.lowercased()) to this bot")
+                        }.foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                            .padding(.vertical, 32).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityLabel("Add \(title.lowercased()) to this bot")
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 12)], spacing: 16) {
                         ForEach(selected) { item in
@@ -184,7 +181,7 @@ struct CompanionAssignmentChooser<Prompt: View, LibraryButton: View>: View {
             }
             HStack {
                 if let newTitle { Button(action: onNew) { Label("New", systemImage: "plus") }.help(newTitle).accessibilityLabel(newTitle) }
-                if !items.isEmpty { openLibraryButton }
+                openLibraryButton
                 Spacer()
             }
         }.padding(16).frame(width: 300, height: 280)
