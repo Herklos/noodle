@@ -347,9 +347,6 @@ final class WindowsGPU: NSObject, VZCustomVirtioDeviceConfigurationDelegate, VZC
     private var size = WindowsGPU.screen
     /// A size change waits in events_read until the driver asks for the display again.
     private var displayChanged = false
-    /// Lets the firmware draw too, for looking at the boot screens while diagnosing an install. VZ may then
-    /// crash when Windows takes over, so it is never on otherwise.
-    var servesFirmware = false
     var onFrame: (@Sendable (CGImage) -> Void)?
     var onGuestReboot: (@Sendable () -> Void)?
     /// How many capsets the config space offers: none without 3D.
@@ -463,7 +460,7 @@ final class WindowsGPU: NSObject, VZCustomVirtioDeviceConfigurationDelegate, VZC
         var body = Data()
         var reply: UInt32 = 0x1100 // OK_NODATA
         // The firmware is refused everything, so it builds no boot display to tear down.
-        switch firmware && !servesFirmware ? 0 : u32(0) {
+        switch firmware ? 0 : u32(0) {
         case 0x0100: // GET_DISPLAY_INFO
             reply = 0x1101
             body = Self.words(0, 0, UInt32(size.width), UInt32(size.height), 1, 0) + Data(count: 15 * 24)
