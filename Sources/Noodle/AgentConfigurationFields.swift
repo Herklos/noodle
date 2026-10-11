@@ -650,7 +650,7 @@ struct EffortControl: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text(selectionName)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.caption)
                         .foregroundStyle(selection.isEmpty ? Color.secondary : Color.accentColor)
                 }
 

@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- The chosen effort in Edit Bot is shown at the same size as its Effort label.
+
 ### Fixed
 
 - A bot no longer stops partway through its work when the Mac runs low on memory. macOS was closing the helper that runs bots, which ended the bot's current reply.
