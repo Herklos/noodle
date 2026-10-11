@@ -20,7 +20,6 @@ public final class HarnessSelection {
 
     public init(defaults: UserDefaults) {
         self.defaults = defaults
-        Self.keepEarlierHarnessesOn(in: defaults)
         choices = defaults.dictionary(forKey: Self.defaultsKey) as? [String: Bool] ?? [:]
     }
 
@@ -30,19 +29,5 @@ public final class HarnessSelection {
         guard isOn(provider) != on else { return }
         choices[provider.rawValue] = on
         defaults?.set(choices, forKey: Self.defaultsKey)
-    }
-
-    // TODO(0.54.0): remove with its call in init(defaults:) and
-    // HarnessSelectionTests.testAnEarlierInstallKeepsEveryHarnessOn. Milestone: 0.53.0.
-    // TODO(Hub 0.26.0): same removal for the Hub. Milestone: Hub 0.25.0.
-    /// Every harness was on before they could be turned off, so a Mac that already
-    /// set one up or ran a bot keeps them all; only a new install gets the defaults.
-    private static func keepEarlierHarnessesOn(in defaults: UserDefaults) {
-        guard defaults.object(forKey: defaultsKey) == nil else { return }
-        let earlier = [HarnessPresentationCache.defaultsKey, "Noodle.session.startDates"]
-        // Saved even when empty, so the next launch does not take this install for an earlier one.
-        defaults.set(earlier.contains(where: { defaults.object(forKey: $0) != nil })
-            ? Dictionary(uniqueKeysWithValues: HarnessProvider.allCases.map { ($0.rawValue, true) }) : [String: Bool](),
-            forKey: defaultsKey)
     }
 }

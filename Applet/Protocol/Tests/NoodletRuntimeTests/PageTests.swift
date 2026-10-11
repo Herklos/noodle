@@ -279,32 +279,6 @@ final class MemoryStore: NoodletStore, @unchecked Sendable {
     }
     #endif
 
-    // TODO(Applet 0.30.0): remove with NoodletPage.moveLocalStorageFromFiles. Milestone: Applet 0.29.0.
-    /// What a noodlet kept in localStorage when its package loaded from `file://` is still there
-    /// once it loads as its own site.
-    func testWhatAPageKeptInLocalStorageMovesToThePackageSite() async throws {
-        let id = UUID()
-        addTeardownBlock { @MainActor in try? await WKWebsiteDataStore.remove(forIdentifier: id) }
-        let (old, _, root) = try page(files: ["index.html": "<title>Old</title>"])
-        let before = WKWebViewConfiguration()
-        before.websiteDataStore = WKWebsiteDataStore(forIdentifier: id)
-        let web = WKWebView(frame: .zero, configuration: before)
-        web.loadFileURL(root.appendingPathComponent("index.html"), allowingReadAccessTo: root)
-        try await until { !web.isLoading && web.url != nil }
-        _ = try await web.callAsyncJavaScript("localStorage.setItem('best', '42'); localStorage.setItem('name', 'Ada')",
-                                              contentWorld: .page)
-        old.stop()
-
-        try await NoodletPage.moveLocalStorageFromFiles(in: WKWebsiteDataStore(forIdentifier: id))
-
-        let page = NoodletPage(root: root, manifest: NoodletManifest(title: "Page"), store: MemoryStore(),
-                               dataStore: WKWebsiteDataStore(forIdentifier: id)) { _, _ in }
-        defer { page.stop() }
-        try await page.load()
-        let kept = try await page.evaluate("return [localStorage.getItem('best'), localStorage.getItem('name')]")
-        XCTAssertEqual(kept, #"["42","Ada"]"#)
-    }
-
     /// Each script gets SharedArrayBuffer first, without losing its strictness or moving a line;
     /// a range asks for bytes the file has, or for none.
     nonisolated func testPackageScriptsAndRangesAreServedAsAsked() {

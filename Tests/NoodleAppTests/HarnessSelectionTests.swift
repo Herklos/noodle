@@ -17,23 +17,6 @@ import XCTest
         XCTAssertEqual(FirstBotSetup.featured, HarnessProvider.allCases.filter(\.isOnByDefault))
     }
 
-    func testANewInstallKeepsItsDefaultsOnceItHasBeenUsed() {
-        let defaults = defaults()
-        _ = HarnessSelection(defaults: defaults)
-        defaults.set([UUID().uuidString: Date().timeIntervalSince1970], forKey: "Noodle.session.startDates")
-        XCTAssertFalse(HarnessSelection(defaults: defaults).isOn(.fx))
-    }
-
-    func testAnEarlierInstallKeepsEveryHarnessOn() {
-        let settingsOpened = defaults(), botsRan = defaults()
-        HarnessPresentationCache.save([.fx: .init(installation: .init(provider: .fx, executablePath: "/fixtures/fx"),
-                                                  authentication: .authenticated)], to: settingsOpened)
-        botsRan.set([UUID().uuidString: Date().timeIntervalSince1970], forKey: "Noodle.session.startDates")
-        for earlier in [settingsOpened, botsRan] {
-            XCTAssertEqual(HarnessProvider.allCases.filter(HarnessSelection(defaults: earlier).isOn), HarnessProvider.allCases)
-        }
-    }
-
     func testChoicesAreKept() {
         let defaults = defaults()
         let selection = HarnessSelection(defaults: defaults)
