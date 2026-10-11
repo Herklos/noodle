@@ -15,6 +15,7 @@ All notable changes to Noodle are documented here, following
 
 - Settings and sheets no longer bounce when you scroll them while everything already fits; only content taller than the window scrolls.
 - A bot no longer stops partway through its work when the Mac runs low on memory. macOS was closing the helper that runs bots, which ended the bot's current reply.
+- The scrollbar in a voice call's transcript popover stays clear of its rounded corners.
 
 ## [0.56.1] - 2026-10-11
 

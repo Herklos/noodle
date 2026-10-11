@@ -191,6 +191,8 @@ struct VoiceCallTranscript: View {
             .padding(14)
         }
         .defaultScrollAnchor(.bottom)
+        // Keep the scrollbar clear of the popover's rounded corners.
+        .contentMargins(.vertical, 16, for: .scrollIndicators)
         .frame(width: 340, height: 300)
     }
 }
