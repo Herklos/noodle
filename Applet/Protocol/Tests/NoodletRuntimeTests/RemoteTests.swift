@@ -98,6 +98,27 @@ final class RemoteTests: XCTestCase {
         } catch {}
     }
 
+    /// While a new revision downloads, the one this device had can be played; it stays until the
+    /// noodlet next opens, so the page reading it keeps its files.
+    func testTheCacheKeepsTheRevisionItHadWhileANewOneArrives() async throws {
+        let archive = try folder().appendingPathComponent("a")
+        try NoodletArchive.write(entries: [("noodlet.json", Data("{}".utf8)), ("index.html", Data(repeating: 7, count: 3000))], to: archive)
+        let bytes = try Data(contentsOf: archive)
+        let cache = NoodletCache(root: try folder())
+        let fetch: @Sendable (Int) async throws -> Data = { bytes.subdata(in: $0..<min(bytes.count, $0 + 100)) }
+        let id = UUID()
+        XCTAssertNil(cache.downloaded(id, except: "abc1"))
+        let first = try await cache.package(id, revision: "abc1", byteCount: bytes.count, fetch: fetch)
+        XCTAssertNil(cache.downloaded(id, except: "abc1"), "offered the revision it was asked for")
+        XCTAssertEqual(cache.downloaded(id, except: "abc2")?.standardizedFileURL, first.standardizedFileURL)
+        let second = try await cache.package(id, revision: "abc2", byteCount: bytes.count, keepingOthers: true, fetch: fetch)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.appendingPathComponent("index.html").path))
+        XCTAssertNil(cache.downloaded(id, except: "abc2"), "offered an older revision once the new one was in")
+        _ = try await cache.package(id, revision: "abc2", byteCount: bytes.count, fetch: fetch)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.appendingPathComponent("noodlet.json").path))
+    }
+
     private final class Arrivals: @unchecked Sendable {
         private let lock = NSLock()
         private var seen: [NoodletArrival] = []

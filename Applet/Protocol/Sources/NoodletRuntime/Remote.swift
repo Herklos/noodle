@@ -157,8 +157,9 @@ public struct NoodletCache: Sendable {
     /// The noodlet's folder at `revision`, fetching its archive piece by piece from `offset` when
     /// this device does not have it yet, and telling `progress` how far it has come. A piece that
     /// fails, as when a phone locks and its connection drops, is asked for again after each of
-    /// `pauses`, keeping what arrived.
-    public func package(_ id: UUID, revision: String, byteCount: Int,
+    /// `pauses`, keeping what arrived. Older revisions stay when `keepingOthers`, as while one of
+    /// them plays, and go the next time the noodlet opens.
+    public func package(_ id: UUID, revision: String, byteCount: Int, keepingOthers: Bool = false,
                         pauses: [Duration] = [.seconds(1), .seconds(3), .seconds(10)],
                         progress: @Sendable (NoodletArrival) -> Void = { _ in },
                         fetch: @Sendable (_ offset: Int) async throws -> Data) async throws -> URL {
@@ -201,10 +202,22 @@ public struct NoodletCache: Sendable {
             progress(.unpacking)
             try NoodletArchive.extract(download, to: package)
         }
+        if keepingOthers { return package }
         for old in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] where old != revision && !old.hasPrefix(".") {
             try? fm.removeItem(at: folder.appendingPathComponent(old))
         }
         return package
+    }
+
+    /// A whole revision of the noodlet this device has other than `revision`, to play while that
+    /// one downloads; none once it has `revision` too.
+    public func downloaded(_ id: UUID, except revision: String) -> URL? {
+        let folder = root.appendingPathComponent(id.uuidString.lowercased())
+        guard !FileManager.default.fileExists(atPath: folder.appendingPathComponent(revision).appendingPathComponent("noodlet.json").path) else { return nil }
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+            .filter { $0 != revision && !$0.hasPrefix(".") }
+            .map { folder.appendingPathComponent($0) }
+            .first { FileManager.default.fileExists(atPath: $0.appendingPathComponent("noodlet.json").path) }
     }
 }
 

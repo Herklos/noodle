@@ -129,6 +129,13 @@ struct NoodletDeviceScreen: View {
     @State private var host: NoodletDeviceHost?
     @State private var failure: String?
     @State private var arrival: NoodletArrival?
+    /// While a new revision downloads, plays the one this phone had instead.
+    @State private var playPrevious: (() -> Void)?
+    /// The new revision's download, going on while the previous one plays.
+    @State private var download: Task<Void, Never>?
+    @State private var playingPrevious = false
+    /// Shown for a few seconds once the new revision is in while the previous one plays.
+    @State private var newVersionReady = false
     /// Whether the page has drawn and the loading screen over it has gone.
     @State private var revealed = false
     @State private var showsControls = true
@@ -250,6 +257,14 @@ struct NoodletDeviceScreen: View {
                     backdrop
                     if let failure { Text(failure).foregroundStyle(.secondary).padding() } else {
                         NoodletLoadingView(page != nil ? .starting : arrival.map(NoodletLoadingView.Stage.arriving) ?? .starting)
+                            // Under the card, so it moves nothing when it goes.
+                            .overlay(alignment: .bottom) {
+                                if let playPrevious, page == nil, arrival != .unpacking {
+                                    Button("Play Previous Version", action: playPrevious)
+                                        .buttonStyle(.glass)
+                                        .alignmentGuide(.bottom) { $0[.top] }
+                                }
+                            }
                     }
                 }
                 .ignoresSafeArea()
@@ -263,6 +278,19 @@ struct NoodletDeviceScreen: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Under the buttons that float over the top corners of a full-screen page.
             .overlay(alignment: .topTrailing) { SurfaceNoticeView(onTV || !revealed ? nil : page?.activity.notice).padding(.top, fullScreen ? 44 : 0) }
+            .overlay(alignment: .top) {
+                if newVersionReady && !onTV {
+                    Label("New version ready for next time", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .glassEffect()
+                        .padding(.top, fullScreen ? 56 : 12)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.default, value: newVersionReady)
             .overlay(alignment: .top) {
                 if fullScreen {
                     HStack {
@@ -312,7 +340,7 @@ struct NoodletDeviceScreen: View {
             KeepAwake.set(awake)
         }
         .onDisappear {
-            answer(false); hardware.detach(); lender.stop(); page?.stop(); NoodletSound.stop(); ScreenOrientation.hold(nil)
+            answer(false); download?.cancel(); hardware.detach(); lender.stop(); page?.stop(); NoodletSound.stop(); ScreenOrientation.hold(nil)
             KeepAwake.set(false)
         }
     }
@@ -328,11 +356,34 @@ struct NoodletDeviceScreen: View {
 
     private func start() async {
         do {
-            let session = session
-            let root = try await NoodletCache(root: chats.noodletCache).package(
-                noodlet.noodletID, revision: noodlet.revision, byteCount: noodlet.byteCount,
-                progress: { next in Task { @MainActor in arrival = next } }
-            ) { try await session.archive(from: $0) }
+            let session = session, noodlet = noodlet
+            let cache = NoodletCache(root: chats.noodletCache)
+            // A large noodlet that changed takes a while to download again; the person may play the
+            // revision they had meanwhile, and the new one is there the next time it opens.
+            let previous = cache.downloaded(noodlet.noodletID, except: noodlet.revision)
+            let (roots, ready) = AsyncThrowingStream.makeStream(of: URL.self)
+            download = Task {
+                do {
+                    ready.yield(try await cache.package(
+                        noodlet.noodletID, revision: noodlet.revision, byteCount: noodlet.byteCount, keepingOthers: previous != nil,
+                        progress: { next in Task { @MainActor in arrival = next } }
+                    ) { try await session.archive(from: $0) })
+                    ready.finish()
+                    if playingPrevious {
+                        newVersionReady = true
+                        try? await Task.sleep(for: .seconds(4))
+                        newVersionReady = false
+                    }
+                } catch {
+                    if previous != nil { Self.log.error("The new revision did not download: \(error.localizedDescription, privacy: .public)") }
+                    ready.finish(throwing: error)
+                }
+            }
+            if let previous { playPrevious = { playingPrevious = true; ready.yield(previous) } }
+            var first: URL?
+            for try await root in roots { first = root; break }
+            playPrevious = nil
+            guard let root = first else { throw CancellationError() }
             // The files it came with say how it runs; the Hub's copy of the manifest only chose where.
             let manifest = try JSONDecoder().decode(NoodletManifest.self, from: Data(contentsOf: root.appendingPathComponent("noodlet.json")))
             try manifest.validate()

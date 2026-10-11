@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- While a changed noodlet downloads again, Play Previous Version plays the one already on the phone; the new one keeps downloading, says when it is ready, and opens next time.
+
+### What to Test
+
+- Open a large noodlet game, have its bot change it, open it again, tap Play Previous Version while it downloads, and check the old one plays. Keep playing until "New version ready for next time" shows, then close it, open it again and check the new one starts without downloading.
+
 ## [0.30.0] - 2026-10-11
 
 ### Added
