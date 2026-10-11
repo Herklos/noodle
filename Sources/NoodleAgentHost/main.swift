@@ -258,6 +258,7 @@ private final class HostSession: NSObject, AgentHostService {
     private weak var connection: NSXPCConnection?
     private let queue = DispatchQueue(label: "Noodle.agent-host-session")
     private var process: Process?
+    private var activity: HostActivity.Hold?
     private var accountProcess: Process?
     private var codexAccount: Task<Void, Never>?
     private var input: ProcessInputWriter?
@@ -401,6 +402,7 @@ private final class HostSession: NSObject, AgentHostService {
                 SharedLogins.shared.add(self, provider: provider, workspace: workspace, loginHome: loginHome,
                                         restricted: restricted, executable: executable)
                 self.process = child
+                self.activity = HostActivity.shared.hold()
                 self.groupID = child.processIdentifier
                 self.input = ProcessInputWriter(handle: stdinPipe.fileHandleForWriting)
                 reply(child.processIdentifier, nil)
@@ -440,7 +442,7 @@ private final class HostSession: NSObject, AgentHostService {
                 ProcessExitConfirmation.wait(process: self.process, groupID: id, queue: self.queue) { stopped in
                     self.outputs.forEach { $0.readabilityHandler = nil }
                     self.outputs = []
-                    if stopped { self.groupID = nil; self.process = nil }
+                    if stopped { self.groupID = nil; self.process = nil; self.activity = nil }
                     self.finishStop(stopped)
                 }
             }
