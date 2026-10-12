@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-10-12
+
 ### Added
 
 - You can drop a picture from Finder or a browser onto the icon editor for a bot or your Hub picture to use it as the icon, as you already could for backgrounds.
@@ -17,6 +19,10 @@ All notable changes to Noodle are documented here, following
 - Edit Bot explains what a bot's backstory is for, and the Backstory and MCP Instructions boxes look like the other text fields.
 - After a bot sends a message, Messenger tells it whether unread messages are still waiting, or asks it to finish anything it left open, so bots follow up instead of stopping after one reply.
 - Bots no longer see website forms marked up as WebMCP tools; they fill such forms like any other. Only tools a site registers in JavaScript are offered.
+
+### Fixed
+
+- Clicking into a window from another app with the trackpad no longer leaves the window ignoring clicks for a while. The sidebar, buttons and everything else could stop responding until macOS gave up waiting for the first click to finish.
 
 ## [0.58.0] - 2026-10-12
 
@@ -32,7 +38,6 @@ All notable changes to Noodle are documented here, following
 - A Codex bot on a voice call can save files and run its tools again. Once Codex had restarted, every command it tried during a call was blocked.
 - A sheet such as Edit Bot can no longer get stuck on screen after the window it belonged to has gone. Its Cancel and Save did nothing and only quitting Noodle removed it; such a sheet now closes on its own.
 - The bars while you record a voice message scroll at a steady speed instead of slowing down and speeding up.
-- Clicking into a window from another app with the trackpad no longer leaves the window ignoring clicks for a while. The sidebar, buttons and everything else could stop responding until macOS gave up waiting for the first click to finish.
 
 ## [0.57.0] - 2026-10-12
 

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-12
+
 ### Added
 
 - Bots can schedule their own wake-ups, with a note on what to do then, to come back to work they are waiting on. At most three wait at once, and a bot that has woken itself twelve times in a row waits until someone writes to it.

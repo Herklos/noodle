@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-12
+
 ### Added
 
 - You can drop a picture from Finder or a browser onto the browser's icon editor to use it as its icon, as you already could for backgrounds.
@@ -19,13 +21,13 @@
 
 - Sites now recognise the browser as Safari, so they serve their full pages instead of reduced or broken ones.
 - Pages that change their title often, such as LinkedIn, no longer make the browser sluggish by saving every change straight away.
+- Clicking into a window from another app with the trackpad no longer leaves the window ignoring clicks for a while. The sidebar, buttons and everything else could stop responding until macOS gave up waiting for the first click to finish.
 
 ## [0.16.2] - 2026-10-12
 
 ### Fixed
 
 - A sheet can no longer get stuck on screen after the window it belonged to has gone. Its buttons did nothing and only quitting removed it; such a sheet now closes on its own.
-- Clicking into a window from another app with the trackpad no longer leaves the window ignoring clicks for a while. The sidebar, buttons and everything else could stop responding until macOS gave up waiting for the first click to finish.
 
 ## [0.16.1] - 2026-10-12
 
