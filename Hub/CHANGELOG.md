@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Inkbox can be added as a tool.
+
 ## [0.28.2] - 2026-10-12
 
 ### Fixed

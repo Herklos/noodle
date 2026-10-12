@@ -52,6 +52,7 @@ under a uniform `.icon` extension. They are bundled, never remotely fetched by t
 | hex.icon (2026-10-06) | https://hex.tech/favicon.svg (rendered to PNG) |
 | higgsfield.icon | https://higgsfield.ai/icon.png |
 | honeycomb.icon (2026-10-06) | https://www.honeycomb.io/favicon.ico |
+| inkbox.icon (2026-10-12) | https://inkbox.ai/static/favicons/logo-inkbox-icon.png |
 | intercom.icon (2026-10-06) | https://www.intercom.com/intercom-marketing-site/favicons/favicon-32x32.png |
 | jam.icon | https://framerusercontent.com/images/PJzGWvCk8HH9Ho4kUWVsQtYI.png |
 | jotform.icon | https://cdn.jotfor.ms/assets/img/favicons/favicon-2021-light.png |
