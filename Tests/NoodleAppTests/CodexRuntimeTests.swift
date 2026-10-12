@@ -25,6 +25,9 @@ import XCTest
             XCTAssertEqual(wire.launches.first?.1, extended)
             let params = try XCTUnwrap(wire.last("thread/start")["params"] as? [String: Any])
             XCTAssertEqual(params["approvalPolicy"] as? String, extended ? "on-request" : "never")
+            // Turns a voice call starts carry no policy and use the thread's
+            // sandbox mode; inside the app sandbox Codex cannot nest its own.
+            XCTAssertEqual(params["sandbox"] as? String, extended ? "workspace-write" : "danger-full-access")
             p.heartbeat(); try wire.reply("turn/start", result: ["turn": ["id": "turn-one"]])
             try await f.wait { f.heartbeats == 1 }
             let turn = try XCTUnwrap(wire.last("turn/start")["params"] as? [String: Any])
@@ -34,6 +37,8 @@ import XCTest
             let next = HarnessWire(), restarted = f.codex(next, extended: extended)
             restarted.start(); try await f.openCodex(next, resuming: true)
             XCTAssertEqual(next.count("thread/start"), 0)
+            let resumed = try XCTUnwrap(next.last("thread/resume")["params"] as? [String: Any])
+            XCTAssertEqual(resumed["sandbox"] as? String, extended ? "workspace-write" : "danger-full-access")
             XCTAssertEqual(restarted.snapshot.phase, .ready)
         }
     }

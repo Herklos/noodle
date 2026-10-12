@@ -519,7 +519,10 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         var params: [String: Any] = [
             "cwd": workspaceURL.path,
             "approvalPolicy": extendedAccess ? "on-request" : "never",
-            "sandbox": "workspace-write",
+            // Turns a voice call starts get no sandboxPolicy and fall back to this
+            // mode. Inside the app sandbox Codex cannot apply its own, so leave
+            // the app sandbox as the only one, as externalSandbox turns do.
+            "sandbox": extendedAccess ? "workspace-write" : "danger-full-access",
             "serviceName": "noodle"
         ]
         if let model = configuration.modelIdentifier { params["model"] = model }
