@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- You can drop a picture from Finder or a browser onto a computer's icon editor to use it as its icon, as you already could for backgrounds.
+
 ## [0.27.1] - 2026-10-12
 
 ### Fixed

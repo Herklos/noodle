@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 /// Resolve browser and Finder drops into the same owned media used by the picker.
 public enum BackgroundDrop {
     public static let contentTypes: [UTType] = [.fileURL, .image, .movie, .url]
+    public static let imageContentTypes: [UTType] = [.fileURL, .image, .url]
     static let maximumBytes: Int64 = 1_073_741_824
 
     public static func accepts(_ provider: NSItemProvider) -> Bool {
@@ -11,13 +12,19 @@ public enum BackgroundDrop {
     }
 
     public static func load(_ provider: NSItemProvider, configuration: URLSessionConfiguration = .ephemeral) async throws -> PreparedBackgroundFile {
+        try await load(provider, configuration: configuration) { try await PreparedBackgroundFile.prepare($0) }
+    }
+
+    /// Stage the dropped media as a local file for `prepare`, which reads it before the staged copy is removed.
+    public static func load<Prepared>(_ provider: NSItemProvider, configuration: URLSessionConfiguration = .ephemeral,
+                                      prepare: (URL) async throws -> Prepared) async throws -> Prepared {
         try Task.checkCancellation()
         var failure: Error = ConversationBackgroundError.invalidMedia
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             do {
                 let url = try await loadURL(provider)
                 guard url.isFileURL else { throw ConversationBackgroundError.invalidMedia }
-                return try await PreparedBackgroundFile.prepare(url)
+                return try await prepare(url)
             } catch { failure = error }
         }
 
@@ -28,14 +35,14 @@ public enum BackgroundDrop {
             .sorted { priority($0) < priority($1) }
         for type in types {
             try Task.checkCancellation()
-            do { return try await loadMedia(provider, type: type) }
+            do { return try await loadMedia(provider, type: type, prepare: prepare) }
             catch { failure = error }
         }
         try Task.checkCancellation()
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
             let url = try await loadURL(provider)
-            if url.isFileURL { return try await PreparedBackgroundFile.prepare(url) }
-            return try await loadRemote(url, configuration: configuration)
+            if url.isFileURL { return try await prepare(url) }
+            return try await loadRemote(url, configuration: configuration, prepare: prepare)
         }
         throw failure
     }
@@ -55,7 +62,8 @@ public enum BackgroundDrop {
         }
     }
 
-    private static func loadMedia(_ provider: NSItemProvider, type: UTType) async throws -> PreparedBackgroundFile {
+    private static func loadMedia<Prepared>(_ provider: NSItemProvider, type: UTType,
+                                            prepare: (URL) async throws -> Prepared) async throws -> Prepared {
         let directory = try stagingDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let suffix = type.preferredFilenameExtension
@@ -87,10 +95,15 @@ public enum BackgroundDrop {
             try data.write(to: target, options: .atomic)
         }
         try Task.checkCancellation()
-        return try await PreparedBackgroundFile.prepare(target)
+        return try await prepare(target)
     }
 
     static func loadRemote(_ url: URL, configuration: URLSessionConfiguration = .ephemeral) async throws -> PreparedBackgroundFile {
+        try await loadRemote(url, configuration: configuration) { try await PreparedBackgroundFile.prepare($0) }
+    }
+
+    private static func loadRemote<Prepared>(_ url: URL, configuration: URLSessionConfiguration,
+                                             prepare: (URL) async throws -> Prepared) async throws -> Prepared {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
             throw BackgroundDropError.directMediaRequired
         }
@@ -120,7 +133,7 @@ public enum BackgroundDrop {
         let target = directory.appendingPathComponent("media").appendingPathExtension(suffix)
         try FileManager.default.moveItem(at: download, to: target)
         try Task.checkCancellation()
-        do { return try await PreparedBackgroundFile.prepare(target) }
+        do { return try await prepare(target) }
         catch is CancellationError { throw CancellationError() }
         catch { throw BackgroundDropError.directMediaRequired }
     }

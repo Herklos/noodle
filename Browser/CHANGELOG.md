@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- You can drop a picture from Finder or a browser onto the browser's icon editor to use it as its icon, as you already could for backgrounds.
+
 ### Changed
 
 - Tabs out of sight slow down as they do in Safari, so many open tabs no longer keep the browser busy.

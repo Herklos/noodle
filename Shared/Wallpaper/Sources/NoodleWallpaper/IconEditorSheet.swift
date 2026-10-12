@@ -23,6 +23,8 @@ public struct IconEditorSheet: View {
     @State private var photoSelection: PhotosPickerItem?
     @State private var isLoadingImage = false
     @State private var takingPhoto = false
+    @State private var isDropTargeted = false
+    @State private var dropTask: Task<Void, Never>?
 
     /// With `initials`, a person's: they come first among the symbols, chosen as no symbol. `takesPhotos`
     /// offers the camera, which only a person's picture does.
@@ -44,6 +46,10 @@ public struct IconEditorSheet: View {
             Divider()
             VStack(spacing: 18) {
                 IconBadge(appearance: draft, symbol: symbol, size: 104, initials: initials)
+                    .overlay {
+                        Circle().inset(by: -5)
+                            .strokeBorder(isDropTargeted && !isLoadingImage ? Color.accentColor : .clear, lineWidth: 3)
+                    }
                     .padding(.top, 4)
                 GroupBox("Image") {
                     VStack(spacing: 8) {
@@ -102,6 +108,8 @@ public struct IconEditorSheet: View {
                 }
             }.padding(20)
         }.frame(width: 440).controlSize(.regular)
+            .onDrop(of: BackgroundDrop.imageContentTypes, isTargeted: $isDropTargeted, perform: drop)
+            .onDisappear { dropTask?.cancel(); dropTask = nil }
             .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.image]) { result in
                 switch result {
                 case .success(let url): loadImage(url)
@@ -134,6 +142,17 @@ public struct IconEditorSheet: View {
                 .background(selected ? Color.accentColor : Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
                 .foregroundStyle(selected ? Color.white : .primary)
         }.buttonStyle(.plain)
+    }
+
+    private func drop(_ providers: [NSItemProvider]) -> Bool {
+        guard !isLoadingImage, let provider = providers.first(where: { provider in
+            BackgroundDrop.imageContentTypes.contains { provider.hasItemConformingToTypeIdentifier($0.identifier) }
+        }) else { return false }
+        let encoding = encoding
+        dropTask = Task {
+            await load { try await BackgroundDrop.load(provider) { try IconImage.load($0, encoding: encoding) } }
+        }
+        return true
     }
 
     private func loadImage(_ url: URL) {

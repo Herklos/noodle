@@ -8,6 +8,7 @@ All notable changes to Noodle are documented here, following
 
 ### Added
 
+- You can drop a picture from Finder or a browser onto the icon editor for a bot or your Hub picture to use it as the icon, as you already could for backgrounds.
 - Bots can schedule their own wake-ups, with a note on what to do then, to come back to work they are waiting on. At most three wait at once, and a bot that has woken itself twelve times in a row waits until someone writes to it.
 
 ### Changed
