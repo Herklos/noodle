@@ -721,8 +721,8 @@ private struct BotBackstoryEditor: View {
                 if backstory.isEmpty {
                     Text("Describe who this bot is, its role, tone, or priorities…")
                         .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 9)
+                        .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                        .padding(.horizontal, 7)
                         // Match the editor's outer inset; the native text view
                         // contributes its own horizontal line-fragment padding.
                         .padding(.vertical, 4)

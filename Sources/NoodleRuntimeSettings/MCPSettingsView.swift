@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import NoodleCore
 
@@ -277,14 +278,45 @@ public struct MCPConnectionIcon: View {
 }
 
 public extension View {
-    /// Draws a TextEditor like a `.roundedBorder` text field, so multi-line
-    /// fields match the single-line ones beside them. The values were measured
-    /// from a rendered system field: 6pt radius, text background fill and a
-    /// 12% primary hairline in both light and dark appearance.
+    /// Puts a TextEditor inside a real `.roundedBorder` field bezel, so
+    /// multi-line fields match the single-line ones beside them. The bezel is
+    /// translucent and its colours depend on where it sits, so it is drawn by
+    /// AppKit rather than imitated.
     func roundedBorderEditor() -> some View {
         scrollContentBackground(.hidden)
-            .padding(4)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)) }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 4)
+            .background { RoundedBorderBezel() }
     }
+}
+
+private struct RoundedBorderBezel: NSViewRepresentable {
+    final class BezelView: NSView {
+        private let field = NSTextField(string: "")
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            field.isEditable = false
+            field.isSelectable = false
+            field.isBezeled = true
+            field.bezelStyle = .roundedBezel
+            field.refusesFirstResponder = true
+            field.setAccessibilityElement(false)
+            addSubview(field)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        // The field keeps its one-line intrinsic height under constraints or
+        // autoresizing; setting its frame here lets the bezel fill the editor.
+        override func layout() {
+            super.layout()
+            field.frame = bounds
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    func makeNSView(context: Context) -> BezelView { BezelView() }
+    func updateNSView(_ nsView: BezelView, context: Context) {}
 }
