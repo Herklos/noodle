@@ -207,6 +207,7 @@ private struct AttachmentPreviewMount: NSViewControllerRepresentable {
     private func present(_ url: URL, title: String, in hostWindow: NSWindow, load: () -> Void) {
         annotationPreview.close()
         dismissAnnotation()
+        QuickLookWebNavigation.install()
         guard let preview = QLPreviewPanel.shared() else { return }
         let reusingPreview = preview.isVisible && ownsPanel && windowSession != nil
         if currentURL != url { lastPointerInPreview = nil }
@@ -708,6 +709,36 @@ private struct AttachmentPreviewMount: NSViewControllerRepresentable {
     private func trace(_ event: String) {
         // Deliberately omit filenames, selected text and comments.
         lifecycleLog.info("\(event, privacy: .public); visible=\(self.panel?.isVisible == true) key=\(self.panel?.isKeyWindow == true) item=\(!self.items.isEmpty) annotation=\(self.pending != nil || self.closingPopover != nil)")
+    }
+}
+
+/// Quick Look's web display asks with a modal alert whether to open a page that
+/// submits a form, reloads or goes back. Quick Look can close and free the display
+/// while that alert waits, and answering it then crashes the app. Skip the alert:
+/// the display then ignores the navigation, as it does after Cancel. It already
+/// gives page alert(), confirm() and prompt() no UI, so a preview stays put.
+///
+/// Beware: QLWeb2DisplayBundle and _warnAboutNoNavigation are private to macOS.
+/// If an update renames them this silently does nothing and the crash can return;
+/// testWebPreviewNavigationNeverRunsAModalAlert fails when they are gone.
+enum QuickLookWebNavigation {
+    /// The display bundle loads with the first web preview, on whichever thread.
+    private static let watching: Void = {
+        _ = NotificationCenter.default.addObserver(forName: Bundle.didLoadNotification, object: nil, queue: nil) { _ in
+            replaceAlert()
+        }
+    }()
+
+    static func install() {
+        _ = watching
+        replaceAlert()
+    }
+
+    private static func replaceAlert() {
+        guard let display = NSClassFromString("QLWeb2DisplayBundle"),
+              let alert = class_getInstanceMethod(display, NSSelectorFromString("_warnAboutNoNavigation")) else { return }
+        let skip: @convention(block) (AnyObject) -> Void = { _ in }
+        method_setImplementation(alert, imp_implementationWithBlock(skip))
     }
 }
 

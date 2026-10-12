@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Previewing a web link no longer crashes Noodle when the page submits a form or reloads. Quick Look asked whether to open it and could close while asking; the preview now just stays on the page.
+
 ## [0.57.0] - 2026-10-12
 
 ### Changed
