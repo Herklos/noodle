@@ -20,6 +20,7 @@ All notable changes to Noodle are documented here, following
 - A Codex bot on a voice call can save files and run its tools again. Once Codex had restarted, every command it tried during a call was blocked.
 - A sheet such as Edit Bot can no longer get stuck on screen after the window it belonged to has gone. Its Cancel and Save did nothing and only quitting Noodle removed it; such a sheet now closes on its own.
 - The bars while you record a voice message scroll at a steady speed instead of slowing down and speeding up.
+- Clicking into a window from another app with the trackpad no longer leaves the window ignoring clicks for a while. The sidebar, buttons and everything else could stop responding until macOS gave up waiting for the first click to finish.
 
 ## [0.57.0] - 2026-10-12
 

@@ -8,6 +8,8 @@ import AppKit
 
     private var monitor: Any?
     private var suppressedButtons: Set<Int> = []
+    /// A trackpad press consumed with its click; it ends with a stage-zero pressure event after the release.
+    private var suppressingPressure = false
     private let focusedAt = NSMapTable<NSWindow, NSNumber>.weakToStrongObjects()
     private var activatedAt: TimeInterval = 0
     private let focus: @MainActor (NSWindow) -> Void
@@ -25,7 +27,7 @@ import AppKit
         monitor = NSEvent.addLocalMonitorForEvents(matching: [
             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
-            .otherMouseDown, .otherMouseUp, .otherMouseDragged
+            .otherMouseDown, .otherMouseUp, .otherMouseDragged, .pressure
         ]) { [weak self] event in
             guard let self else { return event }
             return self.filter(event, applicationActive: NSApp.isActive)
@@ -37,6 +39,7 @@ import AppKit
         monitor = nil
         NotificationCenter.default.removeObserver(self)
         suppressedButtons.removeAll()
+        suppressingPressure = false
         focusedAt.removeAllObjects()
         activatedAt = 0
     }
@@ -51,12 +54,18 @@ import AppKit
     }
 
     func filter(_ event: NSEvent, applicationActive: Bool) -> NSEvent? {
-        filter(event, button: event.buttonNumber, applicationActive: applicationActive)
+        filter(event, button: event.type == .pressure ? 0 : event.buttonNumber, applicationActive: applicationActive)
     }
 
     /// Synthesized NSEvents always report button zero; tests pass the physical button.
     func filter(_ event: NSEvent, button: Int, applicationActive: Bool) -> NSEvent? {
         switch event.type {
+        case .pressure:
+            // Pressure alone, without its mouse-down and mouse-up, leaves AppKit's gesture tracking
+            // holding every later click in the window.
+            guard suppressingPressure else { return event }
+            if event.stage == 0 && !suppressedButtons.contains(0) { suppressingPressure = false }
+            return nil
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             return suppressedButtons.remove(button) == nil ? event : nil
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
@@ -65,6 +74,7 @@ import AppKit
             // A missing mouse-up (for example after switching apps) must not
             // swallow the next independent click.
             suppressedButtons.remove(button)
+            if button == 0 { suppressingPressure = false }
         default:
             return event
         }
@@ -85,6 +95,7 @@ import AppKit
         guard !hasFocus || event.timestamp < focusTime else { return event }
 
         suppressedButtons.insert(button)
+        if button == 0 { suppressingPressure = true }
         var target = window
         while let sheet = target.attachedSheet { target = sheet }
         focus(target)

@@ -22,6 +22,21 @@ import XCTest
         XCTAssertEqual(focuses, 1)
     }
 
+    /// A trackpad click also sends pressure events. Letting those through without their mouse-down and
+    /// mouse-up left AppKit's gesture tracking holding every later click in the window.
+    func testTrackpadPressureOfTheFocusingClickIsConsumedWithIt() throws {
+        let window = fixture()
+        let guarder = WindowFocusGuard { _ in window.hasKey = true }
+        XCTAssertNil(guarder.filter(try mouse(.leftMouseDown, window), applicationActive: false))
+        XCTAssertNil(guarder.filter(try pressure(), applicationActive: true))
+        XCTAssertNil(guarder.filter(try mouse(.leftMouseUp, window), applicationActive: true))
+        // The press ends with a pressure event after the release.
+        XCTAssertNil(guarder.filter(try pressure(), applicationActive: true))
+        XCTAssertNotNil(guarder.filter(try pressure(), applicationActive: true))
+        XCTAssertNotNil(guarder.filter(try mouse(.leftMouseDown, window), applicationActive: true))
+        XCTAssertNotNil(guarder.filter(try pressure(), applicationActive: true))
+    }
+
     func testInactiveApplicationAndAnotherWindowBothRequireFocus() throws {
         let first = fixture(), second = fixture()
         first.hasKey = true
@@ -188,6 +203,16 @@ import XCTest
         try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0,
             context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+
+    /// NSEvent cannot make pressure events; a gesture CGEvent carrying the force HID type becomes one.
+    private func pressure() throws -> NSEvent {
+        let event = try XCTUnwrap(CGEvent(source: nil))
+        event.type = try XCTUnwrap(CGEventType(rawValue: 29))
+        event.setIntegerValueField(try XCTUnwrap(CGEventField(rawValue: 110)), value: 32)
+        let pressure = try XCTUnwrap(NSEvent(cgEvent: event))
+        XCTAssertEqual(pressure.type, .pressure)
+        return pressure
     }
 }
 
