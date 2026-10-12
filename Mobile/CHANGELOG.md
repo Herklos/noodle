@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-10-12
+
 ### Fixed
 
 - Wrapped text in message tables no longer overlaps adjacent rows.

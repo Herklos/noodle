@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-12
+
 ### Added
 
 - Inkbox can be added as a tool.

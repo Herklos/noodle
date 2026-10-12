@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-12
+
 ### Fixed
 
 - A sheet can no longer get stuck on screen after the window it belonged to has gone. Its buttons did nothing and only quitting removed it; such a sheet now closes on its own.

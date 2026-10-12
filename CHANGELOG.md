@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-10-12
+
 ### Added
 
 - Inkbox can be added as a tool.
