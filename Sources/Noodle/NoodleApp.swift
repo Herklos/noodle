@@ -6,9 +6,9 @@ import NoodleLaunchChecks
 import NoodleRuntimeSettings
 import NoodleSettingsUI
 import UserNotifications
+import NoodleWallpaper
 #if NOODLE_DEV_HOOKS
 import os
-import NoodleWallpaper
 #endif
 
 /// Claims the app's single running copy before SwiftUI makes its delegate, which opens its data.
