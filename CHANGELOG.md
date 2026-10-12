@@ -6,6 +6,11 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Wrapped text in message tables no longer overlaps adjacent rows.
+- Table header backgrounds stay within the header when its height changes.
+
 ## [0.57.0] - 2026-10-12
 
 ### Changed

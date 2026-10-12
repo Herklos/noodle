@@ -58,7 +58,6 @@ struct MessageTableGrid: View {
     let table: MessageTable
     var rowLimit: Int?
     @Binding var sort: MessageTableSort?
-    @State private var headerHeight: CGFloat = 0
 
     var body: some View {
         // Rows keep their identity while sorting, or selectable cells would hold stale text.
@@ -67,30 +66,30 @@ struct MessageTableGrid: View {
             GridRow {
                 ForEach(table.header.indices, id: \.self) { column in
                     header(column)
-                        .onGeometryChange(for: CGFloat.self, of: \.size.height) { headerHeight = max(headerHeight, $0) }
+                        .messageTableHeaderCell()
                 }
             }
             ForEach(order, id: \.self) { row in
                 Divider().opacity(0.6)
                 GridRow {
                     ForEach(table.header.indices, id: \.self) { column in
-                        Text(MessageMarkdownCache.render(table.rows[row][column]))
-                            .font(.system(size: 12.5).monospacedDigit())
-                            .lineLimit(3)
-                            .frame(maxWidth: 260, alignment: alignment(column))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .gridColumnAlignment(alignment(column).horizontal)
-                            .textSelection(.enabled)
+                        MessageTableCellLayout(maxWidth: 260) {
+                            Text(MessageMarkdownCache.render(table.rows[row][column]))
+                                .font(.system(size: 12.5).monospacedDigit())
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .gridColumnAlignment(alignment(column).horizontal)
+                        .textSelection(.enabled)
                     }
                 }
             }
         }
         .fixedSize()
         .padding(.horizontal, 4)
-        // One band behind the whole header row; a row background would be drawn per cell.
-        .background(alignment: .top) { Color.primary.opacity(0.06).frame(height: headerHeight) }
+        .messageTableHeaderBackground()
     }
 
     private func alignment(_ column: Int) -> Alignment {
