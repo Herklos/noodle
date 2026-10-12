@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Wrapped text in message tables no longer overlaps adjacent rows.
+- Table header backgrounds no longer overlap the first row after reducing the text size.
+
+### What to Test
+
+- Open a table with long cells and check that each row has enough space for its text, including at larger text sizes.
+- Increase and then reduce the text size with a table open; check that the grey header background shrinks with the headings.
+
 ## [0.30.1] - 2026-10-11
 
 ### Added

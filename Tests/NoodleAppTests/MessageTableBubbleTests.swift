@@ -2,9 +2,29 @@ import AppKit
 import SwiftUI
 import XCTest
 import NoodleCore
+import HubLink
 @testable import Noodle
 
 @MainActor final class MessageTableBubbleTests: HiddenViewTests {
+    func testWrappedTableRowsReserveTheirFullHeight() {
+        let text = "A selection of notebooks, coloured pencils, sketchbooks, watercolour paints, brushes, folders and drawing paper"
+        let cell = host(Text(text).font(.system(size: 12.5).monospacedDigit())
+            .lineLimit(3).frame(width: 260).fixedSize(horizontal: false, vertical: true))
+        let rowCount = 4
+        let table = MessageTable(header: ["Area", "Details"], alignments: [.leading, .leading],
+                                 rows: (0..<rowCount).map { ["Row \($0)", text] })
+        let grid = host(MessageTableGrid(table: table, sort: .constant(nil)))
+        // Each row must contain its wrapped text plus the cell's vertical padding.
+        XCTAssertGreaterThan(cell.fittingSize.height, 25)
+        XCTAssertGreaterThanOrEqual(grid.fittingSize.height, CGFloat(rowCount) * (cell.fittingSize.height + 10))
+    }
+
+    func testShortTableCellsKeepCompactColumns() {
+        let table = MessageTable(header: ["A", "B"], alignments: [.leading, .trailing], rows: [["1", "2"]])
+        let grid = host(MessageTableGrid(table: table, sort: .constant(nil)))
+        XCTAssertLessThan(grid.fittingSize.width, 150)
+    }
+
     private func bubble(_ body: String, in f: StoreFixture) -> NSHostingView<some View> {
         let message = ChatMessage(conversationID: f.directA.id, author: .agent(f.a.id), body: body, delivery: .delivered)
         return host(MessageBubble(message: message, hasConversationBackground: false,

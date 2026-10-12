@@ -71,17 +71,16 @@ struct MessageTableSheet: View {
     }
 }
 
-private struct MessageTableGrid: View {
+struct MessageTableGrid: View {
     let table: MessageTable
     @Binding var sort: MessageTableSort?
-    @State private var headerHeight: CGFloat = 0
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             GridRow {
                 ForEach(table.header.indices, id: \.self) { column in
                     header(column)
-                        .onGeometryChange(for: CGFloat.self, of: \.size.height) { headerHeight = max(headerHeight, $0) }
+                        .messageTableHeaderCell()
                 }
             }
             // Rows keep their identity while sorting, so they move rather than change text.
@@ -89,19 +88,20 @@ private struct MessageTableGrid: View {
                 Divider()
                 GridRow {
                     ForEach(table.header.indices, id: \.self) { column in
-                        Text(MessageText.markdown(table.rows[row][column]))
-                            .font(.subheadline.monospacedDigit())
-                            .frame(maxWidth: 240, alignment: alignment(column))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 10).padding(.vertical, 8)
-                            .gridColumnAlignment(alignment(column).horizontal)
-                            .textSelection(.enabled)
+                        MessageTableCellLayout(maxWidth: 240) {
+                            Text(MessageText.markdown(table.rows[row][column]))
+                                .font(.subheadline.monospacedDigit())
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .gridColumnAlignment(alignment(column).horizontal)
+                        .textSelection(.enabled)
                     }
                 }
             }
         }
         .fixedSize()
-        .background(alignment: .top) { Color.primary.opacity(0.06).frame(height: headerHeight) }
+        .messageTableHeaderBackground()
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
