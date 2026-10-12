@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Changed
 
 - Settings → Bots shows when each bot was last active instead of when it last had a heartbeat. A busy bot rarely needs a heartbeat, so the old time made active bots look neglected.
+- Edit Bot explains what a bot's backstory is for, and the Backstory and MCP Instructions boxes look like the other text fields.
 - After a bot sends a message, Messenger tells it whether unread messages are still waiting, or asks it to finish anything it left open, so bots follow up instead of stopping after one reply.
 - Bots no longer see website forms marked up as WebMCP tools; they fill such forms like any other. Only tools a site registers in JavaScript are offered.
 

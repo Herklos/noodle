@@ -203,11 +203,8 @@ public struct MCPEditor: View {
                     Text("Instructions").font(.caption.weight(.semibold))
                     TextEditor(text: $instructions)
                         .font(.system(size: 13))
-                        .scrollContentBackground(.hidden)
-                        .padding(4)
+                        .roundedBorderEditor()
                         .frame(height: 130)
-                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.18)) }
                         .help("Optional guidance for bots using this connection. Do not include passwords or tokens.")
                 }
                 Text("MCP connection · Sign-in opens in your browser.")
@@ -276,5 +273,18 @@ public struct MCPConnectionIcon: View {
     public init(connection: MCPConnectionRecord, size: CGFloat) {
         self.connection = connection
         self.size = size
+    }
+}
+
+public extension View {
+    /// Draws a TextEditor like a `.roundedBorder` text field, so multi-line
+    /// fields match the single-line ones beside them. The values were measured
+    /// from a rendered system field: 6pt radius, text background fill and a
+    /// 12% primary hairline in both light and dark appearance.
+    func roundedBorderEditor() -> some View {
+        scrollContentBackground(.hidden)
+            .padding(4)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)) }
     }
 }

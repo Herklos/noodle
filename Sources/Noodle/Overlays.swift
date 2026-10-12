@@ -713,8 +713,10 @@ private struct BotBackstoryEditor: View {
                 .font(.caption.weight(.semibold))
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.secondary.opacity(0.1))
+                TextEditor(text: $backstory)
+                    .font(.system(size: 13))
+                    .autocorrectionDisabled(false)
+                    .roundedBorderEditor()
 
                 if backstory.isEmpty {
                     Text("Describe who this bot is, its role, tone, or priorities…")
@@ -726,19 +728,12 @@ private struct BotBackstoryEditor: View {
                         .padding(.vertical, 4)
                         .allowsHitTesting(false)
                 }
-
-                TextEditor(text: $backstory)
-                    .font(.system(size: 13))
-                    .autocorrectionDisabled(false)
-                    .scrollContentBackground(.hidden)
-                    .padding(4)
             }
             .frame(height: 160)
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.secondary.opacity(0.18))
-            }
 
+            Text("Who this bot is and what it cares about. Only this bot sees it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
