@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Bots no longer see website forms marked up as WebMCP tools; they fill such forms like any other. Only tools a site registers in JavaScript are offered.
+
 ## [0.58.0] - 2026-10-12
 
 ### Added

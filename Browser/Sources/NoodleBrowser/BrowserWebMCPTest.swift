@@ -34,14 +34,7 @@ extension BrowserSmokeTest {
         try await eventually("public Pizza Maker result") {
             try await tab.evaluate("return document.querySelector('#size-text')?.textContent.includes('Large') && Array.from(document.querySelectorAll('.topping')).filter(e=>e.textContent.includes('🍄')).length>=3;") as? Bool == true
         }
-        tab.navigate(URL(string: "https://googlechromelabs.github.io/webmcp-tools/demos/french-bistro/?toolautosubmit")!)
-        try await eventually("public Bistro form") {
-            try await tab.evaluate("return document.querySelector('#reservationForm')?.hasAttribute('toolautosubmit')===true && !!document.querySelector('#date')?.getAttribute('min');") as? Bool == true
-        }
-        let date = try await tab.evaluate("return new Date(Date.now()+86400000).toISOString().slice(0,10);") as! String
-        let result = try await call("book_table_le_petit_bistro", args: ["name": "Noodle Test", "phone": "0000000000", "date": date, "time": "19:00", "guests": "2", "seating": "Main Dining", "requests": "Compatibility test"])
-        try require((result["result"] as? String)?.contains("Noodle Test") == true, "Bistro respondWith result missing: \(result)")
-        print("PASS public Google Chrome Labs Pizza Maker and Le Petit Bistro demos using the bundled WebMCP runtime")
+        print("PASS public Google Chrome Labs Pizza Maker demo using the bundled WebMCP runtime")
     }
     #endif
 
@@ -123,20 +116,6 @@ extension BrowserSmokeTest {
         do { _ = try await perform(.webMCPCall, tab: tab, tool: echo); throw BrowserError("Paused WebMCP call ran") }
         catch let error as BrowserError { try require(error.message.contains("paused"), "Unexpected paused WebMCP error") }
         try runtime.setPaused(false, browserID: browserID)
-        let booking = try id("book_table", in: list)
-        let booked = try await perform(.webMCPCall, tab: tab, tool: booking, args: #"{"guest":"Fixture Guest","seats":2,"area":"outside"}"#)
-        try require((booked["result"] as? [String: Any])?["agentInvoked"] as? Bool == true && (booked["result"] as? [String: Any])?["area"] as? String == "outside", "Declarative form invocation failed: \(booked)")
-        try expectError(try await perform(.webMCPCall, tab: tab, tool: booking, args: #"{"guest":"A","seats":0}"#), "INVALID_ARGUMENTS")
-        try require(try await tab.evaluate("return submissions===1;") as? Bool == true, "Invalid form submitted")
-        let manual = try await perform(.webMCPCall, tab: tab, tool: id("manual_search", in: list), args: #"{"query":"human review"}"#)
-        try require(manual["status"] as? String == "needs-user-action", "Manual form did not return a handoff")
-        try require(try await tab.evaluate("return manualSubmissions===0 && document.querySelector('#manual input').value==='human review';") as? Bool == true, "Manual form submitted automatically")
-        _ = try await tab.evaluate("document.querySelector('#manual').requestSubmit(); return true;")
-        try require(try await tab.evaluate("return manualSubmissions===1 && manualWasAgentInvoked===true;") as? Bool == true, "Human form submission lost agentInvoked")
-        let asyncForm = try await perform(.webMCPCall, tab: tab, tool: id("async_form", in: list), args: #"{"text":"async response"}"#)
-        try require(asyncForm["status"] as? String == "completed" && (asyncForm["result"] as? [String: Any])?["text"] as? String == "async response", "Async respondWith result confused with internal state")
-        _ = try await tab.evaluate("document.querySelector('#booking input').setAttribute('minlength','4'); return true;")
-        try expectError(try await perform(.webMCPCall, tab: tab, tool: booking, args: #"{"guest":"Valid","seats":2}"#), "STALE_TOOL")
         _ = try await tab.evaluate("registration.abort(); await document.modelContext.registerTool({name:'echo',description:'Replacement',execute:()=> 'replacement'}); return true;")
         try expectError(try await perform(.webMCPCall, tab: tab, tool: echo), "STALE_TOOL")
         list = try await tools(tab)
@@ -162,12 +141,12 @@ extension BrowserSmokeTest {
         try await ready(tab)
         let navigationTools = try await tools(tab)
         // Navigation can dispose the JS promise; either response must not retry.
-        _ = try? await perform(.webMCPCall, tab: tab, tool: id("navigate_form", in: navigationTools), args: #"{"query":"next"}"#)
-        try await eventually("WebMCP form navigation") { try await tab.evaluate("return !!document.querySelector('#webmcp-result');") as? Bool == true }
+        _ = try? await perform(.webMCPCall, tab: tab, tool: id("navigate", in: navigationTools))
+        try await eventually("WebMCP tool navigation") { try await tab.evaluate("return !!document.querySelector('#webmcp-result');") as? Bool == true }
         let empty = try await perform(.webMCPList, tab: tab)
         try require(empty["status"] as? String == "empty", "Empty tool list confused with integration failure")
         try focus.verify()
         try require(NSApp.windows.filter(\.isVisible).count == windows, "WebMCP opened a window")
-        print("PASS WebMCP document-start registration, CLI/eval parity, authenticated profile isolation, schema validation, async results/errors, registration replacement, declarative/manual forms, frames, response policy, pause, timeout cancellation, navigation and quiet operation")
+        print("PASS WebMCP document-start registration, CLI/eval parity, authenticated profile isolation, schema validation, async results/errors, registration replacement, frames, response policy, pause, timeout cancellation, navigation and quiet operation")
     }
 }

@@ -186,7 +186,6 @@ final class BrowserToolProviderTests: XCTestCase {
     func testTheSkillCarriesTheBrowserGuidanceFromThisModule() {
         let instructions = provider.manifest.instructions
         XCTAssertTrue(instructions.contains("document.modelContext.executeTool"))
-        XCTAssertTrue(instructions.contains("needs-user-action"))
         XCTAssertTrue(instructions.contains("messenger tool browser present"))
         XCTAssertFalse(instructions.contains("skills/browser/browser"), "nothing points bots at the removed command")
         for operation in BrowserOperation.agentCases { XCTAssertFalse(BrowserToolGuidance.tool(operation).isEmpty, operation.rawValue) }

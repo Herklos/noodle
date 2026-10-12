@@ -7,6 +7,10 @@
 - Tabs out of sight slow down as they do in Safari, so many open tabs no longer keep the browser busy.
 - Each browser keeps at most 8 pages running. The least recently used ones stop but stay open as tabs, and load again when you or a bot use them.
 
+### Removed
+
+- WebMCP form tools (forms marked up with `toolname`). Supporting them meant watching every change on every page, which slowed busy sites down; tools a site registers in JavaScript still work.
+
 ### Fixed
 
 - Sites now recognise the browser as Safari, so they serve their full pages instead of reduced or broken ones.
