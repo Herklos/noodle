@@ -146,7 +146,8 @@ public enum MessengerCLI {
                         body: body,
                         attachmentIDs: importedAttachments.map(\.id)
                     )
-                    return .json(message)
+                    let unread = try repository.latestMessages(for: agentID, consuming: false)
+                    return .json(MessengerSendReceipt(message: message, unread: unread))
                 } catch {
                     for attachment in importedAttachments {
                         try? repository.removeAttachment(attachment)
@@ -388,6 +389,30 @@ private struct MessengerStatus: Encodable {
         var container = encoder.singleValueContainer()
         try container.encode(["status": status])
     }
+}
+
+/// The sent message plus `next`, a hint that keeps the bot going after a reply instead of
+/// ending its turn with work still waiting in the inbox.
+private struct MessengerSendReceipt: Encodable {
+    let message: ChatMessage
+    let next: String
+
+    init(message: ChatMessage, unread: [MessengerDelivery]) {
+        self.message = message
+        let here = unread.filter { $0.conversation.id == message.conversationID }.count
+        let conversations = Set(unread.map(\.conversation.id)).count
+        next = unread.isEmpty
+            ? "Inbox empty. Before finishing, check whether anything you promised or started in this cycle is still open; if so, continue it, otherwise finish without sending another message."
+            : "\(unread.count) unread message\(unread.count == 1 ? "" : "s") in \(conversations) conversation\(conversations == 1 ? "" : "s") (\(here) in this one). Run --get-latest and handle them before finishing."
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try message.encode(to: encoder)
+        var container = encoder.container(keyedBy: Key.self)
+        try container.encode(next, forKey: .next)
+    }
+
+    private enum Key: CodingKey { case next }
 }
 
 private struct MessengerEffectReceipt: Encodable {

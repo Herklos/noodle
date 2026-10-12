@@ -913,6 +913,40 @@ final class RepositoryTests: XCTestCase {
         }
     }
 
+    func testMessengerSendSuggestsWhatToDoNext() throws {
+        let bot = try repository.createAgent(named: "Build Bot")
+        let other = try repository.createAgent(named: "Review Bot")
+        let group = try repository.createGroup(
+            named: "Launch Room",
+            participantIDs: [bot.agent.id, other.agent.id],
+            existingAgents: [bot.agent, other.agent]
+        )
+        let command = repository.directory(for: bot.agent)
+            .appendingPathComponent(".agents/skills/messenger/messenger")
+        func send() throws -> String {
+            let result = MessengerCLI.runDirect(arguments: [
+                command.path, "--send", "--conversation", bot.conversation.id.uuidString, "--body", "Done"
+            ])
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            XCTAssertEqual(try decode(ChatMessage.self, from: result.standardOutput).body, "Done")
+            let object = try JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any]
+            return try XCTUnwrap(object?["next"] as? String)
+        }
+
+        try repository.append(ChatMessage(conversationID: bot.conversation.id, author: .user, body: "One", delivery: .queued))
+        try repository.append(ChatMessage(conversationID: bot.conversation.id, author: .user, body: "Two", delivery: .queued))
+        try repository.append(ChatMessage(conversationID: group.id, author: .user, body: "Three", delivery: .queued))
+        let waiting = try send()
+        XCTAssertTrue(waiting.contains("3 unread messages in 2 conversations (2 in this one)"), waiting)
+        XCTAssertTrue(waiting.contains("--get-latest"), waiting)
+        XCTAssertEqual(try repository.latestMessages(for: bot.agent.id, consuming: false).count, 3)
+
+        _ = try repository.latestMessages(for: bot.agent.id)
+        let empty = try send()
+        XCTAssertTrue(empty.hasPrefix("Inbox empty."), empty)
+        XCTAssertTrue(empty.contains("finish without sending another message"), empty)
+    }
+
     func testMessengerCanSendMultipleFilesFromBotWorkspace() throws {
         let sender = try repository.createAgent(named: "Build Bot")
         let recipient = try repository.createAgent(named: "Review Bot")

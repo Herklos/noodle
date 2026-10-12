@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- After a bot sends a message, Messenger tells it whether unread messages are still waiting, or asks it to finish anything it left open, so bots follow up instead of stopping after one reply.
+
 ## [0.29.0] - 2026-10-12
 
 ### Added

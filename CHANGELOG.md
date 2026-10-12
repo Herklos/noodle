@@ -8,6 +8,7 @@ All notable changes to Noodle are documented here, following
 
 ### Changed
 
+- After a bot sends a message, Messenger tells it whether unread messages are still waiting, or asks it to finish anything it left open, so bots follow up instead of stopping after one reply.
 - Bots no longer see website forms marked up as WebMCP tools; they fill such forms like any other. Only tools a site registers in JavaScript are offered.
 
 ## [0.58.0] - 2026-10-12
