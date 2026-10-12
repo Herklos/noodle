@@ -6,10 +6,16 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Inkbox can be added as a tool.
+
 ### Fixed
 
 - Wrapped text in message tables no longer overlaps adjacent rows.
 - Table header backgrounds stay within the header when its height changes.
+- Previewing a web link no longer crashes Noodle when the page submits a form or reloads. Quick Look asked whether to open it and could close while asking; the preview now just stays on the page.
+- A Codex bot on a voice call can save files and run its tools again. Once Codex had restarted, every command it tried during a call was blocked.
 
 ## [0.57.0] - 2026-10-12
 

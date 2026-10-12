@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Inkbox can be added as a tool.
+
+### Fixed
+
+- A Codex bot on a voice call can save files and run its tools again. Once Codex had restarted, every command it tried during a call was blocked.
+
 ## [0.28.2] - 2026-10-12
 
 ### Fixed

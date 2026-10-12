@@ -237,6 +237,45 @@ import XCTest
         XCTAssertEqual(c.attachment(at: 0)?.url, page)
     }
 
+    /// A web page that submits a form or reloads makes Quick Look's web display run
+    /// a modal alert. If the preview closes meanwhile, answering it crashed Noodle.
+    func testWebPreviewNavigationNeverRunsAModalAlert() throws {
+        _ = NSApplication.shared
+        QuickLookWebNavigation.install()
+        let web = Bundle(path: "/System/Library/Frameworks/QuickLookUI.framework/Versions/A/PlugIns/Web2.qldisplay")
+        guard let web, web.load() else { throw XCTSkip("This macOS has no Quick Look web display.") }
+        // QuickLookWebNavigation patches these private names; it needs updating if they change.
+        let display = try XCTUnwrap(NSClassFromString("QLWeb2DisplayBundle") as? NSObject.Type,
+            "Quick Look's web display class was renamed")
+        XCTAssertTrue(display.instancesRespond(to: NSSelectorFromString("_warnAboutNoNavigation")),
+            "Quick Look's web display no longer has the navigation alert")
+        // The display only alerts inside a visible preview; stand in for one.
+        let name = "QLWeb2DisplayBundleAllowingAlerts"
+        let fixture: AnyClass = NSClassFromString(name) ?? {
+            let subclass: AnyClass = objc_allocateClassPair(display, name, 0)!
+            let allows: @convention(block) (AnyObject) -> Bool = { _ in true }
+            class_addMethod(subclass, NSSelectorFromString("allowsAlerts"), imp_implementationWithBlock(allows), "B@:")
+            let preview: @convention(block) (AnyObject) -> AnyObject = { _ in WebPreviewFixture() }
+            class_addMethod(subclass, NSSelectorFromString("preview"), imp_implementationWithBlock(preview), "@@:")
+            objc_registerClassPair(subclass)
+            return subclass
+        }()
+        var alerted = false
+        let watch = Timer(timeInterval: 0.05, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                guard NSApp.modalWindow != nil else { return }
+                alerted = true; NSApp.abortModal()
+            }
+        }
+        RunLoop.main.add(watch, forMode: .common)
+        defer { watch.invalidate() }
+        let preview = (fixture as! NSObject.Type).init()
+        // A display that never showed a preview asserts when it is released.
+        _ = Unmanaged.passRetained(preview)
+        preview.perform(NSSelectorFromString("_warnAboutNoNavigation"))
+        XCTAssertFalse(alerted)
+    }
+
     func testNativeCloseAndRepeatedCleanupEndTheSessionOnce() {
         let host = window(); var ended = 0
         let session = PreviewWindowSession(window: host) { ended += 1 }
@@ -278,6 +317,9 @@ private struct PreviewNavigationHost: View {
             PreviewOwnerRecorder(controller: controller, record: record)
         }
     }
+}
+private final class WebPreviewFixture: NSObject {
+    @objc let url = NSURL(string: "https://example.com/next")
 }
 private struct PreviewOwnerRecorder: View {
     init(controller: AttachmentPreviewController, record: (AttachmentPreviewController) -> Void) { record(controller) }
