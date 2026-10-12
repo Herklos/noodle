@@ -17,6 +17,20 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.web.window === tab.surface)
     }
 
+    /// Sites serve their full pages only to browsers they recognise, and tabs out of sight run
+    /// slower, as in Safari, so dozens of open tabs do not keep working at full speed.
+    @MainActor func testTabsPassAsSafariAndSlowDownOutOfSight() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let tab = try runtime.makeTab(browserID: try library.create(name: "Work").id)
+        let value = try await tab.web.evaluateJavaScript("navigator.userAgent")
+        let agent = try XCTUnwrap(value as? String)
+        XCTAssertNotNil(agent.range(of: #"Version/\d+(\.\d+)* Safari/605\.1\.15$"#, options: .regularExpression), agent)
+        XCTAssertEqual(tab.web.configuration.preferences.inactiveSchedulingPolicy, .throttle)
+    }
+
     /// A tab shows the page's own icon: one that fits a tab, a scalable one before any other, and
     /// the site's favicon.ico when the page names none.
     func testATabPicksThePagesIconThatFitsATab() throws {

@@ -118,13 +118,7 @@ import WebKit
             return response
         }
     }
-    func saveTab(_ tab: BrowserTab) {
-        do {
-            var profile = try library.profile(tab.browserID)
-            guard let index = profile.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-            profile.tabs[index] = tab.info; try library.update(profile)
-        } catch { failure = error.localizedDescription }
-    }
+    func saveTab(_ tab: BrowserTab) { library.updateTab(tab.info, browserID: tab.browserID) }
     @discardableResult func makeTab(browserID: UUID, configuration: WKWebViewConfiguration? = nil, restoring: BrowserTabInfo? = nil) throws -> BrowserTab {
         guard !deleting.contains(browserID) else { throw BrowserError("This browser is being deleted.") }
         var profile = try library.profile(browserID)
@@ -278,6 +272,7 @@ import WebKit
         expiry?.cancel(); expiry = nil
         for tab in tabs.values { tab.stop() }
         tabs.removeAll()
+        library.flush()
     }
     /// `caller` is the signed app asking, when it came over the connection.
     /// `stagingRoot` is where file transfers wait, when not beside the companion socket.

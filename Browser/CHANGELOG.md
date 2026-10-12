@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Tabs out of sight slow down as they do in Safari, so many open tabs no longer keep the browser busy.
+
+### Fixed
+
+- Sites now recognise the browser as Safari, so they serve their full pages instead of reduced or broken ones.
+- Pages that change their title often, such as LinkedIn, no longer make the browser sluggish by saving every change straight away.
+
 ## [0.16.2] - 2026-10-12
 
 ### Fixed

@@ -210,12 +210,31 @@ public struct BrowserProfile: Codable, Identifiable, Equatable, Sendable {
     public func removeBookmark(_ id: UUID, bookmark: UUID) throws {
         try records(id).removeBookmark(bookmark); recordsRevision &+= 1
     }
+    /// A tab's title, address and loading state change many times a second while pages load, so
+    /// they show at once and reach disk together a moment later, or with the next save.
+    public func updateTab(_ tab: BrowserTabInfo, browserID: UUID) {
+        guard readable, let p = profiles.firstIndex(where: { $0.id == browserID }),
+              let t = profiles[p].tabs.firstIndex(where: { $0.id == tab.id }), profiles[p].tabs[t] != tab else { return }
+        profiles[p].tabs[t] = tab
+        guard pendingWrite == nil else { return }
+        pendingWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            if !Task.isCancelled { self?.flush() }
+        }
+    }
+    private var pendingWrite: Task<Void, Never>?
+    /// Writes tab changes still waiting for disk.
+    public func flush() {
+        guard pendingWrite != nil else { return }
+        do { try commit(profiles) } catch { pendingWrite = nil; failure = error.localizedDescription }
+    }
     private func commit(_ profiles: [BrowserProfile]) throws {
         guard readable else { throw BrowserError(failure ?? "The browser library could not be read.") }
         let data = try JSONEncoder().encode(Archive(profiles: profiles))
         guard data.count <= 16 * 1_048_576 else { throw BrowserError("Browser library is full.") }
         try data.write(to: root.appendingPathComponent("browsers.json"), options: [.atomic, .completeFileProtectionUnlessOpen])
         self.profiles = profiles
+        pendingWrite?.cancel(); pendingWrite = nil
     }
     public func directory(_ id: UUID, category: String) throws -> URL {
         _ = try profile(id)

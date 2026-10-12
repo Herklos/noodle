@@ -36,6 +36,12 @@ import WebKit
     private var inputMonitor: Any?
     private var inputGeneration = 0
     static let controlWorld = WKContentWorld.world(name: "NoodleBrowserControl")
+    /// Sites serve their full pages only to browsers they recognise, so tabs name the Safari of
+    /// this macOS, whose version has matched the system's since macOS 26.
+    static let safariName: String = {
+        let system = ProcessInfo.processInfo.operatingSystemVersion
+        return "Version/\(system.majorVersion).\(system.minorVersion) Safari/605.1.15"
+    }()
 
     init(browserID: UUID, info: BrowserTabInfo, runtime: BrowserRuntime, configuration: WKWebViewConfiguration? = nil) {
         self.id = info.id; self.browserID = browserID; self.info = info; self.runtime = runtime
@@ -43,8 +49,10 @@ import WebKit
         config.userContentController = WKUserContentController()
         BrowserWebMCP.install(into: config.userContentController)
         config.websiteDataStore = WKWebsiteDataStore(forIdentifier: browserID)
-        config.preferences.inactiveSchedulingPolicy = .none
+        // Out of sight, pages slow down as in Safari; dozens of tabs at full speed made the whole browser sluggish.
+        config.preferences.inactiveSchedulingPolicy = .throttle
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        config.applicationNameForUserAgent = Self.safariName
         web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800), configuration: config)
         pointer = BrowserPointer(web: web)
         surface = NSPanel(contentRect: web.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)

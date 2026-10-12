@@ -128,6 +128,20 @@ final class BrowserRuntimeTests: XCTestCase {
         let opened = try await runtime.perform(.init(.open, browserID: a.id))
         XCTAssertNotNil(try used(XCTUnwrap(opened.tabID)))
     }
+    /// Pages change their title and address many times a second; the library shows each change
+    /// at once but writes them to disk together, and none is lost when the browser stops.
+    @MainActor func testTabChangesShowAtOnceAndReachDiskTogether() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        let tab = try runtime.makeTab(browserID: try library.create(name: "Work").id)
+        let archive = root.appendingPathComponent("browsers.json"), saved = try Data(contentsOf: archive)
+        for count in 1...20 { tab.info.title = "(\(count)) Feed"; runtime.saveTab(tab) }
+        XCTAssertEqual(try library.profile(tab.browserID).tabs.first?.title, "(20) Feed")
+        XCTAssertEqual(try Data(contentsOf: archive), saved, "every change rewrote the library")
+        runtime.shutdown()
+        XCTAssertEqual(try BrowserLibrary(root: root).profile(tab.browserID).tabs.first?.title, "(20) Feed")
+    }
 
     /// A long home folder name must not push the connection past the platform's socket path limit.
     func testLongConnectionPathRegistersAndAnswers() throws {
