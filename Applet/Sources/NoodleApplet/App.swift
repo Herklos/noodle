@@ -136,6 +136,7 @@ private struct AppletMenu: View {
   }
   func applicationDidFinishLaunching(_ notification: Notification) {
     WindowFocusGuard.shared.start()
+    OrphanedSheetSweeper.shared.start()
     CompanionAppVisibility.shared.start(permitsDock: !AppletLaunchCheck.isVerificationRun)
     let defaultLaunch = notification.userInfo?[NSApplication.launchIsDefaultUserInfoKey] as? Bool == true
     launchLog.notice("Provider launched; default app launch: \(defaultLaunch)")

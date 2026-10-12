@@ -118,6 +118,7 @@ struct NoodleBrowserApp: App {
     private var externalLaunch = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         WindowFocusGuard.shared.start()
+        OrphanedSheetSweeper.shared.start()
         #if NOODLE_DEV_HOOKS
         NSLog("noodle.development-hooks.enabled")
         #endif

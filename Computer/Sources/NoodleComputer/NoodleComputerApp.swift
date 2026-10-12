@@ -224,6 +224,7 @@ enum ComputerLaunchCheck {
   }
   func applicationDidFinishLaunching(_ notification: Notification) {
     WindowFocusGuard.shared.start()
+    OrphanedSheetSweeper.shared.start()
     CompanionAppVisibility.shared.start(permitsDock: !ComputerLaunchCheck.isVerificationRun)
     #if NOODLE_DEV_HOOKS
     // scripts/verify-launch-hooks.sh rejects a release that carries this marker.

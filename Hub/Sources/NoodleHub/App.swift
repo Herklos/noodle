@@ -3,6 +3,7 @@ import HubCore
 import HubLink
 import NoodleLaunchChecks
 import NoodleRuntimeSettings
+import NoodleSettingsUI
 import ServiceManagement
 import SwiftUI
 
@@ -86,6 +87,7 @@ struct NoodleHubApp: App {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        OrphanedSheetSweeper.shared.start()
         HubUpdater.shared.start()
         // Noodle Hub Dev is not added to the login items.
         #if !DEBUG

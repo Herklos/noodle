@@ -14,6 +14,7 @@ All notable changes to Noodle are documented here, following
 
 - Previewing a web link no longer crashes Noodle when the page submits a form or reloads. Quick Look asked whether to open it and could close while asking; the preview now just stays on the page.
 - A Codex bot on a voice call can save files and run its tools again. Once Codex had restarted, every command it tried during a call was blocked.
+- A sheet such as Edit Bot can no longer get stuck on screen after the window it belonged to has gone. Its Cancel and Save did nothing and only quitting Noodle removed it; such a sheet now closes on its own.
 
 ## [0.57.0] - 2026-10-12
 

@@ -9,6 +9,7 @@
 ### Fixed
 
 - A Codex bot on a voice call can save files and run its tools again. Once Codex had restarted, every command it tried during a call was blocked.
+- A sheet can no longer get stuck on screen after the window it belonged to has gone. Its buttons did nothing and only quitting removed it; such a sheet now closes on its own.
 
 ## [0.28.2] - 2026-10-12
 

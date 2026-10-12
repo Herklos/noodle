@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         WindowFocusGuard.shared.start()
+        OrphanedSheetSweeper.shared.start()
         AgentPickerController.shared.start()
         NSApp.setActivationPolicy(.regular)
         NoodleStore.active?.updateDockBadge()
