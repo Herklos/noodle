@@ -57,6 +57,8 @@ public final class MessengerBroker: @unchecked Sendable {
     private let mailboxMonitor = WorkspaceMailboxMonitor()
     /// Called on the broker's queue when a bot changed its own record, such as its status.
     public var onAgentChanged: (@Sendable (UUID) -> Void)?
+    /// Called on the broker's queue when a bot scheduled or cancelled one of its wakes.
+    public var onWakesChanged: (@Sendable (UUID) -> Void)?
     /// Whether a noodlet has a preview. Only `present` sets one, so a bot attaching a noodlet
     /// without is refused and told to present it rather than leave a plain icon in the conversation.
     public var noodletHasPreview: (@Sendable (URL) async -> Bool)?
@@ -138,6 +140,10 @@ public final class MessengerBroker: @unchecked Sendable {
     private func perform(_ request: MessengerBridgeRequest, for agent: AgentRecord) -> MessengerCommandResult {
         let response = MessengerCLI.perform(request.action, repository: repository, agentID: agent.id, brokered: true)
         if case .setStatus = request.action, response.exitCode == 0 { onAgentChanged?(agent.id) }
+        switch request.action {
+        case .scheduleWake, .cancelWake: if response.exitCode == 0 { onWakesChanged?(agent.id) }
+        default: break
+        }
         return response
     }
 

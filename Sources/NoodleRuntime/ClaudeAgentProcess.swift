@@ -201,6 +201,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         startTurn(reason: .heartbeat)
     }
 
+    public func wake() {
+        guard canReceiveHeartbeat else { return }
+        startTurn(reason: .wake)
+    }
+
     private func sendPendingNotificationIfPossible() {
         guard notificationPending, running, interruptRequestID == nil else { return }
         if turnIsActive {
@@ -245,9 +250,10 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             connection.write(data)
             trace.record(.wakeSubmitted)
             turnIsActive = true
-            if reason == .heartbeat { onHeartbeat() }
+            if reason.isScheduled { onHeartbeat() }
             let detail = switch reason {
             case .heartbeat: "Heartbeat: checking for follow-up work"
+            case .wake: "Waking as scheduled"
             case .runtimeRecovered: "Recovering interrupted work"
             case .inboxChanged: "Checking for new messages"
             }

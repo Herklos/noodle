@@ -89,6 +89,9 @@ import NoodleRuntime
         self.applets = applets
         messenger = MessengerBroker(repository: repository)
         messenger.noodletHasPreview = { [applets] url in await applets.hasPreview(url) }
+        messenger.onWakesChanged = { [weak self] id in
+            Task { @MainActor in guard let self else { return }; self.runtime.refreshWakes(for: id, repository: self.repository) }
+        }
         connections.onAssignmentsChange = { [weak self] in self?.toolBroker?.synchronizeSkills() }
         computers.onAssignmentsChange = { [weak self] in self?.toolBroker?.synchronizeSkills() }
         browsers.onAssignmentsChange = { [weak self] in self?.toolBroker?.synchronizeSkills() }
@@ -133,6 +136,7 @@ import NoodleRuntime
                     self.runtime.reconcile(agents: agents, repository: self.repository)
                 }
                 self.runtime.checkHeartbeats()
+                self.runtime.checkWakes(repository: self.repository)
                 await self.checkForChangesInBackground()
             }
         }

@@ -291,6 +291,9 @@ final class NoodleStore {
         reload()
         // A device made, changed or deleted one of this Mac's bots.
         messenger.onAgentChanged = { [weak self] id in Task { @MainActor in self?.reloadStatus(of: id) } }
+        messenger.onWakesChanged = { [weak self] id in
+            Task { @MainActor in guard let self else { return }; self.runtime.refreshWakes(for: id, repository: self.repository) }
+        }
         messenger.noodletHasPreview = { [applets] url in await applets.hasPreview(url) }
         thisMac.onBotsEdited = { [weak self] in self?.reload() }
         noodletAnnotations.present = { [weak self] capture in
@@ -2295,6 +2298,7 @@ final class NoodleStore {
                 guard !Task.isCancelled else { break }
                 self.runtime.reconcile(agents: self.agents, repository: self.repository)
                 self.runtime.checkHeartbeats()
+                self.runtime.checkWakes(repository: self.repository)
             }
         }
         // Harnesses Noodle installed have no updater of their own. Settings need not be open.

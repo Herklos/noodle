@@ -155,6 +155,17 @@ public enum MessengerCLI {
                     throw error
                 }
 
+            case .scheduleWake(let dueAt, let delay, let note):
+                let now = Date()
+                return .json(try repository.scheduleWake(agentID: agentID, at: dueAt ?? now.addingTimeInterval(delay ?? 0),
+                                                         note: note, now: now))
+
+            case .listWakes:
+                return .json(try repository.listWakes(agentID: agentID))
+
+            case .cancelWake(let id):
+                return .json(try repository.cancelWake(agentID: agentID, id: id))
+
             case .setStatus(let status):
                 return .json(MessengerStatus(status: try repository.setAgentStatus(status, agentID: agentID).status))
 
@@ -281,6 +292,24 @@ public enum MessengerCLI {
                 action = .setStatus(status)
             case .clearStatus:
                 action = .setStatus(nil)
+            case .wakeIn, .wakeAt:
+                guard let note = Self.option("--note", in: values) else { throw MessengerCLIError.invalidArguments }
+                if let raw = Self.option("--wake-in", in: values) {
+                    guard let delay = Self.duration(raw) else { throw MessengerCLIError.invalidArguments }
+                    action = .scheduleWake(dueAt: nil, delay: delay, note: note)
+                } else {
+                    guard let raw = Self.option("--wake-at", in: values), let date = Self.date(raw) else {
+                        throw MessengerCLIError.invalidArguments
+                    }
+                    action = .scheduleWake(dueAt: date, delay: nil, note: note)
+                }
+            case .listWakes:
+                action = .listWakes
+            case .cancelWake:
+                guard let raw = Self.option("--cancel-wake", in: values), let id = UUID(uuidString: raw) else {
+                    throw MessengerCLIError.invalidArguments
+                }
+                action = .cancelWake(id)
             case .send:
                 guard let rawConversation = Self.option("--conversation", in: values),
                       let conversationID = UUID(uuidString: rawConversation) else {
@@ -343,6 +372,29 @@ public enum MessengerCLI {
             return options
         }
 
+        /// A whole number of minutes, hours or days, such as 20m, 2h or 1d.
+        private static func duration(_ raw: String) -> TimeInterval? {
+            guard let unit = raw.last, let count = Int(raw.dropLast()), count > 0 else { return nil }
+            switch unit {
+            case "m": return TimeInterval(count) * 60
+            case "h": return TimeInterval(count) * 3_600
+            case "d": return TimeInterval(count) * 86_400
+            default: return nil
+            }
+        }
+
+        /// ISO 8601 with a time zone, or a local date and time such as 2026-10-13T09:00.
+        private static func date(_ raw: String) -> Date? {
+            if let date = ISO8601DateFormatter().date(from: raw) { return date }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            for format in ["yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss"] {
+                formatter.dateFormat = format
+                if let date = formatter.date(from: raw) { return date }
+            }
+            return nil
+        }
+
         private static func option(_ name: String, in arguments: [String]) -> String? {
             guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else {
                 return nil
@@ -402,7 +454,7 @@ private struct MessengerSendReceipt: Encodable {
         let here = unread.filter { $0.conversation.id == message.conversationID }.count
         let conversations = Set(unread.map(\.conversation.id)).count
         next = unread.isEmpty
-            ? "Inbox empty. Before finishing, check whether anything you promised or started in this cycle is still open; if so, continue it, otherwise finish without sending another message."
+            ? "Inbox empty. Before finishing, check whether anything you promised or started in this cycle is still open; if so, continue it now, or schedule a wake with --wake-in if you have to wait for something. Otherwise finish without sending another message."
             : "\(unread.count) unread message\(unread.count == 1 ? "" : "s") in \(conversations) conversation\(conversations == 1 ? "" : "s") (\(here) in this one). Run --get-latest and handle them before finishing."
     }
 
@@ -461,6 +513,10 @@ public enum MessengerAction: Codable, Sendable {
         case send(conversationID: UUID, body: String, attachmentURLs: [URL])
         /// Nil clears it.
         case setStatus(String?)
+        /// `delay` is measured when Noodle receives the request, so 5m meets the five-minute minimum.
+        case scheduleWake(dueAt: Date?, delay: TimeInterval?, note: String)
+        case listWakes
+        case cancelWake(UUID)
         /// Handled by the CLI through the tool bridge; never sent to the Messenger broker.
         case tool(arguments: [String])
         case help

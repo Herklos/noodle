@@ -14,6 +14,8 @@ public protocol AgentRuntimeProcess: AnyObject {
     @discardableResult func notify(immediately: Bool) -> UUID
     func promoteNotification(_ id: UUID)
     func heartbeat()
+    /// Starts a turn for a wake the bot scheduled, when it can take one like a heartbeat.
+    func wake()
     /// Only harnesses with voices take calls; the rest keep these defaults.
     func startVoiceCall(_ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws
     func sendToVoiceCall(_ text: String)

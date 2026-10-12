@@ -15,6 +15,7 @@ import XCTest
     var starts = 0
     var stops = 0
     var heartbeats = 0
+    var wakes = 0
     var notifications: [Bool] = []
     var voiceCallRequests: [VoiceCallRequest] = []
     var voiceCallTexts: [String] = []
@@ -56,6 +57,7 @@ import XCTest
     }
     func promoteNotification(_ id: UUID) { XCTFail("Explicit delivery should not need a classifier") }
     func heartbeat() { heartbeats += 1; launch.onHeartbeat() }
+    func wake() { wakes += 1; launch.onHeartbeat() }
     func startVoiceCall(_ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws {
         voiceCallRequests.append(request)
         voiceCallEvents = events

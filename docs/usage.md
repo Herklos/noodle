@@ -139,6 +139,11 @@ switches for an explanation.
 
 They run only while Noodle is open and the Mac is awake. A heartbeat can use model
 tokens even when the bot has nothing to say; it does not authorize new work.
+
+Bots can also schedule their own wake-ups, for example to check back on something
+they are waiting for. These happen even when heartbeats are off. A bot can have
+at most three waiting at once, and after twelve in a row it waits until someone
+writes to it.
 Noodle also attempts to resume interrupted work after a restart. Startup errors
 and **Kick** appear beside the affected bot in **Settings → Harness**. Kick is also
 available from the bot's sidebar menu; review any recovery confirmation first.

@@ -88,7 +88,12 @@ public struct AgentHeartbeatScheduler: Sendable {
 public enum AgentWakeReason: String, CaseIterable, Sendable {
     case inboxChanged = "inbox-changed"
     case heartbeat
+    /// A wake the bot scheduled for itself.
+    case wake
     case runtimeRecovered = "runtime-recovered"
+
+    /// Turns Noodle starts on a timer rather than for a message; they do not count as interaction.
+    public var isScheduled: Bool { self == .heartbeat || self == .wake }
 
     /// Names the Messenger skill so a bot whose harness never surfaced it still knows where to look.
     public var eventText: String { "<noodle-event type=\"\(rawValue)\" skill=\".agents/skills/messenger/SKILL.md\" />" }

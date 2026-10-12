@@ -75,6 +75,32 @@ import XCTest
         XCTAssertEqual(f.runtime.lastActiveDates[agent.id], finished)
     }
 
+    func testScheduledWakeFiresOnceWhenDueAndTheBotIsFree() async throws {
+        let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
+        let start = f.clock.date
+        _ = try f.repository.scheduleWake(agentID: agent.id, at: start.addingTimeInterval(600), note: "Check the build", now: start)
+        f.runtime.refreshWakes(for: agent.id, repository: f.repository)
+        await f.runtime.settleWakes()
+        process.canReceiveHeartbeat = true
+        f.clock.date = start.addingTimeInterval(599)
+        f.runtime.checkWakes(repository: f.repository)
+        await f.runtime.settleWakes()
+        XCTAssertEqual(process.wakes, 0)
+        f.clock.date = start.addingTimeInterval(700)
+        process.canReceiveHeartbeat = false
+        f.runtime.checkWakes(repository: f.repository)
+        await f.runtime.settleWakes()
+        XCTAssertEqual(process.wakes, 0, "A busy bot keeps its wake until it is free")
+        process.canReceiveHeartbeat = true
+        f.runtime.checkWakes(repository: f.repository)
+        await f.runtime.settleWakes()
+        f.runtime.checkWakes(repository: f.repository)
+        await f.runtime.settleWakes()
+        XCTAssertEqual(process.wakes, 1)
+        XCTAssertEqual(process.heartbeats, 0)
+        XCTAssertEqual(try f.repository.listWakes(agentID: agent.id).due.map(\.note), ["Check the build"])
+    }
+
     func testPerBotSettingsDoNotResetOtherBotsAndReenableStartsFreshCountdown() throws {
         let f = try fixture(), a = try f.agent("A"), b = try f.agent("B")
         let first = try f.start(a), second = try f.start(b)

@@ -167,6 +167,7 @@ final class MessengerDocumentationTests: XCTestCase {
         try repository.append(message)
         let prefix = ["messenger", "--agent-directory", repository.directory(for: bot.agent).path]
         let conversation = ["--conversation", bot.conversation.id.uuidString]
+        var wakeID = ""
         for command in MessengerCommandKind.allCases {
             let options: [String]
             switch command {
@@ -177,10 +178,16 @@ final class MessengerDocumentationTests: XCTestCase {
             case .react, .unreact: options = conversation + ["--message", message.id.uuidString, "--emoji", "✅"]
             case .send: options = conversation + ["--body", "Reply"]
             case .setStatus: options = ["Busy"]
-            case .clearStatus: options = []
+            case .clearStatus, .listWakes: options = []
+            case .wakeIn: options = ["20m", "--note", "Check"]
+            case .wakeAt: options = ["2099-01-01T00:00:00Z", "--note", "Later"]
+            case .cancelWake: options = [wakeID]
             }
             let result = MessengerCLI.runDirect(arguments: prefix + [command.rawValue] + options, environment: [:])
             XCTAssertEqual(result.exitCode, 0, "\(command): \(result.standardError)")
+            if command == .wakeIn {
+                wakeID = try XCTUnwrap((try JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any])?["id"] as? String)
+            }
             if command == .help {
                 XCTAssertEqual(result.standardOutput, MessengerDocumentation.cliHelp + "\n")
             }

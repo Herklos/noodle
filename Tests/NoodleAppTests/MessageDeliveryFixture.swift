@@ -87,6 +87,7 @@ import XCTest
     func start() { XCTFail("Routing must never start a harness") }
     func stop(completion: @escaping (Bool) -> Void) { XCTFail("Routing must never stop a harness") }
     func heartbeat() { XCTFail("Routing must not send a heartbeat") }
+    func wake() { XCTFail("Routing must not send a wake") }
 }
 
 @MainActor final class RoutingFixture {

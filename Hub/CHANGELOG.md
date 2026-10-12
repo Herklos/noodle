@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bots can schedule their own wake-ups, with a note on what to do then, to come back to work they are waiting on. At most three wait at once, and a bot that has woken itself twelve times in a row waits until someone writes to it.
+
 ### Changed
 
 - Settings → Bots shows when each bot was last active instead of when it last had a heartbeat. A busy bot rarely needs a heartbeat, so the old time made active bots look neglected.

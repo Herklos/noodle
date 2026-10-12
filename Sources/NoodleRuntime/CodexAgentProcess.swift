@@ -226,6 +226,11 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         startTurn(reason: .heartbeat)
     }
 
+    public func wake() {
+        guard canReceiveHeartbeat else { return }
+        startTurn(reason: .wake)
+    }
+
     private func didTerminate(status: Int32) {
         reportUnexpectedTermination(lastErrorText ?? "Codex exited with status \(status)")
     }
@@ -321,7 +326,7 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
                 trace.record(.turnAccepted)
                 turnIsActive = true
                 update(.working, snapshot.detail)
-                if reason == .heartbeat { onHeartbeat() }
+                if reason.isScheduled { onHeartbeat() }
                 if let error = earlyTurnError {
                     earlyTurnError = nil
                     handle(error)
@@ -603,6 +608,7 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             turnIsActive = true
             let detail = switch reason {
             case .heartbeat: "Heartbeat: checking for follow-up work"
+            case .wake: "Waking as scheduled"
             case .runtimeRecovered: "Recovering interrupted work"
             case .inboxChanged: "Checking for new messages"
             }

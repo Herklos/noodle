@@ -179,6 +179,12 @@ public final class AgentRuntimeCoordinator {
     private var isStoppingAll = false
 
     @ObservationIgnored private var heartbeatScheduler: AgentHeartbeatScheduler
+    /// Each bot's soonest scheduled wake, read from its package when it starts or Messenger changes it.
+    @ObservationIgnored private var wakeDates: [UUID: Date] = [:]
+    /// Wakes taken from storage whose turn could not start, because the bot became busy meanwhile.
+    @ObservationIgnored private var owedWakes: Set<UUID> = []
+    /// Wake storage is read and written off the main thread, one change per bot at a time.
+    @ObservationIgnored private var wakeTasks: [UUID: Task<Void, Never>] = [:]
     private let defaults: UserDefaults
     @ObservationIgnored private lazy var messageDelivery = MessageDeliveryRouter(defaults: defaults)
 
@@ -455,6 +461,53 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
+    public func refreshWakes(for agentID: UUID, repository: WorkspaceRepository) {
+        changeWakes(of: agentID) { _ in
+            await Task.detached { repository.nextWakeDate(agentID: agentID) }.value
+        }
+    }
+
+    /// Wakes a bot whose scheduled wake is due once it can take a turn; a busy bot keeps it.
+    /// Checking only reads dates held in memory, so it can run every second.
+    public func checkWakes(repository: WorkspaceRepository) {
+        for id in owedWakes {
+            guard let process = processes[id], process.canReceiveHeartbeat else { continue }
+            owedWakes.remove(id)
+            process.wake()
+        }
+        let date = now()
+        for (id, due) in wakeDates where due <= date {
+            guard let process = processes[id], process.canReceiveHeartbeat else { continue }
+            wakeDates[id] = nil
+            changeWakes(of: id) { coordinator in
+                let (fired, next) = await Task.detached {
+                    ((try? repository.takeDueWakes(agentID: id, at: date)) == true, repository.nextWakeDate(agentID: id))
+                }.value
+                if fired {
+                    if let process = coordinator.processes[id], process.canReceiveHeartbeat { process.wake() }
+                    else { coordinator.owedWakes.insert(id) }
+                }
+                return next
+            }
+        }
+    }
+
+    private func changeWakes(of agentID: UUID, _ change: @escaping @MainActor (AgentRuntimeCoordinator) async -> Date?) {
+        let previous = wakeTasks[agentID]
+        wakeTasks[agentID] = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            let next = await change(self)
+            // Removing the bot cancels this; its wakes are then no longer tracked.
+            if !Task.isCancelled { wakeDates[agentID] = next }
+        }
+    }
+
+    /// Waits for wake storage changes already started.
+    func settleWakes() async {
+        for task in wakeTasks.values { await task.value }
+    }
+
     public var availableInstallations: [HarnessInstallation] {
         installations.filter(\.isAvailable)
     }
@@ -709,6 +762,7 @@ public final class AgentRuntimeCoordinator {
                 detail: "Could not prepare the bot's workspace. Check its managed skill directories before retrying.")
             return
         }
+        refreshWakes(for: agent.id, repository: repository)
         guard let installation = installation(for: agent),
               let executablePath = installation.executablePath else {
             snapshots[agent.id] = AgentRuntimeSnapshot(
@@ -969,6 +1023,9 @@ public final class AgentRuntimeCoordinator {
         saveHeartbeatActivityDates()
         lastActiveDates.removeValue(forKey: agentID)
         saveLastActiveDates()
+        wakeDates.removeValue(forKey: agentID)
+        owedWakes.remove(agentID)
+        wakeTasks.removeValue(forKey: agentID)?.cancel()
     }
 
     public func stopAll() {
