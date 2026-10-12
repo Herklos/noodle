@@ -7,7 +7,14 @@ import NoodleCore
 struct LiveVoiceWaveform: View {
     let samples: [Float]
     var duration: TimeInterval = 0
+    var started = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Audio arrives in uneven chunks, so the playhead follows the clock a quarter
+    /// second behind and never passes the audio received so far.
+    static func position(elapsed: TimeInterval, sampleCount: Int) -> Double {
+        min(Double(sampleCount), max(0, (elapsed - 0.25) / 0.05))
+    }
 
     static func bars(samples: [Float], width: CGFloat, height: CGFloat,
                      sampleCount: Int? = nil, position: Double? = nil) -> [CGRect] {
@@ -35,23 +42,20 @@ struct LiveVoiceWaveform: View {
     }
 
     var body: some View {
-        let position = max(Double(samples.count), duration / 0.05)
-        Bars(samples: samples, sampleCount: Int(position + 0.000001), position: position)
-            .fill(.primary.opacity(0.7))
-            .clipped()
-            .animation(reduceMotion ? nil : .linear(duration: 0.1), value: position)
-            .accessibilityLabel("Live microphone waveform")
+        let sampleCount = max(samples.count, Int(duration / 0.05 + 0.000001))
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.1 : nil)) { timeline in
+            Bars(samples: samples, sampleCount: sampleCount,
+                 position: Self.position(elapsed: timeline.date.timeIntervalSince(started), sampleCount: sampleCount))
+                .fill(.primary.opacity(0.7))
+                .clipped()
+        }
+        .accessibilityLabel("Live microphone waveform")
     }
 
     private struct Bars: Shape {
         let samples: [Float]
         let sampleCount: Int
-        var position: Double
-
-        var animatableData: Double {
-            get { position }
-            set { position = newValue }
-        }
+        let position: Double
 
         func path(in rect: CGRect) -> Path {
             Path { path in

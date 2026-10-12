@@ -61,6 +61,21 @@ import NoodleCore
         XCTAssertEqual(LiveVoiceWaveform.bars(samples: [Float](repeating: 0.04, count: 240), width: 600, height: 22).count, 120)
     }
 
+    /// The live playhead follows the clock, not each poll: with audio arriving in
+    /// ~85ms chunks and polled every 100ms, it still advances one bar per 50ms.
+    func testLiveWaveformScrollsAtSteadySpeedWhileAudioArrivesInChunks() {
+        let positions = stride(from: 0.5, to: 2.0, by: 0.05).map { elapsed in
+            let polled = (elapsed / 0.1).rounded(.down) * 0.1
+            let received = (polled / 0.085).rounded(.down) * 0.085
+            return LiveVoiceWaveform.position(elapsed: elapsed, sampleCount: Int(received / 0.05))
+        }
+        for (earlier, later) in zip(positions, positions.dropFirst()) {
+            XCTAssertEqual(later - earlier, 1, accuracy: 0.0001)
+        }
+        XCTAssertEqual(LiveVoiceWaveform.position(elapsed: 0.1, sampleCount: 0), 0)
+        XCTAssertEqual(LiveVoiceWaveform.position(elapsed: 5, sampleCount: 20), 20, "Never runs ahead of the audio")
+    }
+
     /// Return and keypad Enter send a ready voice draft and Escape discards it, even
     /// when something else in the chat window has focus.
     func testReturnEnterAndEscapeActOnReadyDraftWhereverFocusIs() async throws {

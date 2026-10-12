@@ -53,7 +53,8 @@ struct VoiceMessageComposer<Content: View>: View {
                                     .help("Check the microphone’s mute switch.")
                             } else {
                                 if recorder.phase == .recording {
-                                    LiveVoiceWaveform(samples: recorder.liveLevels, duration: recorder.duration).frame(height: 22)
+                                    LiveVoiceWaveform(samples: recorder.liveLevels, duration: recorder.duration,
+                                                      started: recorder.recordingStarted).frame(height: 22)
                                 } else {
                                     VoiceWaveform(samples: recorder.levels).frame(height: 22)
                                 }

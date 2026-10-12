@@ -16,6 +16,8 @@ struct VoiceRecordingDraft: Codable {
     private(set) var duration: TimeInterval = 0
     private(set) var levels: [Float] = []
     private(set) var liveLevels: [Float] = []
+    /// When the captured audio began, so the live meter scrolls with the clock rather than with each poll.
+    private(set) var recordingStarted = Date()
     private(set) var transcript: String?
     private(set) var error: String?
     private(set) var preparation = "Preparing speech…"
@@ -108,6 +110,7 @@ struct VoiceRecordingDraft: Codable {
                 self.capture = capture
                 try await capture.start()
                 try check(token)
+                recordingStarted = Date()
                 phase = .recording
                 try persist()
                 meterTask = Task {
@@ -137,6 +140,8 @@ struct VoiceRecordingDraft: Codable {
                                 recoveringInput = false
                                 stalledTicks = 0
                                 previousDuration = sink.snapshot().duration
+                                // The clock ran on during the stall; realign it with the audio.
+                                recordingStarted = Date().addingTimeInterval(-previousDuration)
                             } catch {
                                 guard generation == token, phase == .recording else { break }
                                 recoveringInput = false
