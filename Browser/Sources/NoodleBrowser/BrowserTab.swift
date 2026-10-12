@@ -31,6 +31,10 @@ import WebKit
     private var visitedURL: String?
     private var visitedTitle: String?
     private var humanInput = false
+    /// When a person, a bot or someone watching live last used the page, to the moment.
+    var lastActive = Date()
+    /// Waiting on a dialog, an upload or a page call, or being watched; stopping the page would lose that.
+    var mustKeepRunning: Bool { dialog != nil || upload != nil || !operations.isEmpty || watched }
     /// Where a person watching remotely clicks and types.
     private var surfaceInjector: SurfaceEventInjector?
     private var inputMonitor: Any?

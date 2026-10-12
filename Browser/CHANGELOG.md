@@ -5,6 +5,7 @@
 ### Changed
 
 - Tabs out of sight slow down as they do in Safari, so many open tabs no longer keep the browser busy.
+- Each browser keeps at most 8 pages running. The least recently used ones stop but stay open as tabs, and load again when you or a bot use them.
 
 ### Fixed
 

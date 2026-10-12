@@ -10,8 +10,13 @@ import WebKit
     let library: BrowserLibrary
     @Published var failure: String?
     @Published private(set) var tabs: [UUID: BrowserTab] = [:]
-    /// The icons of the open tabs' pages; a tab sends `objectWillChange` when its icon changes.
-    var favicons: [UUID: NSImage] { tabs.compactMapValues(\.favicon) }
+    /// The icons of the open tabs' pages, kept for pages that stopped; a tab sends
+    /// `objectWillChange` when its icon changes.
+    var favicons: [UUID: NSImage] { stoppedFavicons.merging(tabs.compactMapValues(\.favicon)) { $1 } }
+    private var stoppedFavicons: [UUID: NSImage] = [:]
+    /// How many pages run at once in each browser. Every running page costs memory and processor
+    /// time, so the least recently used ones stop, keeping their tab, and load again when used.
+    static let runningPageLimit = 8
     var showBrowser: ((UUID) -> Void)?
     var willRemoveBrowser: ((UUID) -> Void)?
     private var server: BrowserConnectionServer?
@@ -132,7 +137,18 @@ import WebKit
         }
         tabs[info.id] = tab
         showWatchedTab(browserID)
+        stopIdlePages(browserID, keeping: info.id)
         return tab
+    }
+    private func stopIdlePages(_ browserID: UUID, keeping kept: UUID) {
+        let selected = try? library.profile(browserID).selectedTabID
+        let running = tabs.values.filter { $0.browserID == browserID }
+        let idle = running.filter { $0.id != kept && $0.id != selected && !$0.mustKeepRunning }.sorted { $0.lastActive < $1.lastActive }
+        for tab in idle.prefix(max(0, running.count - Self.runningPageLimit)) {
+            tab.info.loading = false; saveTab(tab)
+            if let icon = tab.favicon { stoppedFavicons[tab.id] = icon }
+            tabs.removeValue(forKey: tab.id)?.stop()
+        }
     }
     func tab(browserID: UUID, tabID: UUID) throws -> BrowserTab {
         let profile = try library.profile(browserID)
@@ -167,6 +183,7 @@ import WebKit
     /// A person, a bot or someone watching live used the tab. Saved at most once a minute,
     /// since people's input arrives many times a second.
     func touch(browserID: UUID, tabID: UUID, now: Date = Date()) {
+        tabs[tabID]?.lastActive = now
         do {
             var profile = try library.profile(browserID)
             guard let index = profile.tabs.firstIndex(where: { $0.id == tabID }) else { return }
@@ -215,7 +232,7 @@ import WebKit
         profile.tabs.removeAll { $0.id == tabID }
         if profile.selectedTabID == tabID { profile.selectedTabID = profile.tabs.first?.id }
         try library.update(profile)
-        tabs.removeValue(forKey: tabID)?.stop()
+        tabs.removeValue(forKey: tabID)?.stop(); stoppedFavicons.removeValue(forKey: tabID)
         showWatchedTab(browserID)
     }
     func setMuted(_ value: Bool, browserID: UUID) async throws {
@@ -233,6 +250,7 @@ import WebKit
         willRemoveBrowser?(id)
         surfaces.removeValue(forKey: id)?.stop()
         for tab in tabs.values.filter({ $0.browserID == id }) { tabs.removeValue(forKey: tab.id)?.stop() }
+        for tab in try library.profile(id).tabs { stoppedFavicons.removeValue(forKey: tab.id) }
         for (key, value) in activeDownloads where value.browserID == id {
             _ = await value.download?.cancel(); activeDownloads.removeValue(forKey: key)
         }

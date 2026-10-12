@@ -128,6 +128,30 @@ final class BrowserRuntimeTests: XCTestCase {
         let opened = try await runtime.perform(.init(.open, browserID: a.id))
         XCTAssertNotNil(try used(XCTUnwrap(opened.tabID)))
     }
+    /// Only the most recently used pages keep running. The rest stop but stay in the tab strip,
+    /// with their address and icon, and load again when used; the tab on screen and one waiting on
+    /// a dialog keep running.
+    @MainActor func testOnlyRecentlyUsedPagesKeepRunning() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root)
+        var a = try library.create(name: "A")
+        let infos = (0..<12).map { BrowserTabInfo(title: "Page \($0)", url: "https://example.com/\($0)") }
+        a.tabs = infos; a.selectedTabID = infos[0].id; try library.update(a)
+        let runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        _ = try runtime.tab(browserID: a.id, tabID: infos[0].id)
+        try runtime.tab(browserID: a.id, tabID: infos[1].id).dialog = BrowserDialog(kind: "alert", message: "Hi", origin: "example.com")
+        for info in infos[2...] { _ = try runtime.tab(browserID: a.id, tabID: info.id) }
+        XCTAssertEqual(runtime.tabs.count, BrowserRuntime.runningPageLimit)
+        XCTAssertNotNil(runtime.tabs[infos[0].id], "the tab on screen stopped")
+        XCTAssertNotNil(runtime.tabs[infos[1].id], "a tab waiting on a dialog stopped")
+        XCTAssertNil(runtime.tabs[infos[2].id], "the least recently used page kept running")
+        XCTAssertEqual(try library.profile(a.id).tabs.map(\.id), infos.map(\.id), "stopping a page closed its tab")
+        let reloaded = try runtime.tab(browserID: a.id, tabID: infos[2].id)
+        XCTAssertEqual(reloaded.web.url?.absoluteString, "https://example.com/2")
+        XCTAssertEqual(runtime.tabs.count, BrowserRuntime.runningPageLimit)
+    }
     /// Pages change their title and address many times a second; the library shows each change
     /// at once but writes them to disk together, and none is lost when the browser stops.
     @MainActor func testTabChangesShowAtOnceAndReachDiskTogether() throws {
