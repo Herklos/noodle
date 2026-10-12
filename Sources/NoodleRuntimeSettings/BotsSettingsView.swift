@@ -126,13 +126,14 @@ public struct BotsSettingsView: View {
                 }
                 .font(.caption)
                 Group {
-                    if let date = store.runtime.lastHeartbeatDates[agent.id] {
+                    if let date = store.runtime.lastActiveDates[agent.id] {
                         HStack(spacing: 0) {
-                            Text("Last heartbeat ")
+                            Text("Active ")
                             Text(date, style: .relative)
+                            Text(" ago")
                         }
                     } else {
-                        Text("No heartbeat yet")
+                        Text("Not active yet")
                     }
                 }
                 .font(.caption)

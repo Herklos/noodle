@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Settings → Bots shows when each bot was last active instead of when it last had a heartbeat. A busy bot rarely needs a heartbeat, so the old time made active bots look neglected.
 - After a bot sends a message, Messenger tells it whether unread messages are still waiting, or asks it to finish anything it left open, so bots follow up instead of stopping after one reply.
 
 ## [0.29.0] - 2026-10-12

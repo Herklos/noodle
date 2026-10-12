@@ -17,7 +17,7 @@ import XCTest
         old.transition(.failed, detail: "Late failure from stopped runtime")
         old.launch.onHeartbeat()
         XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
-        XCTAssertNil(f.runtime.lastHeartbeatDates[agent.id])
+        XCTAssertNil(f.runtime.lastActiveDates[agent.id])
     }
 
     func testDeletedRuntimeCannotRecreateSnapshot() throws {
@@ -26,7 +26,7 @@ import XCTest
         process.transition(.working)
         process.launch.onHeartbeat()
         XCTAssertNil(f.runtime.snapshots[agent.id])
-        XCTAssertNil(f.runtime.lastHeartbeatDates[agent.id])
+        XCTAssertNil(f.runtime.lastActiveDates[agent.id])
     }
 
     func testShutdownRejectsLateCallbacksBeforeTheNextLaunch() throws {
@@ -35,7 +35,7 @@ import XCTest
         process.transition(.working)
         process.launch.onHeartbeat()
         XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .offline)
-        XCTAssertNil(f.runtime.lastHeartbeatDates[agent.id])
+        XCTAssertNil(f.runtime.lastActiveDates[agent.id])
     }
 
     func testRuntimeCannotPublishStateForAnotherBot() throws {

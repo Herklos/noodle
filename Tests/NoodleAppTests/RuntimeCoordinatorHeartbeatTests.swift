@@ -24,7 +24,6 @@ import XCTest
         f.runtime.checkHeartbeats()
         f.runtime.checkHeartbeats()
         XCTAssertEqual(process.heartbeats, 1)
-        XCTAssertEqual(f.runtime.lastHeartbeatDates[agent.id], f.clock.date)
         f.clock.date = initial.addingTimeInterval(86_400)
         f.runtime.checkHeartbeats()
         f.runtime.checkHeartbeats()
@@ -38,7 +37,7 @@ import XCTest
         process.transition(.working)
         f.runtime.checkHeartbeats()
         XCTAssertEqual(process.heartbeats, 0)
-        XCTAssertNil(f.runtime.lastHeartbeatDates[agent.id])
+        XCTAssertNil(f.runtime.lastActiveDates[agent.id])
         // A runtime may become ready without reporting a completed work transition.
         process.canReceiveHeartbeat = true
         f.runtime.checkHeartbeats()
@@ -62,6 +61,18 @@ import XCTest
         f.clock.date.addTimeInterval(1)
         f.runtime.checkHeartbeats()
         XCTAssertEqual(process.heartbeats, 1)
+    }
+
+    func testBotIsLastActiveWhenItsTurnEnds() throws {
+        let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
+        process.transition(.working)
+        f.clock.date.addTimeInterval(90)
+        process.transition(.ready)
+        let finished = f.clock.date
+        f.clock.date.addTimeInterval(600)
+        f.runtime.recordActivity(for: agent.id)
+        f.runtime.configureHeartbeats(intervalMinutes: 5)
+        XCTAssertEqual(f.runtime.lastActiveDates[agent.id], finished)
     }
 
     func testPerBotSettingsDoNotResetOtherBotsAndReenableStartsFreshCountdown() throws {
@@ -108,18 +119,20 @@ import XCTest
         XCTAssertEqual(AgentHeartbeatConfiguration.load(from: f.defaults), f.runtime.heartbeatConfiguration)
     }
 
-    func testRelaunchKeepsPersistedActivityAndLastHeartbeatButRemovalClearsThem() throws {
+    func testRelaunchKeepsPersistedActivityAndLastActiveButRemovalClearsThem() throws {
         let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
         process.canReceiveHeartbeat = true
         f.runtime.configureHeartbeats(intervalMinutes: 1)
         f.runtime.seedHeartbeatActivity(for: agent.id, at: f.clock.date.addingTimeInterval(-60))
         f.runtime.checkHeartbeats()
+        process.transition(.working)
+        process.transition(.ready)
         let last = f.clock.date
         f.runtime.stopAll()
         let reloaded = AgentRuntimeCoordinator(discovery: f.discovery, defaults: f.defaults,
             makeProcess: { f.factory.make($0) }, sleep: { try await f.clock.sleep($0) }, now: { f.clock.date })
         defer { reloaded.stopAll() }
-        XCTAssertEqual(reloaded.lastHeartbeatDates[agent.id], last)
+        XCTAssertEqual(reloaded.lastActiveDates[agent.id], last)
         XCTAssertEqual(reloaded.heartbeatConfiguration.intervalMinutes, 1)
         reloaded.seedHeartbeatActivity(for: agent.id, at: last.addingTimeInterval(-600))
         reloaded.start(agent: agent, repository: f.repository)
@@ -131,7 +144,7 @@ import XCTest
         reloaded.checkHeartbeats()
         XCTAssertEqual(next.heartbeats, 1)
         reloaded.stop(agentID: agent.id)
-        XCTAssertNil(reloaded.lastHeartbeatDates[agent.id])
+        XCTAssertNil(reloaded.lastActiveDates[agent.id])
         XCTAssertNil(f.defaults.dictionary(forKey: "Noodle.heartbeat.lastDates")?[agent.id.uuidString])
         XCTAssertNil(f.defaults.dictionary(forKey: "Noodle.heartbeat.lastActivityDates")?[agent.id.uuidString])
     }
@@ -142,6 +155,6 @@ import XCTest
             f.defaults.set(["invalid UUID": 10, agent.id.uuidString: "not a date"], forKey: key)
         }
         let runtime = AgentRuntimeCoordinator(discovery: f.discovery, defaults: f.defaults)
-        XCTAssertTrue(runtime.lastHeartbeatDates.isEmpty)
+        XCTAssertTrue(runtime.lastActiveDates.isEmpty)
     }
 }

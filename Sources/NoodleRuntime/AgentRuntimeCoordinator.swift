@@ -116,7 +116,8 @@ public final class AgentRuntimeCoordinator {
     }
     public private(set) var preventIdleSleepWhileWorking: Bool
     public private(set) var heartbeatConfiguration: AgentHeartbeatConfiguration
-    public private(set) var lastHeartbeatDates: [UUID: Date]
+    /// When each bot last finished a turn, heartbeat turns included.
+    public private(set) var lastActiveDates: [UUID: Date]
     @ObservationIgnored private var sessionStartDates: [UUID: Date]
     /// Messages and the turns that answer them; heartbeats do not count.
     @ObservationIgnored private var lastInteractionDates: [UUID: Date]
@@ -274,7 +275,7 @@ public final class AgentRuntimeCoordinator {
             configuration: configuration,
             lastActivity: Self.loadDates(from: defaults, key: Self.lastActivityDatesKey)
         )
-        lastHeartbeatDates = Self.loadLastHeartbeatDates(from: defaults)
+        lastActiveDates = Self.loadDates(from: defaults, key: Self.lastActiveDatesKey)
         sessionStartDates = Self.loadDates(from: defaults, key: Self.sessionStartDatesKey)
         lastInteractionDates = Self.loadDates(from: defaults, key: Self.lastInteractionDatesKey)
         let selection = self.harnesses
@@ -393,16 +394,19 @@ public final class AgentRuntimeCoordinator {
 
     private func recordHeartbeat(for agentID: UUID) {
         heartbeatTurns.insert(agentID)
-        lastHeartbeatDates[agentID] = now()
-        saveLastHeartbeatDates()
     }
 
-    private func saveLastHeartbeatDates() {
+    private func recordTurnEnd(for agentID: UUID) {
+        lastActiveDates[agentID] = now()
+        saveLastActiveDates()
+    }
+
+    private func saveLastActiveDates() {
         defaults.set(
-            Dictionary(uniqueKeysWithValues: lastHeartbeatDates.map {
+            Dictionary(uniqueKeysWithValues: lastActiveDates.map {
                 ($0.key.uuidString, $0.value.timeIntervalSince1970)
             }),
-            forKey: Self.lastHeartbeatDatesKey
+            forKey: Self.lastActiveDatesKey
         )
     }
 
@@ -430,11 +434,8 @@ public final class AgentRuntimeCoordinator {
     private static let sessionStartDatesKey = "Noodle.session.startDates"
     private static let lastInteractionDatesKey = "Noodle.session.lastInteractionDates"
     private static let lastActivityDatesKey = "Noodle.heartbeat.lastActivityDates"
-    private static let lastHeartbeatDatesKey = "Noodle.heartbeat.lastDates"
-
-    private static func loadLastHeartbeatDates(from defaults: UserDefaults) -> [UUID: Date] {
-        loadDates(from: defaults, key: lastHeartbeatDatesKey)
-    }
+    /// Saved heartbeat times seed the dates: a heartbeat turn counts as activity too.
+    private static let lastActiveDatesKey = "Noodle.heartbeat.lastDates"
 
     private static func loadDates(from defaults: UserDefaults, key: String) -> [UUID: Date] {
         guard let stored = defaults.dictionary(forKey: key) else { return [:] }
@@ -966,8 +967,8 @@ public final class AgentRuntimeCoordinator {
         forgetSignInRetries(agentID)
         heartbeatScheduler.remove(agentID)
         saveHeartbeatActivityDates()
-        lastHeartbeatDates.removeValue(forKey: agentID)
-        saveLastHeartbeatDates()
+        lastActiveDates.removeValue(forKey: agentID)
+        saveLastActiveDates()
     }
 
     public func stopAll() {
@@ -1144,6 +1145,7 @@ public final class AgentRuntimeCoordinator {
             defer { previousPhase = snapshot.phase }
             if previousPhase == .working, snapshot.phase == .ready {
                 self.recordActivity(for: agentID)
+                self.recordTurnEnd(for: agentID)
                 if self.heartbeatTurns.remove(agentID) == nil { self.recordInteraction(for: agentID) }
                 self.connectionRecoveryAttempts[agentID] = nil
                 self.signInAnnounced.remove(agentID)
