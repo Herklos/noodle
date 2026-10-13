@@ -212,6 +212,7 @@ let project = Project(
                 .package(product: "ComputerBridge"),
                 .target(name: "NoodleAgentHost"),
                 .target(name: "NoodleShareExtension"),
+                .target(name: "NoodleWidgetsExtension"),
                 .target(name: "NoodleVisionToolsExtension"),
                 .target(name: "NoodleMapsToolsExtension"),
                 .target(name: "NoodleBrowserToolsExtension"),
@@ -280,6 +281,23 @@ let project = Project(
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(NOODLE_APP_BUNDLE_ID).share",
                 "PRODUCT_NAME": "NoodleShare",
                 "EXECUTABLE_NAME": "NoodleShareExtension",
+            ]) { $1 })
+        ),
+        // The desktop widgets, sharing only the app group Noodle leaves their bots in.
+        .target(
+            name: "NoodleWidgetsExtension",
+            destinations: .macOS,
+            product: .appExtension,
+            bundleId: "com.pdparchitect.noodle.widgets",
+            deploymentTargets: .macOS("26.0"),
+            infoPlist: .file(path: "Support/Widgets-Info.plist"),
+            sources: ["Sources/NoodleWidgets/**"],
+            entitlements: .file(path: "Support/Widgets.entitlements"),
+            dependencies: [.package(product: "NoodleCore"), .package(product: "NoodleWallpaper"), .sdk(name: "WidgetKit", type: .framework)],
+            settings: .settings(base: signing.merging([
+                "PRODUCT_BUNDLE_IDENTIFIER": "$(NOODLE_APP_BUNDLE_ID).widgets",
+                "PRODUCT_NAME": "NoodleWidgets",
+                "EXECUTABLE_NAME": "NoodleWidgetsExtension",
             ]) { $1 })
         ),
         toolExtension("Vision"),

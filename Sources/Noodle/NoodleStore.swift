@@ -171,6 +171,7 @@ final class NoodleStore {
     @ObservationIgnored let noodletAnnotations: NoodletAnnotations
     @ObservationIgnored private let noodletOverlay = NoodletAnnotationOverlay()
     @ObservationIgnored private var hubMirrorTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    @ObservationIgnored private let botWidgets = BotWidgetPublisher()
     let harnessSetup: HarnessSetupController
     private let connectsServices: Bool
     private var transcriptRefreshTask: Task<Void, Never>?
@@ -2304,6 +2305,7 @@ final class NoodleStore {
                 self.runtime.reconcile(agents: self.agents, repository: self.repository)
                 self.runtime.checkHeartbeats()
                 self.runtime.checkWakes(repository: self.repository)
+                if self.connectsServices { self.botWidgets.publish(self.widgetBots) }
             }
         }
         // Harnesses Noodle installed have no updater of their own. Settings need not be open.

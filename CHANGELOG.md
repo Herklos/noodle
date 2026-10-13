@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Clicking a bot's picture in either desktop widget opens its chat, just like clicking its name.
+
 ### Added
 
 - Edit → Paste as Attachment (⌥⌘V), also in the message field's context menu, attaches copied text as a file however short it is.
@@ -19,6 +23,7 @@ All notable changes to Noodle are documented here, following
 
 ### Added
 
+- Desktop widgets. Bots opens a chat with a bot in one click; the small size holds your first bot. Bot Status shows your most recently active bots, which of them are working, and each bot's status or else the start of its latest reply.
 - Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.
 - Organize in a bot's conversation menu asks an idle bot to tidy its own files: recurring work moves into assignments, memory is brought up to date and stale files go. The bot sends a short note on what changed. It is on iPhone too, for bots on This Mac as a Hub.
 - The welcome offers Noodle Hub beside the accounts, so you can start with the harnesses a Noodle Hub lends you instead of signing in to one on this Mac.
