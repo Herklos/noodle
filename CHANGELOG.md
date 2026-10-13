@@ -9,7 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.
-- Organize in a bot's conversation menu asks an idle bot to tidy its own files: recurring work moves into assignments, memory is brought up to date and stale files go. The bot sends a short note on what changed.
+- Organize in a bot's conversation menu asks an idle bot to tidy its own files: recurring work moves into assignments, memory is brought up to date and stale files go. The bot sends a short note on what changed. It is on iPhone too, for bots on This Mac as a Hub.
 
 ### Fixed
 

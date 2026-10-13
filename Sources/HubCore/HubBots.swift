@@ -485,6 +485,12 @@ import NoodleRuntime
         runtime.startNewSession(agent: agent, repository: repository)
     }
 
+    public func organize(_ id: UUID, for user: HubUser) throws {
+        let agent = try runHere(id, by: user)
+        guard runtime.canOrganize(agent.id) else { throw LinkError("\(agent.displayName) is busy. Try again when it is idle.") }
+        runtime.organize(agent.id)
+    }
+
     /// Deletes every bot of a user who is being removed, and their conversations with bots shared with them.
     public func removeBots(of user: HubUser) {
         for agent in (try? repository.loadAgents()) ?? [] where access.owner(ofBot: agent.id) == user.id {

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Organize in a bot's settings asks an idle bot on your Hub to tidy its own files, as on the Mac. The bot sends a short note on what changed.
+
+### What to Test
+
+- Open an idle bot's settings, tap Organize, and check the bot replies with a short note on what it tidied. While the bot is working, check Organize is dimmed.
+
 ## [0.30.2] - 2026-10-12
 
 ### Fixed

@@ -630,6 +630,25 @@ import XCTest
         XCTAssertEqual(processes().count, 2)
     }
 
+    /// As in Noodle's sidebar: Organize reaches an idle bot and is refused while it works.
+    func testAPhoneOrganizesAnIdleBot() async throws {
+        let (runtime, processes) = try fakeRuntime()
+        let (f, _) = try await fixture(bots: [], runtime: runtime)
+        let (agent, first) = try startedBot(f, in: runtime, processes)
+
+        do {
+            _ = try await f.device.request(.organize(botID: agent.id))
+            XCTFail("a busy bot was organized")
+        } catch {}
+        XCTAssertEqual(first.organizes, 0)
+
+        first.canReceiveHeartbeat = true
+        let answer = try await f.device.request(.organize(botID: agent.id))
+        XCTAssertEqual(answer, .done)
+        XCTAssertEqual(first.organizes, 1)
+        XCTAssertEqual(first.stops, 0, "Organize keeps the session")
+    }
+
     /// As Edit Bot in Noodle: a model or effort changed on the phone is what the running bot uses next.
     func testAPhoneEditingABotRestartsItWithTheNewSettings() async throws {
         let (runtime, processes) = try fakeRuntime()

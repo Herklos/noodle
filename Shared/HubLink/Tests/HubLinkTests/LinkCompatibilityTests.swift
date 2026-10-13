@@ -307,6 +307,7 @@ final class LinkVersion1Tests: XCTestCase {
             "markRead": .markRead(LinkReadMark(conversationID: b, messageID: a)),
             "pushTopic": .pushTopic(LinkPushTopic(topic: "topic")), "noPushTopic": .pushTopic(LinkPushTopic(topic: nil)),
             "kick": .kick(botID: a), "confirmKick": .confirmKick(botID: a, confirmationID: b), "newSession": .newSession(botID: a),
+            "organize": .organize(botID: a),
             "toolCatalog": .toolCatalog,
             "noodlet": .noodlet(conversationID: b, attachmentID: c), "noodletArchive": .noodletArchive(grant: a, offset: 524288),
             "noodletCall": .noodletCall(LinkNoodletCall(grant: a, id: b, offset: 0, total: 2, data: Data([1, 2]))),

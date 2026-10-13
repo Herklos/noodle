@@ -213,6 +213,9 @@ private actor FakeHub {
         case .success(.newSession(let id)) where id == bot.id:
             restarts.append("new session")
             return .done
+        case .success(.organize(let id)) where id == bot.id:
+            restarts.append("organize")
+            return .done
         case .success(.pin(let pin)) where pin.conversationID == bot.conversationID:
             bot.pinnedAt = pin.pinned ? Date() : nil
             pins.append(pin)
@@ -345,7 +348,7 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(unshared.first { $0.id == "studio" }?.sharedWith == [grace.id])
     }
 
-    /// Kick restarts at once or brings back the Hub's question, whose answer names it; New Session goes straight through.
+    /// Kick restarts at once or brings back the Hub's question, whose answer names it; New Session and Organize go straight through.
     @Test func kickAndNewSessionReachTheHub() async throws {
         let hub = FakeHub()
         let (chats, server) = try await paired(to: hub)
@@ -360,7 +363,8 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(asked == question)
         try await chats.confirmKick(asked, for: scout)
         try await chats.startNewSession(scout)
-        #expect(await hub.restarts == ["kick", "kick", "confirm \(question.id)", "new session"])
+        try await chats.organize(scout)
+        #expect(await hub.restarts == ["kick", "kick", "confirm \(question.id)", "new session", "organize"])
     }
 
     /// A long conversation opens on its newest page; scrolling back brings the rest.

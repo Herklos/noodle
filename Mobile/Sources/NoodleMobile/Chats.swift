@@ -528,6 +528,13 @@ enum HubThread: HubConversation {
         }
     }
 
+    /// Asks the bot to tidy its own workspace files; the Hub refuses while it is busy.
+    func organize(_ agent: LinkBot) async throws {
+        guard case .done = try await pairing.request(.organize(botID: agent.id)) else {
+            throw LinkError("The Hub sent an unexpected answer.")
+        }
+    }
+
     func agent(_ id: UUID) -> LinkBot? { agents.first { $0.id == id } }
 
     func thread(_ id: UUID) -> HubThread? { threads.first { $0.id == id } }
@@ -2331,6 +2338,11 @@ struct AgentEditor: View {
                     Section {
                         NavigationLink("Background") { BackgroundEditor(chats: chats, thread: .bot(agent)) }
                     }
+                    Section {
+                        Button("Organize") { run(thenClose: true) { try await chats.organize(agent) } }
+                            .disabled(chats.agent(agent.id)?.phase != .ready)
+                    }
+                    .disabled(saving)
                     // Kept out of the way, as people should rarely need them: Kick only for a failed bot.
                     Section {
                         if chats.agent(agent.id)?.phase == .failed {

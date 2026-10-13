@@ -1067,6 +1067,7 @@ import XCTest
             .shareBot(id: bot.id, people: [grace.user.id, bea.user.id]), .shareBot(id: bot.id, people: []),
             .updateBot(id: bot.id, LinkBotDraft(name: "Mine", provider: "claude-code")), .deleteBot(id: bot.id),
             .kick(botID: bot.id), .confirmKick(botID: bot.id, confirmationID: UUID()), .newSession(botID: bot.id),
+            .organize(botID: bot.id),
             .archive(LinkArchiveChange(id: bot.id, archived: true)), .assignConnections(botID: bot.id, connectionIDs: []),
             .createGroup(LinkGroupDraft(name: "Mine", botIDs: [bot.id])),
             .updateGroup(id: group.id, LinkGroupDraft(name: "Mine", botIDs: [bot.id])), .deleteGroup(id: group.id),

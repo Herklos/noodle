@@ -123,6 +123,9 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     case confirmKick(botID: UUID, confirmationID: UUID)
     /// Starts the bot with a fresh context, keeping its workspace, memory and messages.
     case newSession(botID: UUID)
+    /// Asks an idle bot to tidy its own workspace files, as Organize does in Noodle. Answers `done`;
+    /// refused while the bot is busy.
+    case organize(botID: UUID)
     /// Messages of one of this user's conversations, from position `after` on.
     case messages(conversationID: UUID, after: Int)
     /// Part of a conversation, answered with `messages`: the newest first, earlier pages as the

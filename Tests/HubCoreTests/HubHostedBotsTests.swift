@@ -202,7 +202,7 @@ import XCTest
         let id = try await host(f)
         let refused: [LinkRequest] = [
             .updateBot(id: id, LinkBotDraft(name: "Jeeves", provider: "claude-code")),
-            .kick(botID: id), .newSession(botID: id), .confirmKick(botID: id, confirmationID: UUID()),
+            .kick(botID: id), .newSession(botID: id), .organize(botID: id), .confirmKick(botID: id, confirmationID: UUID()),
             .createGroup(LinkGroupDraft(name: "House", botIDs: [id])),
         ]
         for request in refused {
