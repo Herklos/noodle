@@ -12,6 +12,7 @@ All notable changes to Noodle are documented here, following
 
 ### Fixed
 
+- On a heartbeat, a bot you asked to keep doing something, such as a daily search, does the next round in full instead of stopping after a quick look.
 - Settings → Bots shows "Active now" for a bot that is working, and a turn cut short by a restart counts as activity. A bot busy after a restart could look idle for half an hour.
 
 ## [0.59.0] - 2026-10-12

@@ -34,6 +34,14 @@ final class MessengerDocumentationTests: XCTestCase {
         }
     }
 
+    /// A bot told to keep doing something does a full round on each heartbeat instead of finishing silently.
+    func testHeartbeatTreatsStandingAssignmentsAsWork() {
+        let guidance = AgentWakeReason.heartbeat.reference.guidance
+        XCTAssertTrue(guidance.contains("standing assignment"))
+        XCTAssertTrue(guidance.contains("do its next round in full"))
+        XCTAssertTrue(guidance.contains("finish silently"))
+    }
+
     /// The shared rules once, then one line per effect saying when to use it.
     func testEffectRulesAreStatedOnceAndEachEffectOnlySaysWhenToUseIt() {
         let rules = MessengerDocumentation.effectInstructions
