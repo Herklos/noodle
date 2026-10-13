@@ -91,6 +91,15 @@ import NoodletRuntime
   @Published private(set) var frontPackage: NoodletPackage?
   private var server: AppletConnectionServer?
   private var artifacts: [UUID: (owner: String, url: URL)] = [:]
+  /// Archives still being written, by where they go, and the error of one that could not be.
+  private var packing: [URL: Error?] = [:]
+  /// Writes a noodlet's files as one archive at `destination`, off the main thread. Replaced in tests.
+  var pack: @Sendable (NoodletPackage, URL) throws -> Void = { package, destination in
+    let partial = destination.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: partial) }
+    try NoodletArchive.write(package.names(), from: package.url, to: partial)
+    try FileManager.default.moveItem(at: partial, to: destination)
+  }
   private let defaults: UserDefaults
   /// Returns why a noodlet may not use the permissions it declares. Replaced in tests.
   lazy var authorize: (NoodletPackage) async -> String? = { [defaults] in
@@ -198,10 +207,12 @@ import NoodletRuntime
             dataRoot: data, account: AppletSecrets.account(package, dataRoot: data), secrets: library.secrets
           ).perform(call)
         } else {
-          let (url, revision) = try archive(package)
+          // Answered before the archive is written, so a device knows at once whether it has
+          // this revision already; it asks for the archive's pieces once it is.
+          let (url, revision, size) = try await archive(package)
           response.artifactID = register(url, owner: owner)
           response.revision = revision
-          response.byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+          response.byteCount = size
           response.manifest = package.manifest
         }
         return response
@@ -247,9 +258,17 @@ import NoodletRuntime
         guard let id = request.artifactID, let artifact = artifacts[id],
           owner == "local" || artifact.owner == owner
         else { throw AppletError("Artifact is unavailable to this caller.") }
+        let offset = request.offset ?? 0
+        if let packed = packing[artifact.url] {
+          if let packed { throw packed }
+          var response = AppletResponse()
+          response.data = Data()
+          response.offset = offset
+          response.done = false
+          return response
+        }
         let reader = try FileHandle(forReadingFrom: artifact.url)
         defer { try? reader.close() }
-        let offset = request.offset ?? 0
         try reader.seek(toOffset: UInt64(offset))
         let data = try reader.read(upToCount: 1_048_576) ?? Data()
         let size = try artifact.url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -257,6 +276,7 @@ import NoodletRuntime
         response.data = data
         response.offset = offset + data.count
         response.done = offset + data.count >= size
+        response.byteCount = size
         return response
       }
       if request.operation == .list {
@@ -718,23 +738,35 @@ import NoodletRuntime
     objectWillChange.send()
     return url
   }
-  /// The noodlet's files as one archive, kept once for each revision, and that revision.
-  private func archive(_ package: NoodletPackage) throws -> (URL, String) {
-    let revision = package.revision
+  /// Where the noodlet's files are archived, kept once for each revision, that revision, and the
+  /// size of its files. A new revision's archive is written meanwhile, in the background.
+  private func archive(_ package: NoodletPackage) async throws -> (URL, String, Int) {
+    let read = revision
+    let (revision, size) = try await Task.detached {
+      (read(package), try package.names().reduce(0) {
+        $0 + ((try? package.url.appendingPathComponent($1).resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+      })
+    }.value
     let directory = library.root.appendingPathComponent("Archives")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let url = directory.appendingPathComponent("\(package.key).\(revision).noodletarchive")
-    if !FileManager.default.fileExists(atPath: url.path) {
+    // One that failed is written again.
+    let writing = packing[url].map { $0 == nil } ?? false
+    if !writing, !FileManager.default.fileExists(atPath: url.path) {
       for old in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
       where old.hasPrefix(package.key + ".") {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(old))
       }
-      let partial = directory.appendingPathComponent(".\(UUID().uuidString)")
-      defer { try? FileManager.default.removeItem(at: partial) }
-      try NoodletArchive.write(package.names(), from: package.url, to: partial)
-      try FileManager.default.moveItem(at: partial, to: url)
+      packing[url] = .some(nil)
+      let write = pack
+      Task {
+        do {
+          try await Task.detached { try write(package, url) }.value
+          packing[url] = nil
+        } catch { packing[url] = error }
+      }
     }
-    return (url, revision)
+    return (url, revision, size)
   }
   private func register(_ url: URL, owner: String) -> UUID {
     let id = UUID()

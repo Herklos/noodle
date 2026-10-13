@@ -153,15 +153,16 @@ import QuickLookUI
         var archive = AppletRequest(.archive)
         archive.noodletID = id
         let readied = try await controller.companion(archive)
-        guard let artifact = readied.artifactID, let revision = readied.revision, let byteCount = readied.byteCount,
+        guard let artifact = readied.artifactID, let revision = readied.revision,
               readied.manifest?.title == "Noodlet on this Mac" else { throw AppletError("Applet did not ready the noodlet's files.") }
         let cache = manager.temporaryDirectory.appendingPathComponent("NoodletCache-Test-\(UUID())")
         defer { try? manager.removeItem(at: cache) }
-        let files = try await NoodletCache(root: cache).package(id, revision: revision, byteCount: byteCount) { offset in
+        let files = try await NoodletCache(root: cache).package(id, revision: revision) { offset in
             var piece = AppletRequest(.artifact)
             piece.artifactID = artifact
             piece.offset = offset
-            return try await controller.companion(piece).data ?? Data()
+            let read = try await controller.companion(piece)
+            return (read.data ?? Data(), read.byteCount ?? 0)
         }
         let store = RemoteNoodletStore { _, _, _, piece in
             var call = AppletRequest(.store)

@@ -449,8 +449,9 @@ public actor LinkNoodletSession {
         return true
     }
 
-    /// A piece of the noodlet's files from `offset`, the same files even if the Hub forgot them.
-    public func archive(from offset: Int) async throws -> Data {
+    /// A piece of the noodlet's files from `offset`, the same files even if the Hub forgot them, and
+    /// the size of them all; nothing and no size while the Hub is still packing them.
+    public func archive(from offset: Int) async throws -> (data: Data, total: Int) {
         let revision = noodlet.revision
         do {
             return try await archivePiece(from: offset)
@@ -460,10 +461,10 @@ public actor LinkNoodletSession {
         }
     }
 
-    private func archivePiece(from offset: Int) async throws -> Data {
-        guard case .chunk(let data, _) = try await request(.noodletArchive(grant: noodlet.grant, offset: offset))
+    private func archivePiece(from offset: Int) async throws -> (data: Data, total: Int) {
+        guard case .chunk(let data, let total) = try await request(.noodletArchive(grant: noodlet.grant, offset: offset))
         else { throw LinkError("The Hub sent an unexpected answer.") }
-        return data
+        return (data, total)
     }
 
     /// Sends a piece of the call `id` on the noodlet's data and secrets; the last one answers.

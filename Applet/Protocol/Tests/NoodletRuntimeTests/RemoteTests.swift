@@ -76,24 +76,24 @@ final class RemoteTests: XCTestCase {
         let cache = NoodletCache(root: try folder())
         let id = UUID()
         let offsets = Offsets()
-        let fetch: @Sendable (Int) async throws -> Data = { offset in
+        let fetch: @Sendable (Int) async throws -> (Data, Int) = { offset in
             await offsets.add(offset)
-            return bytes.subdata(in: offset..<min(bytes.count, offset + 1000))
+            return (bytes.subdata(in: offset..<min(bytes.count, offset + 1000)), bytes.count)
         }
-        let first = try await cache.package(id, revision: "abc1", byteCount: bytes.count, fetch: fetch)
+        let first = try await cache.package(id, revision: "abc1", fetch: fetch)
         XCTAssertEqual(try Data(contentsOf: first.appendingPathComponent("index.html")).count, 300_000)
         let count = await offsets.all.count
         XCTAssertGreaterThan(count, 0)
-        _ = try await cache.package(id, revision: "abc1", byteCount: bytes.count, fetch: fetch)
+        _ = try await cache.package(id, revision: "abc1", fetch: fetch)
         let again = await offsets.all.count
         XCTAssertEqual(again, count, "fetched a revision it had")
-        let second = try await cache.package(id, revision: "abc2", byteCount: bytes.count, fetch: fetch)
+        let second = try await cache.package(id, revision: "abc2", fetch: fetch)
         let later = await offsets.all.count
         XCTAssertGreaterThan(later, count)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.appendingPathComponent("noodlet.json").path))
         do {
-            _ = try await cache.package(id, revision: "../x", byteCount: bytes.count, fetch: fetch)
+            _ = try await cache.package(id, revision: "../x", fetch: fetch)
             XCTFail("a revision named a path")
         } catch {}
     }
@@ -105,16 +105,16 @@ final class RemoteTests: XCTestCase {
         try NoodletArchive.write(entries: [("noodlet.json", Data("{}".utf8)), ("index.html", Data(repeating: 7, count: 3000))], to: archive)
         let bytes = try Data(contentsOf: archive)
         let cache = NoodletCache(root: try folder())
-        let fetch: @Sendable (Int) async throws -> Data = { bytes.subdata(in: $0..<min(bytes.count, $0 + 100)) }
+        let fetch: @Sendable (Int) async throws -> (Data, Int) = { (bytes.subdata(in: $0..<min(bytes.count, $0 + 100)), bytes.count) }
         let id = UUID()
         XCTAssertNil(cache.downloaded(id, except: "abc1"))
-        let first = try await cache.package(id, revision: "abc1", byteCount: bytes.count, fetch: fetch)
+        let first = try await cache.package(id, revision: "abc1", fetch: fetch)
         XCTAssertNil(cache.downloaded(id, except: "abc1"), "offered the revision it was asked for")
         XCTAssertEqual(cache.downloaded(id, except: "abc2")?.standardizedFileURL, first.standardizedFileURL)
-        let second = try await cache.package(id, revision: "abc2", byteCount: bytes.count, keepingOthers: true, fetch: fetch)
+        let second = try await cache.package(id, revision: "abc2", keepingOthers: true, fetch: fetch)
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.appendingPathComponent("index.html").path))
         XCTAssertNil(cache.downloaded(id, except: "abc2"), "offered an older revision once the new one was in")
-        _ = try await cache.package(id, revision: "abc2", byteCount: bytes.count, fetch: fetch)
+        _ = try await cache.package(id, revision: "abc2", fetch: fetch)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.appendingPathComponent("noodlet.json").path))
     }
@@ -126,22 +126,49 @@ final class RemoteTests: XCTestCase {
         func add(_ arrival: NoodletArrival) { lock.withLock { seen.append(arrival) } }
     }
 
-    /// A noodlet on its way says how much of it has arrived, then that it is unpacking; one this
-    /// device already has arrives at once.
+    /// A noodlet on its way says it waits on the Hub, how much of it has arrived, then that it is
+    /// unpacking; one this device already has arrives at once.
     func testTheCacheSaysHowFarANoodletHasArrived() async throws {
         let archive = try folder().appendingPathComponent("a")
         try NoodletArchive.write(entries: [("noodlet.json", Data("{}".utf8)), ("index.html", Data(repeating: 7, count: 3000))], to: archive)
         let bytes = try Data(contentsOf: archive)
         let cache = NoodletCache(root: try folder())
         let arrivals = Arrivals()
-        let fetch: @Sendable (Int) async throws -> Data = { bytes.subdata(in: $0..<min(bytes.count, $0 + 100)) }
+        let fetch: @Sendable (Int) async throws -> (Data, Int) = { (bytes.subdata(in: $0..<min(bytes.count, $0 + 100)), bytes.count) }
         let id = UUID()
-        _ = try await cache.package(id, revision: "abc1", byteCount: bytes.count, progress: arrivals.add, fetch: fetch)
+        _ = try await cache.package(id, revision: "abc1", progress: arrivals.add, fetch: fetch)
         let seen = arrivals.all
-        let received = stride(from: 0, through: bytes.count, by: 100).map { $0 } + (bytes.count % 100 == 0 ? [] : [bytes.count])
-        XCTAssertEqual(seen, received.map { .downloading(received: $0, total: bytes.count) } + [.unpacking])
-        _ = try await cache.package(id, revision: "abc1", byteCount: bytes.count, progress: arrivals.add, fetch: fetch)
+        let received = stride(from: 100, through: bytes.count, by: 100).map { $0 } + (bytes.count % 100 == 0 ? [] : [bytes.count])
+        XCTAssertEqual(seen, [.preparing] + received.map { .downloading(received: $0, total: bytes.count) } + [.unpacking])
+        _ = try await cache.package(id, revision: "abc1", progress: arrivals.add, fetch: fetch)
         XCTAssertEqual(arrivals.all, seen, "a noodlet it had arrived again")
+    }
+
+    /// While the Hub is still packing the noodlet, its pieces come back empty and are asked for
+    /// again, the device saying it waits on the Hub.
+    func testTheCacheWaitsWhileTheHubPacksTheNoodlet() async throws {
+        let archive = try folder().appendingPathComponent("a")
+        try NoodletArchive.write(entries: [("noodlet.json", Data("{}".utf8)), ("index.html", Data(repeating: 7, count: 300))], to: archive)
+        let bytes = try Data(contentsOf: archive)
+        let offsets = Offsets()
+        let arrivals = Arrivals()
+        let fetch: @Sendable (Int) async throws -> (Data, Int) = { offset in
+            await offsets.add(offset)
+            guard await offsets.all.count > 2 else { return (Data(), 0) }
+            return (bytes.subdata(in: offset..<bytes.count), bytes.count)
+        }
+        let package = try await NoodletCache(root: try folder()).package(UUID(), revision: "abc1", packingPause: .zero,
+                                                                          progress: arrivals.add, fetch: fetch)
+        XCTAssertEqual(try Data(contentsOf: package.appendingPathComponent("index.html")).count, 300)
+        let asked = await offsets.all
+        XCTAssertEqual(asked, [0, 0, 0])
+        XCTAssertEqual(arrivals.all, [.preparing, .downloading(received: bytes.count, total: bytes.count), .unpacking])
+    }
+
+    /// A small new revision is waited for; a large one downloads while the one the device has plays.
+    func testOnlyASmallNewRevisionIsWaitedFor() {
+        XCTAssertTrue(NoodletCache.worthWaiting(for: 3_000_000))
+        XCTAssertFalse(NoodletCache.worthWaiting(for: 80_000_000))
     }
 
     /// A piece that fails, as when the phone locks mid-download and its connection drops, is asked
@@ -152,15 +179,15 @@ final class RemoteTests: XCTestCase {
         let bytes = try Data(contentsOf: archive)
         let offsets = Offsets()
         let failed = Arrivals()
-        let fetch: @Sendable (Int) async throws -> Data = { offset in
+        let fetch: @Sendable (Int) async throws -> (Data, Int) = { offset in
             await offsets.add(offset)
             if offset == 100, failed.all.isEmpty {
                 failed.add(.unpacking)
                 throw URLError(.networkConnectionLost)
             }
-            return bytes.subdata(in: offset..<min(bytes.count, offset + 100))
+            return (bytes.subdata(in: offset..<min(bytes.count, offset + 100)), bytes.count)
         }
-        let package = try await NoodletCache(root: try folder()).package(UUID(), revision: "abc1", byteCount: bytes.count, fetch: fetch)
+        let package = try await NoodletCache(root: try folder()).package(UUID(), revision: "abc1", fetch: fetch)
         XCTAssertEqual(try Data(contentsOf: package.appendingPathComponent("index.html")).count, 3000)
         let asked = await offsets.all
         XCTAssertEqual(Array(asked.prefix(3)), [0, 100, 100])
@@ -170,13 +197,13 @@ final class RemoteTests: XCTestCase {
     func testTheCacheGivesUpOnADownloadThatKeepsFailing() async throws {
         let root = try folder()
         let offsets = Offsets()
-        let fetch: @Sendable (Int) async throws -> Data = { offset in
+        let fetch: @Sendable (Int) async throws -> (Data, Int) = { offset in
             await offsets.add(offset)
             throw URLError(.networkConnectionLost)
         }
         let id = UUID()
         do {
-            _ = try await NoodletCache(root: root).package(id, revision: "abc1", byteCount: 5000, pauses: [.zero, .zero], fetch: fetch)
+            _ = try await NoodletCache(root: root).package(id, revision: "abc1", pauses: [.zero, .zero], fetch: fetch)
             XCTFail("a download that kept failing finished")
         } catch {}
         let asked = await offsets.all

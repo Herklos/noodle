@@ -203,7 +203,8 @@ public struct AppletResponse: Codable, Sendable {
     /// The noodlet's manifest and the revision of its files, with an `archive`.
     public var manifest: NoodletManifest?
     public var revision: String?
-    /// The size of an `archive`'s file.
+    /// The size of a noodlet's files, unpacked, on `archive`; of the archive, on `artifact`. An
+    /// `artifact` still being written answers no data and no size, to be asked for again.
     public var byteCount: Int?
     /// What a `store` call answered.
     public var stored: NoodletValue?

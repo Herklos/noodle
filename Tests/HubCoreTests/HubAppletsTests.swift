@@ -24,6 +24,10 @@ import XCTest
         var permissions: [UUID: [String: String]] = [:]
         /// What a noodlet's files archive to, larger than one piece.
         let archive = Data((0..<1_500_000).map { UInt8(truncatingIfNeeded: $0) })
+        /// The size of the noodlet's files, unpacked.
+        let filesSize = 2_000_000
+        /// How many more reads of its archive find it still being written.
+        var packingReads = 0
         private(set) var calls: [(UUID?, NoodletStoreCall)] = []
         /// Whom each request was made for, in order.
         private(set) var asked: [(AppletOperation, String?)] = []
@@ -36,12 +40,19 @@ import XCTest
                 case .archive:
                     response.artifactID = session
                     response.revision = "r1"
-                    response.byteCount = archive.count
+                    response.byteCount = filesSize
                     response.manifest = NoodletManifest(title: "Counter")
                 case .artifact:
                     let offset = request.offset ?? 0
+                    if packingReads > 0 {
+                        packingReads -= 1
+                        response.data = Data()
+                        response.done = false
+                        return response
+                    }
                     response.data = archive.subdata(in: offset..<min(archive.count, offset + 1_048_576))
                     response.done = offset + (response.data?.count ?? 0) >= archive.count
+                    response.byteCount = archive.count
                 case .store:
                     calls.append((request.noodletID, request.store!))
                     response.stored = .text("kept")
@@ -77,6 +88,7 @@ import XCTest
         let applet: FakeApplet
         let surfaces: FakeSurfaces
         let link: HubLinkService
+        let root: URL
     }
 
     private func fixture() async throws -> Fixture {
@@ -103,7 +115,7 @@ import XCTest
         guard case .listening = link.state else { throw XCTSkip("Could not listen: \(link.state)") }
         let device = HubPairing(directory: root.appendingPathComponent("Device"), deviceName: "Mac")
         await device.join(link.invite(ada).url().absoluteString)
-        return Fixture(hub: hub, ada: ada, device: device, applet: applet, surfaces: surfaces, link: link)
+        return Fixture(hub: hub, ada: ada, device: device, applet: applet, surfaces: surfaces, link: link, root: root)
     }
 
     /// Posts a noodlet link into a conversation, as the bot or as its owner.
@@ -360,13 +372,18 @@ import XCTest
         XCTAssertEqual(readied.noodletID, noodlet)
         XCTAssertEqual(readied.revision, "r1")
         XCTAssertEqual(try JSONDecoder().decode(NoodletManifest.self, from: readied.manifest).title, "Counter")
+        XCTAssertEqual(readied.byteCount, f.applet.filesSize)
+        // While Applet still writes the archive, a piece comes back empty, with no size yet.
+        f.applet.packingReads = 1
+        let early = try await f.device.request(.noodletArchive(grant: readied.grant, offset: 0))
+        XCTAssertEqual(early, .chunk(data: Data(), total: 0))
         var files = Data()
-        while files.count < readied.byteCount {
+        repeat {
             guard case .chunk(let data, let total) = try await f.device.request(.noodletArchive(grant: readied.grant, offset: files.count))
             else { return XCTFail("no piece") }
-            XCTAssertEqual(total, readied.byteCount)
+            XCTAssertEqual(total, f.applet.archive.count)
             files.append(data)
-        }
+        } while files.count < f.applet.archive.count
         XCTAssertEqual(files, f.applet.archive)
 
         let call = try JSONEncoder().encode(NoodletStoreCall(operation: "write", path: "a.txt", data: String(repeating: "x", count: 10)))
@@ -380,6 +397,26 @@ import XCTest
         XCTAssertEqual(try JSONDecoder().decode(NoodletValue.self, from: answer), .text("kept"))
         XCTAssertEqual(f.applet.calls.map(\.0), [noodlet])
         XCTAssertEqual(f.applet.calls.map(\.1), [NoodletStoreCall(operation: "write", path: "a.txt", data: String(repeating: "x", count: 10))])
+    }
+
+    /// A device from before the Hub answered ahead of packing gets its noodlet once the archive is
+    /// written, with the archive's size, as it always did.
+    func testAnOlderDeviceGetsTheNoodletOnceItIsPacked() async throws {
+        let f = try await fixture()
+        let bot = try f.hub.bots.create(LinkBotDraft(name: "Alfred", provider: "claude-code"), for: f.ada)
+        let link = try post(made(in: folder(of: bot, f), f), in: bot, byBot: true, hub: f.hub)
+        f.applet.packingReads = 1
+        var request = try JSONSerialization.jsonObject(with: LinkProtocol.encode(.noodlet(conversationID: bot.conversationID, attachmentID: link))) as! [String: Any]
+        request["waitsWhilePacking"] = nil
+        let identity = try LinkIdentity.loadOrCreate(at: f.root.appendingPathComponent("Device/device.key"))
+        let (answer, _) = try await LinkClient.exchange(try JSONSerialization.data(withJSONObject: request), identity: identity,
+                                                        hubKey: f.link.key, endpoints: f.link.endpoints, timeout: .seconds(10))
+        guard case .noodlet(let readied) = try LinkProtocol.decodeResponse(answer) else { return XCTFail("no noodlet") }
+        XCTAssertEqual(readied.byteCount, f.applet.archive.count)
+        XCTAssertEqual(f.applet.packingReads, 0)
+        guard case .noodlet(let current) = try await f.device.request(.noodlet(conversationID: bot.conversationID, attachmentID: link))
+        else { return XCTFail("no noodlet") }
+        XCTAssertEqual(current.byteCount, f.applet.filesSize)
     }
 
     /// Watching live, too, Applet checks the noodlet is the bot's as it starts it.

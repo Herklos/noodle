@@ -8,6 +8,10 @@
 - Phones can ask an idle bot to organize its own files, as Organize does in Noodle.
 - Phones show pictures, videos and PDFs in conversations from small previews the Hub makes, instead of downloading each whole file.
 
+### Changed
+
+- A noodlet opened on a phone no longer waits for the Hub to pack its files before the phone knows whether it changed, so a phone can start the version it has at once while the new one downloads.
+
 ### Fixed
 
 - Bots no longer settle into only checking their inbox on every heartbeat after a long run of quiet ones; each heartbeat now names the work to do.

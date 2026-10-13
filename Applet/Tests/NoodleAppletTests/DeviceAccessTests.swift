@@ -44,21 +44,62 @@ import XCTest
         let response = try await runtime.handle(request, identity: hub).checked()
         XCTAssertEqual(response.revision, package.revision)
         XCTAssertEqual(response.manifest?.title, "Pocket")
-        var archive = Data()
-        while true {
-            var piece = AppletRequest(.artifact)
-            piece.artifactID = response.artifactID
-            piece.offset = archive.count
-            let read = try await runtime.handle(piece, identity: hub).checked()
-            archive.append(try XCTUnwrap(read.data))
-            if read.done == true { break }
-        }
-        XCTAssertEqual(archive.count, response.byteCount)
+        XCTAssertEqual(response.byteCount, files.values.reduce(0) { $0 + $1.count }, "not the size of its files")
+        let (archive, total) = try await read(try XCTUnwrap(response.artifactID))
+        XCTAssertEqual(archive.count, total)
         let file = root.appendingPathComponent("received.noodletarchive")
         try archive.write(to: file)
         let out = root.appendingPathComponent("Out.noodlet")
         try NoodletArchive.extract(file, to: out)
         for (name, data) in files { XCTAssertEqual(try Data(contentsOf: out.appendingPathComponent(name)), data, name) }
+    }
+
+    /// The archive, read piece by piece as the Hub does, asking again while it is still being
+    /// written; and its size, which only the finished archive tells.
+    private func read(_ artifact: UUID) async throws -> (Data, Int?) {
+        var archive = Data()
+        var total: Int?
+        for _ in 0..<10_000 {
+            var piece = AppletRequest(.artifact)
+            piece.artifactID = artifact
+            piece.offset = archive.count
+            let read = try await runtime.handle(piece, identity: hub).checked()
+            let data = try XCTUnwrap(read.data)
+            if data.isEmpty, read.done != true {
+                try await Task.sleep(for: .milliseconds(10))
+                continue
+            }
+            archive.append(data)
+            total = read.byteCount
+            if read.done == true { return (archive, total) }
+        }
+        throw AppletError("The archive was never written.")
+    }
+
+    /// The Hub hears the noodlet's revision and manifest before its archive is written, so a
+    /// device knows at once whether it has that revision; the archive's pieces follow once written.
+    func testTheHubHearsOfANoodletBeforeItsArchiveIsWritten() async throws {
+        let (id, package) = try await noodlet(try htmlNoodlet("Pocket"))
+        let gate = DispatchSemaphore(value: 0)
+        let pack = runtime.pack
+        runtime.pack = { package, url in
+            gate.wait()
+            try pack(package, url)
+        }
+        var request = AppletRequest(.archive)
+        request.noodletID = id
+        let response = try await runtime.handle(request, identity: hub).checked()
+        XCTAssertEqual(response.revision, package.revision)
+        var piece = AppletRequest(.artifact)
+        piece.artifactID = response.artifactID
+        piece.offset = 0
+        let early = try await runtime.handle(piece, identity: hub).checked()
+        XCTAssertEqual(early.data, Data())
+        XCTAssertNotEqual(early.done, true)
+        XCTAssertNil(early.byteCount)
+        gate.signal()
+        let (archive, total) = try await read(try XCTUnwrap(response.artifactID))
+        XCTAssertEqual(archive.count, total)
     }
 
     /// A device's page keeps the same data and secrets as the noodlet has on this Mac.

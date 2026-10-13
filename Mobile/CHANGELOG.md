@@ -12,6 +12,7 @@
 - Files downloaded from your Hub are no longer included in iPhone backups, and the least recently viewed are removed once they take more than 512 MB; they download again when opened. Files of messages not yet sent stay in backups.
 - Pictures, videos and PDFs in conversations show from small previews your Hub makes; the whole file downloads only when you open, share or use it as a background. This needs the Hub update released alongside.
 - A web page linked in several conversations is previewed once.
+- When a noodlet you played before has a large update, the version you have starts at once and the new one downloads meanwhile, with its progress shown at the top. For a small update, Play Previous Version sits below the download progress instead of over it. This needs the Hub update released alongside.
 
 ### What to Test
 
@@ -19,6 +20,7 @@
 - Scroll a conversation with many pictures up and back down; check pictures appear without a spinner the second time and scrolling stays smooth.
 - Quit the app and open a conversation with a shared noodlet, browser tab or computer; check its card shows its picture straight away.
 - In a conversation with a large photo, a video and a PDF from a bot, check each shows a picture quickly; tap each and check it opens in full, and share one from its menu.
+- Open a large noodlet game you played before after the bot changed it; check the old version starts straight away, "Downloading new version" shows its progress at the top, and "New version ready for next time" follows. Do the same with a small noodlet, in portrait and sideways; check Play Previous Version shows below the progress and never over it.
 
 ## [0.30.2] - 2026-10-12
 

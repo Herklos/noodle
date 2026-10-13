@@ -16,6 +16,7 @@ import NoodleRuntime
         /// The conversation it was shared in, which the user must still be able to open.
         let conversation: UUID
         let archive: UUID
+        /// The archive's size, as Applets from before it was packed in the background tell it.
         let byteCount: Int
         var used: Date
     }
@@ -36,7 +37,9 @@ import NoodleRuntime
         self.canOpen = canOpen
     }
 
-    func open(_ noodlet: UUID, of bot: UUID, in conversation: UUID, for user: UUID) async throws -> LinkNoodlet {
+    /// Answered at once with the size of its files, or when `packed`, for a device from before
+    /// that, once its archive is written, with the archive's size.
+    func open(_ noodlet: UUID, of bot: UUID, in conversation: UUID, for user: UUID, packed: Bool = false) async throws -> LinkNoodlet {
         var request = AppletRequest(.archive)
         request.noodletID = noodlet
         request.owner = bot.uuidString.lowercased()
@@ -45,22 +48,40 @@ import NoodleRuntime
               let manifest = response.manifest else {
             throw LinkError("Update \(AppletBuildIdentity.current.appName) to open noodlets on your devices.")
         }
+        var size = byteCount
+        if packed {
+            var read = AppletRequest(.artifact)
+            read.artifactID = archive
+            read.offset = 0
+            read.owner = request.owner
+            while true {
+                let piece = try await applets.companion(read)
+                if piece.data?.isEmpty == false || piece.done == true {
+                    size = piece.byteCount ?? byteCount
+                    break
+                }
+                try await Task.sleep(for: .seconds(1))
+            }
+        }
         grants = grants.filter { now().timeIntervalSince($0.value.used) < Self.lifetime }
         let grant = UUID()
         grants[grant] = Grant(user: user, noodlet: noodlet, bot: bot.uuidString.lowercased(), conversation: conversation,
                               archive: archive, byteCount: byteCount, used: now())
-        return LinkNoodlet(grant: grant, noodletID: noodlet, revision: revision, byteCount: byteCount,
+        return LinkNoodlet(grant: grant, noodletID: noodlet, revision: revision, byteCount: size,
                            manifest: try JSONEncoder().encode(manifest))
     }
 
-    /// A piece of the noodlet's archive from `offset`, and the archive's size.
+    /// A piece of the noodlet's archive from `offset`, and the archive's size; nothing and no size
+    /// while Applet is still writing it.
     func archive(_ id: UUID, from offset: Int, for user: UUID) async throws -> (Data, Int) {
         let grant = try granted(id, to: user)
         var request = AppletRequest(.artifact)
         request.artifactID = grant.archive
         request.offset = offset
         request.owner = grant.bot
-        return (try await applets.companion(request).data ?? Data(), grant.byteCount)
+        let response = try await applets.companion(request)
+        let data = response.data ?? Data()
+        return (data, response.byteCount ?? (data.isEmpty ? 0 : grant.byteCount))
     }
 
     /// Takes a piece of a page's call, and once it has them all, what the noodlet answered.

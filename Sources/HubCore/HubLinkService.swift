@@ -334,7 +334,7 @@ import os
         }
         var response: LinkResponse
         do {
-            response = try await handle(request, from: key)
+            response = try await handle(request, from: key, waitsWhilePacking: LinkProtocol.waitsWhilePacking(data))
             // Lists stay small however many pictures they show; the device fetches each once.
             if LinkProtocol.fetchesPictures(data) {
                 switch response {
@@ -520,7 +520,7 @@ import os
         }
     }
 
-    private func handle(_ request: LinkRequest, from key: LinkPublicKey) async throws -> LinkResponse {
+    private func handle(_ request: LinkRequest, from key: LinkPublicKey, waitsWhilePacking: Bool = true) async throws -> LinkResponse {
         // On the owner's own Mac these are Noodle's, which changes them too: read them as it left them.
         if access.isPersonal {
             switch request {
@@ -782,7 +782,8 @@ import os
             guard case (.noodlet(let noodlet), let bot) = try await hubBots().companionLink(attachmentID, in: conversationID, for: user) else {
                 throw LinkError("That is not a noodlet.")
             }
-            return .noodlet(try await hubNoodlets().open(noodlet, of: bot, in: conversationID, for: user.id))
+            return .noodlet(try await hubNoodlets().open(noodlet, of: bot, in: conversationID, for: user.id,
+                                                         packed: !waitsWhilePacking))
         case .noodletArchive(let grant, let offset):
             let (data, total) = try await hubNoodlets().archive(grant, from: offset, for: try user(key).id)
             return .chunk(data: data, total: total)

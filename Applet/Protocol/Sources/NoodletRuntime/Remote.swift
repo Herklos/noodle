@@ -44,8 +44,10 @@ public struct RemoteNoodletStore: NoodletStore {
     }
 }
 
-/// How far a noodlet from another Mac has come: its archive arriving, then unpacking.
+/// How far a noodlet from another Mac has come: the Mac packing it, its archive arriving, then
+/// unpacking.
 public enum NoodletArrival: Equatable, Sendable {
+    case preparing
     case downloading(received: Int, total: Int)
     case unpacking
 }
@@ -91,7 +93,7 @@ public struct NoodletLoadingView: View {
 
     private var title: String {
         switch stage {
-        case .preparing: "Preparing on Hub"
+        case .preparing, .arriving(.preparing): "Preparing on Hub"
         case .arriving(.downloading): "Downloading"
         case .arriving(.unpacking): "Unpacking"
         case .starting: "Starting"
@@ -100,7 +102,7 @@ public struct NoodletLoadingView: View {
 
     private var detail: String {
         switch stage {
-        case .preparing: "Packing files"
+        case .preparing, .arriving(.preparing): "Packing files"
         case .arriving(.downloading(let received, let total)): "\(Self.size(received)) of \(Self.size(total))"
         case .arriving(.unpacking): size > 0 ? Self.size(size) : "Unpacking its files"
         case .starting: "Opening its page"
@@ -119,11 +121,16 @@ public struct NoodletLoadingView: View {
 
 /// A thin bar: filled to `fraction` and gliding there over `pace`, or with a band sweeping across
 /// while there is no fraction to show. The same size either way.
-struct NoodletProgressBar: View {
+public struct NoodletProgressBar: View {
     var fraction: Double?
     var pace: Double
 
-    var body: some View {
+    public init(fraction: Double?, pace: Double) {
+        self.fraction = fraction
+        self.pace = pace
+    }
+
+    public var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             ZStack(alignment: .leading) {
@@ -154,15 +161,22 @@ public struct NoodletCache: Sendable {
 
     public init(root: URL) { self.root = root }
 
+    /// Up to how large, unpacked, a new revision is waited for rather than the one this device has
+    /// played at once while it downloads.
+    public static func worthWaiting(for byteCount: Int) -> Bool { byteCount < 25_000_000 }
+
     /// The noodlet's folder at `revision`, fetching its archive piece by piece from `offset` when
-    /// this device does not have it yet, and telling `progress` how far it has come. A piece that
-    /// fails, as when a phone locks and its connection drops, is asked for again after each of
-    /// `pauses`, keeping what arrived. Older revisions stay when `keepingOthers`, as while one of
-    /// them plays, and go the next time the noodlet opens.
-    public func package(_ id: UUID, revision: String, byteCount: Int, keepingOthers: Bool = false,
+    /// this device does not have it yet, and telling `progress` how far it has come. `fetch` gives
+    /// a piece and the archive's size, or nothing and no size while the archive is still being
+    /// written, when it is asked again after `packingPause`. A piece that fails, as when a phone
+    /// locks and its connection drops, is asked for again after each of `pauses`, keeping what
+    /// arrived. Older revisions stay when `keepingOthers`, as while one of them plays, and go the
+    /// next time the noodlet opens.
+    public func package(_ id: UUID, revision: String, keepingOthers: Bool = false,
                         pauses: [Duration] = [.seconds(1), .seconds(3), .seconds(10)],
+                        packingPause: Duration = .seconds(1),
                         progress: @Sendable (NoodletArrival) -> Void = { _ in },
-                        fetch: @Sendable (_ offset: Int) async throws -> Data) async throws -> URL {
+                        fetch: @Sendable (_ offset: Int) async throws -> (data: Data, total: Int)) async throws -> URL {
         guard !revision.isEmpty, revision.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
             throw AppletError("The noodlet arrived damaged.")
         }
@@ -176,23 +190,31 @@ public struct NoodletCache: Sendable {
             fm.createFile(atPath: download.path, contents: nil)
             let output = try FileHandle(forWritingTo: download)
             var received = 0
+            var size: Int?
             do {
-                progress(.downloading(received: 0, total: byteCount))
+                progress(.preparing)
                 var tries = pauses[...]
-                while received < byteCount {
-                    let data: Data
+                while size.map({ received < $0 }) ?? true {
+                    let piece: (data: Data, total: Int)
                     do {
-                        data = try await fetch(received)
+                        piece = try await fetch(received)
                     } catch {
                         guard !(error is CancellationError), let pause = tries.popFirst() else { throw error }
                         try await Task.sleep(for: pause)
                         continue
                     }
                     tries = pauses[...]
-                    guard !data.isEmpty else { throw AppletError("The noodlet arrived incomplete.") }
-                    try output.write(contentsOf: data)
-                    received += data.count
-                    progress(.downloading(received: received, total: byteCount))
+                    if size == nil, piece.total == 0, piece.data.isEmpty {
+                        try await Task.sleep(for: packingPause)
+                        continue
+                    }
+                    guard !piece.data.isEmpty, size.map({ $0 == piece.total }) ?? true else {
+                        throw AppletError("The noodlet arrived incomplete.")
+                    }
+                    size = piece.total
+                    try output.write(contentsOf: piece.data)
+                    received += piece.data.count
+                    progress(.downloading(received: received, total: piece.total))
                 }
                 try output.close()
             } catch {

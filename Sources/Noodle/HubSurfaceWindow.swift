@@ -288,7 +288,7 @@ struct HubNoodletPage: View {
         do {
             let session = session
             let root = try await NoodletCache(root: mirror.noodletCache).package(
-                noodlet.noodletID, revision: noodlet.revision, byteCount: noodlet.byteCount,
+                noodlet.noodletID, revision: noodlet.revision,
                 progress: { next in Task { @MainActor in arrival = next } }
             ) { try await session.archive(from: $0) }
             // The files it came with say how it runs; the Hub's copy of the manifest only chose where.

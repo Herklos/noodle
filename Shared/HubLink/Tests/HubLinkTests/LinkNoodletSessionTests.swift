@@ -33,7 +33,8 @@ final class LinkNoodletSessionTests: XCTestCase {
         let first = await session.noodlet.grant
         await hub.forget()
         let files = try await session.archive(from: 0)
-        XCTAssertEqual(files, Data("files".utf8))
+        XCTAssertEqual(files.data, Data("files".utf8))
+        XCTAssertEqual(files.total, 5)
         let second = await session.noodlet.grant
         XCTAssertNotEqual(second, first)
 

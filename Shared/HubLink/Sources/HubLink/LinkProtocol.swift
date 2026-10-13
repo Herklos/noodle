@@ -19,7 +19,14 @@ public enum LinkProtocol {
     public static let noodletForgotten = "Open this noodlet again."
 
     public static func encode(_ request: LinkRequest) throws -> Data {
-        try encoder.encode(Envelope(version: version, fetchesPictures: true, request: request))
+        try encoder.encode(Envelope(version: version, fetchesPictures: true, waitsWhilePacking: true, request: request))
+    }
+
+    /// Whether the device asks again for a noodlet's archive while the Hub still packs it, so
+    /// `noodlet` may answer first, with the size of its files. Devices from before it was added get
+    /// the answer once the archive is packed, with its size, as they always did.
+    public static func waitsWhilePacking(_ data: Data) -> Bool {
+        (try? decoder.decode(Header.self, from: data))?.waitsWhilePacking ?? false
     }
 
     /// Whether the device fetches pictures with `picture` itself, so lists may leave them out.
@@ -66,10 +73,12 @@ public enum LinkProtocol {
     private struct Header: Decodable {
         var version: Int
         var fetchesPictures: Bool?
+        var waitsWhilePacking: Bool?
     }
     private struct Envelope: Codable {
         var version: Int
         var fetchesPictures: Bool?
+        var waitsWhilePacking: Bool?
         var request: LinkRequest
     }
 
@@ -222,7 +231,8 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Readies a noodlet a bot shared in one of this user's conversations to run on this device.
     /// Answered with `noodlet`.
     case noodlet(conversationID: UUID, attachmentID: UUID)
-    /// A piece of the noodlet a `noodlet` answer readied, starting at `offset`. Answered with `chunk`.
+    /// A piece of the noodlet a `noodlet` answer readied, starting at `offset`. Answered with `chunk`,
+    /// empty and with no total while the Hub is still packing it.
     case noodletArchive(grant: UUID, offset: Int)
     /// A piece of one call a noodlet running on this device makes on its data and secrets, which
     /// stay on the Hub. Answered with `done` until the last piece, then with `noodletAnswer`.
@@ -440,7 +450,7 @@ public struct LinkNoodlet: Codable, Equatable, Sendable {
     public var noodletID: UUID
     /// Changes whenever its files do.
     public var revision: String
-    /// The size of its archive.
+    /// The size of its files, unpacked.
     public var byteCount: Int
     /// Its noodlet.json, which says how it wants to run before its files are fetched.
     public var manifest: Data
