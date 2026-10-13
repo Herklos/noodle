@@ -70,15 +70,18 @@ struct AttachmentView: View {
         .task(id: attachment.id) { await load() }
     }
 
+    /// The card as the Hub resolved it this time, else as this phone kept it, else as shared.
+    private var shownCard: LinkCardInfo? { liveCard ?? chats.keptCard(for: attachment) ?? attachment.card }
+
     /// A browser tab, computer or noodlet a bot shared: its last picture, opening live on the Hub's Mac.
     private var live: some View {
         Button { watchLive(attachment, nil) } label: {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack {
                     Color(.secondarySystemBackground)
-                    if let data = (liveCard ?? attachment.card)?.image, let image = UIImage(data: data) {
+                    if let data = shownCard?.image, let image = DecodedImages.picture(data) {
                         Image(uiImage: image).resizable().scaledToFit()
-                    } else if attachment.liveKind == .computer, let terminal = attachment.card?.detail {
+                    } else if attachment.liveKind == .computer, let terminal = shownCard?.detail {
                         // A computer shared as its terminal shows its latest lines, as on the Mac.
                         Text(terminal).font(.system(size: 7, design: .monospaced)).foregroundStyle(.white.opacity(0.8))
                             .lineLimit(14).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(8)
@@ -89,7 +92,7 @@ struct AttachmentView: View {
                 }
                 .frame(width: 240, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                Text(liveCard?.title ?? attachment.liveTitle)
+                Text(shownCard?.title ?? attachment.liveTitle)
                     .font(.subheadline.weight(.medium)).lineLimit(1)
             }
             .padding(8)
@@ -130,7 +133,7 @@ struct AttachmentView: View {
     @ViewBuilder private var picture: some View {
         let frame = Self.pictureFrame(for: attachment.pixelSize, compact: compact)
         let bounds = compact ? Self.compactBounds : Self.pictureBounds
-        if let image {
+        if let image = shownImage {
             if let frame {
                 Image(uiImage: image)
                     .resizable()
@@ -155,7 +158,7 @@ struct AttachmentView: View {
     private var card: some View {
         HStack(spacing: 10) {
             Group {
-                if let image {
+                if let image = shownImage {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Image(systemName: failed ? "exclamationmark.triangle" : Self.symbol(for: attachment.mediaType))
@@ -193,11 +196,25 @@ struct AttachmentView: View {
         previewing = url
     }
 
+    /// Pixels decoded for a picture's bubble, or for a file card's thumbnail.
+    private var shownPixels: Int { isImage ? 720 : 88 }
+
+    /// The picture as decoded the last time this bubble was drawn, so it shows at once when it comes back.
+    private var shownImage: UIImage? {
+        image ?? chats.downloadedFile(for: attachment).flatMap { DecodedImages.shown($0, at: shownPixels) }
+    }
+
     private func load() async {
         do {
             let file = try await chats.file(for: attachment, in: thread)
             url = file
-            image = isImage ? Self.downsampled(file, to: 720) : await thumbnail(of: file)
+            if let shown = DecodedImages.shown(file, at: shownPixels) {
+                image = shown
+            } else if isImage {
+                image = await Task.detached(priority: .userInitiated) { DecodedImages.downsampled(file, to: 720) }.value
+            } else {
+                image = await thumbnail(of: file)
+            }
         } catch {
             failed = true
         }
@@ -206,17 +223,9 @@ struct AttachmentView: View {
     private func thumbnail(of file: URL) async -> UIImage? {
         let request = QLThumbnailGenerator.Request(fileAt: file, size: CGSize(width: 88, height: 88), scale: displayScale,
                                                    representationTypes: .thumbnail)
-        return try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).uiImage
-    }
-
-    /// Decodes only as many pixels as the bubble shows.
-    static func downsampled(_ file: URL, to pixels: Int) -> UIImage? {
-        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: pixels,
-              ] as CFDictionary) else { return nil }
-        return UIImage(cgImage: image)
+        guard let image = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).uiImage else { return nil }
+        DecodedImages.keep(image, of: file, at: 88)
+        return image
     }
 
     static func symbol(for mediaType: String) -> String {
@@ -507,7 +516,7 @@ struct LinkPreviewCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
                     Color.black.opacity(0.28)
-                    if let data = card?.image, let image = UIImage(data: data) {
+                    if let data = card?.image, let image = DecodedImages.picture(data) {
                         Image(uiImage: image).resizable().scaledToFill()
                             .frame(width: 280, height: 158, alignment: .top)
                     } else if card == nil {
@@ -542,7 +551,7 @@ struct PendingFileChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Group {
-                if file.mediaType.hasPrefix("image/"), let image = AttachmentView.downsampled(file.url, to: 96) {
+                if file.mediaType.hasPrefix("image/"), let image = DecodedImages.downsampled(file.url, to: 96) {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Image(systemName: AttachmentView.symbol(for: file.mediaType)).foregroundStyle(.secondary)
@@ -818,12 +827,19 @@ private struct SharedAttachmentRow: View {
     let open: (LinkAttachment) -> Void
     @State private var resolved: LinkAttachment?
 
+    /// Resolved this time, else with the card this phone kept, so its picture shows at once.
+    private var shown: LinkAttachment {
+        if let resolved { return resolved }
+        var shown = attachment
+        if let kept = chats.keptCard(for: attachment) { shown.card = kept }
+        return shown
+    }
+
     var body: some View {
-        let shown = resolved ?? attachment
         Button { open(shown) } label: {
             HStack(spacing: 12) {
                 Group {
-                    if let data = shown.card?.image, let image = UIImage(data: data) {
+                    if let data = shown.card?.image, let image = DecodedImages.picture(data) {
                         Image(uiImage: image).resizable().scaledToFit()
                     } else {
                         Image(systemName: shown.liveSymbol).font(.title2).foregroundStyle(.secondary)
@@ -842,4 +858,56 @@ private struct SharedAttachmentRow: View {
         .buttonStyle(.plain)
         .task(id: attachment.id) { resolved = await chats.sharedAttachment(attachment, in: thread) }
     }
+}
+
+/// Pictures decoded once and kept while memory allows, so a bubble, card or avatar drawn again, as
+/// when scrolled back into view, shows at once rather than decoding again on the main thread.
+enum DecodedImages {
+    private nonisolated(unsafe) static let pictures: NSCache<NSData, UIImage> = cache()
+    private nonisolated(unsafe) static let files: NSCache<NSString, UIImage> = cache()
+
+    private static func cache<Key>() -> NSCache<Key, UIImage> {
+        let cache = NSCache<Key, UIImage>()
+        cache.totalCostLimit = 48 * 1024 * 1024
+        return cache
+    }
+
+    /// What it takes in memory, so the caches stay within their limit.
+    private static func cost(of image: UIImage) -> Int {
+        image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+    }
+
+    /// The picture in these bytes, decoded ready to draw.
+    static func picture(_ data: Data) -> UIImage? {
+        let key = data as NSData
+        if let image = pictures.object(forKey: key) { return image }
+        guard let decoded = UIImage(data: data) else { return nil }
+        let image = decoded.preparingForDisplay() ?? decoded
+        pictures.setObject(image, forKey: key, cost: cost(of: image))
+        return image
+    }
+
+    /// A file's picture as decoded at this size before, if it still is.
+    static func shown(_ file: URL, at pixels: Int) -> UIImage? {
+        files.object(forKey: key(file, pixels))
+    }
+
+    static func keep(_ image: UIImage, of file: URL, at pixels: Int) {
+        files.setObject(image, forKey: key(file, pixels), cost: cost(of: image))
+    }
+
+    /// Decodes only as many pixels as are shown, once.
+    static func downsampled(_ file: URL, to pixels: Int) -> UIImage? {
+        if let image = shown(file, at: pixels) { return image }
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+              let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: pixels,
+              ] as CFDictionary) else { return nil }
+        let image = UIImage(cgImage: decoded)
+        keep(image, of: file, at: pixels)
+        return image
+    }
+
+    private static func key(_ file: URL, _ pixels: Int) -> NSString { "\(pixels) \(file.path)" as NSString }
 }

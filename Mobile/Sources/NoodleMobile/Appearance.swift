@@ -317,7 +317,7 @@ struct PersonAvatar: View {
 
     var body: some View {
         Group {
-            if let data = avatar?.image, let image = UIImage(data: data) {
+            if let data = avatar?.image, let image = DecodedImages.picture(data) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 AgentAvatar.swatch(AgentAvatar.colourIndex((avatar ?? .standard(for: id)).colour)).overlay {

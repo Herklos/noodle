@@ -17,6 +17,7 @@ private actor FakeHub {
     var files: [UUID: (attachment: LinkAttachment, data: Data)] = [:]
     var downloads = 0
     var pictureFetches = 0
+    var cardFetches = 0
     /// Bot edits as the phone sent them.
     var edits: [LinkBotDraft] = []
     /// Where the phone asked to hear of unread replies, in order.
@@ -230,6 +231,11 @@ private actor FakeHub {
             guard let index = hubSharing.firstIndex(where: { $0.id == hub }) else { return .failure("No such Hub.") }
             hubSharing[index].sharedWith = people
             return .hubSharing(hubSharing)
+        case .success(.linkCard):
+            cardFetches += 1
+            return .linkCard(LinkCardInfo(title: "Racer"))
+        case .success(.linkPreview):
+            return .picture(Data("racer picture".utf8))
         default:
             return .failure("Not in this test.")
         }
@@ -730,6 +736,69 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(first.lastPathComponent == "report.txt")
         #expect(first == second)
         #expect(await hub.downloads == 1)
+    }
+
+    /// A picture shown in two places at once, as in its bubble and the Shared list, comes down once.
+    @Test func aFileAskedForTwiceAtOnceIsDownloadedOnce() async throws {
+        let hub = FakeHub()
+        let attachment = await hub.botSends(Data(repeating: 7, count: LinkProtocol.chunkSize * 3), named: "photo.png", mediaType: "image/png")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        async let first = chats.file(for: attachment, in: scout)
+        async let second = chats.file(for: attachment, in: scout)
+        #expect(try await first == second)
+        #expect(await hub.downloads == 1)
+    }
+
+    /// Downloaded files are copies the Hub still has: left out of backups, and the least recently
+    /// shown dropped past the limit. Files of messages not yet sent are never dropped.
+    @Test func downloadedFilesStayOutOfBackupsAndTheOldestGoPastTheLimit() async throws {
+        let hub = FakeHub()
+        let older = await hub.botSends(Data(repeating: 1, count: 1000), named: "a.png", mediaType: "image/png")
+        let old = await hub.botSends(Data(repeating: 2, count: 1000), named: "b.png", mediaType: "image/png")
+        let recent = await hub.botSends(Data(repeating: 3, count: 1000), named: "c.png", mediaType: "image/png")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        for attachment in [older, old, recent] { _ = try await chats.file(for: attachment, in: scout) }
+        // Shown again, so it is the most recently used.
+        let kept = try await chats.file(for: older, in: scout)
+        chats.retryPauses = [.zero]
+        await hub.failSends(10)
+        let draft = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+        try Data(repeating: 4, count: 1000).write(to: draft)
+        try? await chats.send("Look", files: [OutgoingFile(url: draft, filename: "d.png", mediaType: "image/png")], to: scout)
+        let unsent = try #require(chats.messages(of: scout).first { $0.body == "Look" }?.attachments.first)
+
+        #expect(try kept.deletingLastPathComponent().deletingLastPathComponent()
+            .resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+
+        chats.dropOldFiles(over: 2500)
+        #expect(chats.downloadedFile(for: older) != nil)
+        #expect(chats.downloadedFile(for: unsent) != nil)
+        #expect(chats.downloadedFile(for: old) == nil)
+        #expect(chats.downloadedFile(for: recent) == nil)
+    }
+
+    /// A shared noodlet's card shows at once after a relaunch, from what this phone kept of it.
+    @Test func sharedCardsAreKeptAcrossLaunches() async throws {
+        let hub = FakeHub()
+        let racer = await hub.botSharesNoodlet("Racer")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: directory)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let card = try #require(await chats.sharedAttachment(racer, in: scout).card)
+        #expect(card.image == Data("racer picture".utf8))
+
+        let relaunched = HubChats(pairing: HubPairing(directory: directory, deviceName: "iPhone"))
+        #expect(relaunched.keptCard(for: racer) == card)
+        #expect(await hub.cardFetches == 1)
     }
 
     @Test func onlyPublicWebLinksGetAPreview() {

@@ -611,7 +611,7 @@ private struct ConsoleBackdrop: View {
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.08, green: 0.07, blue: 0.16), .black], startPoint: .top, endPoint: .bottom)
-            if let image, let picture = UIImage(data: image) {
+            if let image, let picture = DecodedImages.picture(image) {
                 Color.clear.overlay { Image(uiImage: picture).resizable().scaledToFill() }
                     .blur(radius: 40).opacity(0.45)
                     .transition(.opacity)
@@ -636,7 +636,7 @@ private struct ConsoleCard: View {
         let shape = RoundedRectangle(cornerRadius: width * 0.07, style: .continuous)
         ZStack {
             shape.fill(Color(white: 0.16))
-            if let data = attachment.card?.image, let image = UIImage(data: data) {
+            if let data = attachment.card?.image, let image = DecodedImages.picture(data) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 VStack(spacing: 8) {

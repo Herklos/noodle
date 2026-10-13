@@ -6,9 +6,16 @@
 
 - Organize in a bot's settings asks an idle bot on your Hub to tidy its own files, as on the Mac. The bot sends a short note on what changed.
 
+### Changed
+
+- Pictures in conversations show at once when scrolled back into view, and shared noodlet, browser and computer cards keep their last picture after the app restarts.
+- Files downloaded from your Hub are no longer included in iPhone backups, and the least recently viewed are removed once they take more than 512 MB; they download again when opened.
+
 ### What to Test
 
 - Open an idle bot's settings, tap Organize, and check the bot replies with a short note on what it tidied. While the bot is working, check Organize is dimmed.
+- Scroll a conversation with many pictures up and back down; check pictures appear without a spinner the second time and scrolling stays smooth.
+- Quit the app and open a conversation with a shared noodlet, browser tab or computer; check its card shows its picture straight away.
 
 ## [0.30.2] - 2026-10-12
 

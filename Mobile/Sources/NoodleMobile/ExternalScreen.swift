@@ -224,7 +224,7 @@ struct NoodletMenuView: View {
                 RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.12))
                 switch item {
                 case .noodlet(let attachment):
-                    if let data = attachment.card?.image, let image = UIImage(data: data) {
+                    if let data = attachment.card?.image, let image = DecodedImages.picture(data) {
                         Image(uiImage: image).resizable().scaledToFill()
                     } else {
                         Image(systemName: attachment.liveSymbol).font(.system(size: 48))

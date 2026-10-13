@@ -151,8 +151,21 @@ extension HubChats {
             if resolved.card == nil { resolved.card = LinkCardInfo(title: attachment.liveTitle) }
             resolved.card?.image = image
         }
-        if let card = resolved.card { cards[attachment.id] = card }
+        if let card = resolved.card {
+            cards[attachment.id] = card
+            keep(card, for: attachment)
+        }
         return resolved
+    }
+
+    /// The card as this phone last had it, kept across launches, so its picture shows at once while it
+    /// is asked for again.
+    func keptCard(for attachment: LinkAttachment) -> LinkCardInfo? {
+        if let card = cards[attachment.id] { return card }
+        if let known = keptCards[attachment.id] { return known }
+        let card = (try? Data(contentsOf: cardURL(for: attachment))).flatMap { try? JSONDecoder().decode(LinkCardInfo.self, from: $0) }
+        keptCards[attachment.id] = .some(card)
+        return card
     }
 
     /// Where this Hub's noodlets are kept on this phone.
@@ -595,7 +608,7 @@ private struct ToolPresetRow: View {
     }
 
     @ViewBuilder private var icon: some View {
-        if let data = preset.icon, let image = UIImage(data: data) {
+        if let data = preset.icon, let image = DecodedImages.picture(data) {
             Image(uiImage: image).resizable().scaledToFit()
         } else {
             Text(String(preset.name.prefix(1))).font(.system(size: 18, weight: .semibold))

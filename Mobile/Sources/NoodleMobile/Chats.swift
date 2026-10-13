@@ -93,6 +93,10 @@ enum HubThread: HubConversation {
     /// Card pictures, fetched as their cards come into view.
     @ObservationIgnored var pictures: [UUID: Data] = [:]
     @ObservationIgnored var cards: [UUID: LinkCardInfo] = [:]
+    /// Cards read back from this phone, nil where none was kept.
+    @ObservationIgnored var keptCards: [UUID: LinkCardInfo?] = [:]
+    /// Files coming down from the Hub, so a file asked for twice at once comes down once.
+    @ObservationIgnored private var downloading: [UUID: Task<URL, Error>] = [:]
     /// Messages in one page: small enough to come quickly, however long the conversation.
     private static let pageSize = 50
 
@@ -126,6 +130,8 @@ enum HubThread: HubConversation {
             start = cache.start ?? [:]
             isLoaded = true
         }
+        // Once a launch, after the conversations first show.
+        Task { [weak self] in self?.dropOldFiles() }
     }
 
     private var cacheURL: URL { pairing.directory.appendingPathComponent("chats.json") }
@@ -846,12 +852,45 @@ enum HubThread: HubConversation {
     /// The file on this phone, downloaded from the Hub the first time it is asked for.
     func file(for attachment: LinkAttachment, in conversation: some HubConversation) async throws -> URL {
         let url = fileURL(for: attachment)
-        if FileManager.default.fileExists(atPath: url.path) { return url }
-        let staging = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: staging) }
-        try await pairing.download(attachment, from: conversation.conversationID, to: staging)
-        try keep(staging, as: attachment)
-        return url
+        if FileManager.default.fileExists(atPath: url.path) {
+            markUsed(attachment)
+            return url
+        }
+        if let download = downloading[attachment.id] { return try await download.value }
+        let pairing = pairing, conversationID = conversation.conversationID
+        let download = Task {
+            let staging = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: staging) }
+            try await pairing.download(attachment, from: conversationID, to: staging)
+            try keep(staging, as: attachment)
+            return url
+        }
+        downloading[attachment.id] = download
+        defer { downloading[attachment.id] = nil }
+        return try await download.value
+    }
+
+    /// How much room downloaded files take on this phone for each Hub before the least recently shown go.
+    static let keptFilesLimit = 512 * 1024 * 1024
+
+    /// Drops the least recently shown files past the limit; the Hub still has them, so they come down
+    /// again if shown. Files of messages not yet sent are the only copies and stay.
+    func dropOldFiles(over limit: Int = HubChats.keptFilesLimit) {
+        let unsentIDs = Set(unsent.values.flatMap { $0.attachments.map(\.id.uuidString) })
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
+        var folders = ((try? FileManager.default.contentsOfDirectory(at: filesFolder, includingPropertiesForKeys: keys)) ?? []).map { folder in
+            let size = (FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys)?.allObjects as? [URL] ?? [])
+                .reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+            let used = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return (folder: folder, size: size, used: used)
+        }
+        var total = folders.reduce(0) { $0 + $1.size }
+        folders.sort { $0.used < $1.used }
+        for entry in folders where total > limit && !unsentIDs.contains(entry.folder.lastPathComponent) {
+            try? FileManager.default.removeItem(at: entry.folder)
+            if let id = UUID(uuidString: entry.folder.lastPathComponent) { keptCards[id] = nil }
+            total -= entry.size
+        }
     }
 
     /// The file on this phone if it is already downloaded.
@@ -860,18 +899,46 @@ enum HubThread: HubConversation {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    private var filesFolder: URL { pairing.directory.appendingPathComponent("Files", isDirectory: true) }
+
     /// Files live under their ID, keeping their name so Quick Look and sharing show it.
     private func fileURL(for attachment: LinkAttachment) -> URL {
         let name = URL(fileURLWithPath: attachment.filename).lastPathComponent
-        return pairing.directory.appendingPathComponent("Files", isDirectory: true)
-            .appendingPathComponent(attachment.id.uuidString, isDirectory: true)
+        return filesFolder.appendingPathComponent(attachment.id.uuidString, isDirectory: true)
             .appendingPathComponent(name.isEmpty ? "Attachment" : name)
+    }
+
+    /// A shared card's last picture, kept beside its attachment's file so both go together.
+    func cardURL(for attachment: LinkAttachment) -> URL {
+        filesFolder.appendingPathComponent(attachment.id.uuidString, isDirectory: true).appendingPathComponent(".card.json")
+    }
+
+    func keep(_ card: LinkCardInfo, for attachment: LinkAttachment) {
+        let url = cardURL(for: attachment)
+        guard (try? prepareFolder(for: url)) != nil else { return }
+        try? JSONEncoder().encode(card).write(to: url, options: .atomic)
+        keptCards[attachment.id] = .some(card)
+    }
+
+    /// Makes the folder for a kept file. Everything kept here is a copy the Hub has, so none of it is backed up.
+    private func prepareFolder(for url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var folder = filesFolder
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? folder.setResourceValues(values)
+    }
+
+    /// Notes a file as just shown, so it is among the last to go past the limit.
+    private func markUsed(_ attachment: LinkAttachment) {
+        try? FileManager.default.setAttributes([.modificationDate: Date()],
+                                               ofItemAtPath: fileURL(for: attachment).deletingLastPathComponent().path)
     }
 
     private func keep(_ source: URL, as attachment: LinkAttachment) throws {
         let url = fileURL(for: attachment)
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try prepareFolder(for: url)
         try FileManager.default.copyItem(at: source, to: url)
     }
 
@@ -2729,7 +2796,7 @@ struct AgentAvatar: View {
 
     var body: some View {
         Group {
-            if let data = draft.avatarImageData, let image = UIImage(data: data) {
+            if let data = draft.avatarImageData, let image = DecodedImages.picture(data) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Self.swatch(Self.colourIndex(draft.avatarColorIndex))
