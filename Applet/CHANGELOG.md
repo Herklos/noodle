@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-13
+
 ### Changed
 
 - A noodlet's files are packed for Noodle Hub in the background, so the Hub hears which version it is at once and Applet keeps responding while a large noodlet packs.

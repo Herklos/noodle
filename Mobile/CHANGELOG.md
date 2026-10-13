@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-13
+
 ### Added
 
 - Organize in a bot's settings asks an idle bot on your Hub to tidy its own files, as on the Mac. The bot sends a short note on what changed.

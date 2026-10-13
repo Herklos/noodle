@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-13
+
 ### Added
 
 - Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.
