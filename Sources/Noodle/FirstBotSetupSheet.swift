@@ -106,7 +106,7 @@ struct FirstBotSetupSheet: View {
                     .frame(width: 36, height: 36)
                     .accessibilityHidden(true)
                 VStack(spacing: 2) {
-                    Text("Noodle Hub").font(.headline)
+                    Text("Hub").font(.headline)
                     Text("by invitation").font(.caption).foregroundStyle(.secondary)
                 }
                 SettingsStatusLabel(title: "Not joined", systemImage: "minus.circle", color: .secondary)
