@@ -75,6 +75,16 @@ import XCTest
         XCTAssertEqual(f.runtime.lastActiveDates[agent.id], finished)
     }
 
+    func testBotIsLastActiveWhenARestartCutsItsTurnShort() throws {
+        let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
+        process.transition(.working)
+        f.clock.date.addTimeInterval(90)
+        let cut = f.clock.date
+        f.runtime.restart(agent: agent, repository: f.repository)
+        f.clock.date.addTimeInterval(600)
+        XCTAssertEqual(f.runtime.lastActiveDates[agent.id], cut)
+    }
+
     func testScheduledWakeFiresOnceWhenDueAndTheBotIsFree() async throws {
         let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
         let start = f.clock.date

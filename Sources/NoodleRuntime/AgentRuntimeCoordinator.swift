@@ -111,12 +111,18 @@ public final class AgentRuntimeCoordinator {
     private(set) var snapshots: [UUID: AgentRuntimeSnapshot] = [:] {
         didSet {
             activity.recordSnapshots(snapshots.filter { oldValue[$0.key] != $0.value })
+            // A turn cut short by a restart, stop or crash counts as activity too.
+            let leftWork = oldValue.filter { $0.value.phase == .working && snapshots[$0.key]?.phase != .working }
+            if !leftWork.isEmpty {
+                for id in leftWork.keys { lastActiveDates[id] = now() }
+                saveLastActiveDates()
+            }
             updateSleepAssertion()
         }
     }
     public private(set) var preventIdleSleepWhileWorking: Bool
     public private(set) var heartbeatConfiguration: AgentHeartbeatConfiguration
-    /// When each bot last finished a turn, heartbeat turns included.
+    /// When each bot last finished or abandoned a turn, heartbeat turns included.
     public private(set) var lastActiveDates: [UUID: Date]
     @ObservationIgnored private var sessionStartDates: [UUID: Date]
     /// Messages and the turns that answer them; heartbeats do not count.
@@ -400,11 +406,6 @@ public final class AgentRuntimeCoordinator {
 
     private func recordHeartbeat(for agentID: UUID) {
         heartbeatTurns.insert(agentID)
-    }
-
-    private func recordTurnEnd(for agentID: UUID) {
-        lastActiveDates[agentID] = now()
-        saveLastActiveDates()
     }
 
     private func saveLastActiveDates() {
@@ -1202,7 +1203,6 @@ public final class AgentRuntimeCoordinator {
             defer { previousPhase = snapshot.phase }
             if previousPhase == .working, snapshot.phase == .ready {
                 self.recordActivity(for: agentID)
-                self.recordTurnEnd(for: agentID)
                 if self.heartbeatTurns.remove(agentID) == nil { self.recordInteraction(for: agentID) }
                 self.connectionRecoveryAttempts[agentID] = nil
                 self.signInAnnounced.remove(agentID)

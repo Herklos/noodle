@@ -126,7 +126,9 @@ public struct BotsSettingsView: View {
                 }
                 .font(.caption)
                 Group {
-                    if let date = store.runtime.lastActiveDates[agent.id] {
+                    if store.runtime.snapshot(for: agent.id).phase == .working {
+                        Text("Active now")
+                    } else if let date = store.runtime.lastActiveDates[agent.id] {
                         HStack(spacing: 0) {
                             Text("Active ")
                             Text(date, style: .relative)

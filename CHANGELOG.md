@@ -10,6 +10,10 @@ All notable changes to Noodle are documented here, following
 
 - Bots can set repeating wake-ups on a cron schedule, such as every weekday at nine, for work you ask them to do regularly. A repeating wake-up keeps coming back until the bot cancels it, at most once every five minutes.
 
+### Fixed
+
+- Settings → Bots shows "Active now" for a bot that is working, and a turn cut short by a restart counts as activity. A bot busy after a restart could look idle for half an hour.
+
 ## [0.59.0] - 2026-10-12
 
 ### Added
