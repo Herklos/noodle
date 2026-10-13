@@ -37,6 +37,16 @@ require_key() {
     : "${APPLE_API_ISSUER_ID:?Missing App Store Connect issuer}"
 }
 
+# CI builds at full speed. On a laptop the build runs at background priority, which keeps it on the
+# efficiency cores, with fewer jobs and one simulator, so the machine stays usable while it works.
+build() {
+    if [[ -n "${CI:-}" ]]; then
+        xcodebuild "$@"
+    else
+        taskpolicy -b xcodebuild -jobs 4 "$@"
+    fi
+}
+
 # An iPhone simulator on the newest iOS, preferring one already running.
 choose_simulator() {
     simulator="$(xcrun simctl list devices available --json | python3 -c '
@@ -52,7 +62,7 @@ case "$command" in
     run)
         choose_simulator
         generate
-        xcodebuild -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
+        build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
             -derivedDataPath "$folder/Derived" -destination "id=$simulator" build
         xcrun simctl boot "$simulator" 2>/dev/null || true
         # Xcode 27 shows simulators in Device Hub; earlier versions have the Simulator app.
@@ -65,8 +75,10 @@ case "$command" in
     test)
         choose_simulator
         generate
-        xcodebuild -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
-            -derivedDataPath "$folder/Derived" -destination "id=$simulator" \
+        parallel=()
+        [[ -n "${CI:-}" ]] || parallel=(-parallel-testing-enabled NO)
+        build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
+            -derivedDataPath "$folder/Derived" -destination "id=$simulator" "${parallel[@]}" \
             -retry-tests-on-failure -test-iterations 2 -collect-test-diagnostics never test
         ;;
     package)
@@ -76,7 +88,7 @@ case "$command" in
         generate
         archive="$folder/Derived/NoodleMobile.xcarchive"
         rm -rf "$archive" "$output"
-        xcodebuild -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Release \
+        build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Release \
             -derivedDataPath "$folder/Derived" -destination 'generic/platform=iOS' -archivePath "$archive" \
             CURRENT_PROJECT_VERSION="$build" -allowProvisioningUpdates \
             -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$APPLE_API_KEY_ID" \
