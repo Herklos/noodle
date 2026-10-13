@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Restricted Muse Code bots start again. Muse Code 1.4.4 and later stopped with "Agent Definition filesystem source failed".
+
 ## [0.31.0] - 2026-10-13
 
 ### Added
