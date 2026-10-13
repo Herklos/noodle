@@ -17,6 +17,8 @@ struct ScrollableChatComposer: NSViewRepresentable {
     let submit: () -> Void
     var focusSidebar: (() -> Void)? = nil
     var pasteAttachments: ((NSPasteboard) -> Bool)? = nil
+    /// Paste as Attachment: text becomes a file however short it is.
+    var forcePasteAttachments: ((NSPasteboard) -> Bool)? = nil
     var dropFiles: (([URL]) -> Void)? = nil
     @AppStorage(ComposerNameCompletion.descriptionsDefaultsKey) private var showDescriptions = true
     @Environment(\.isEnabled) private var isEnabled
@@ -36,6 +38,7 @@ struct ScrollableChatComposer: NSViewRepresentable {
         context.coordinator.parent = self
         view.editor.isEditable = isEnabled
         view.editor.pasteAttachments = isEnabled ? pasteAttachments : nil
+        view.editor.forcePasteAttachments = isEnabled ? forcePasteAttachments : nil
         view.editor.dropFiles = isEnabled ? dropFiles : nil
         let requestFocus = isFocused && !context.coordinator.lastRequestedFocus
         context.coordinator.lastRequestedFocus = isFocused
@@ -82,6 +85,7 @@ struct ScrollableChatComposer: NSViewRepresentable {
         view.focusChanged = nil
         view.editor.delegate = nil
         view.editor.pasteAttachments = nil
+        view.editor.forcePasteAttachments = nil
         view.editor.dropFiles = nil
     }
 
@@ -207,6 +211,7 @@ struct ScrollableChatComposer: NSViewRepresentable {
 @MainActor final class ComposerTextView: NSTextView {
     var focusChanged: ((Bool) -> Void)?
     var pasteAttachments: ((NSPasteboard) -> Bool)?
+    var forcePasteAttachments: ((NSPasteboard) -> Bool)?
     var dropFiles: (([URL]) -> Void)?
     var placeholder = "" { didSet { needsDisplay = true } }
     override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
@@ -241,6 +246,26 @@ struct ScrollableChatComposer: NSViewRepresentable {
     override func paste(_ sender: Any?) {
         if pasteAttachments?(.general) == true { return }
         pasteAsPlainText(sender)
+    }
+    /// Sent by Edit > Paste as Attachment and the editor's context menu.
+    @objc func pasteAsAttachment(_ sender: Any?) {
+        if !pasteAsAttachment(from: .general) { NSSound.beep() }
+    }
+    func pasteAsAttachment(from pasteboard: NSPasteboard) -> Bool {
+        forcePasteAttachments?(pasteboard) == true
+    }
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(pasteAsAttachment(_:)) { return isEditable && forcePasteAttachments != nil }
+        return super.validateUserInterfaceItem(item)
+    }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        if let menu, forcePasteAttachments != nil,
+           let paste = menu.items.firstIndex(where: { $0.action == #selector(paste(_:)) }) {
+            menu.insertItem(NSMenuItem(title: "Paste as Attachment", action: #selector(pasteAsAttachment(_:)),
+                                       keyEquivalent: ""), at: paste + 1)
+        }
+        return menu
     }
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])

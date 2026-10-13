@@ -442,6 +442,9 @@ private struct ComposerDraftInput: View {
                 submit: { store.sendDraft(to: conversation.id) },
                 focusSidebar: focusSidebar,
                 pasteAttachments: { store.importAttachmentsFromPasteboard(into: conversation.id, pasteboard: $0) },
+                forcePasteAttachments: {
+                    store.importAttachmentsFromPasteboard(into: conversation.id, pasteboard: $0, textAsAttachment: true)
+                },
                 dropFiles: { urls in
                     urls.forEach { store.importAttachment(from: $0, into: conversation.id) }
                 }

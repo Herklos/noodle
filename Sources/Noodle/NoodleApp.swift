@@ -139,6 +139,13 @@ struct NoodleApp: App {
                 UsageMenuButton(history: store.usage)
                 Divider()
             }
+            CommandGroup(after: .pasteboard) {
+                // Handled by the focused composer; elsewhere nothing answers and the menu beeps.
+                Button("Paste as Attachment") {
+                    NSApp.sendAction(#selector(ComposerTextView.pasteAsAttachment(_:)), to: nil, from: nil)
+                }
+                .keyboardShortcut("v", modifiers: [.command, .option])
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Bot") {
                     NotificationCenter.default.post(name: .newBot, object: nil)

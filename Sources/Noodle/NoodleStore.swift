@@ -1697,7 +1697,9 @@ final class NoodleStore {
         }
     }
 
-    func importAttachmentsFromPasteboard(into conversationID: UUID, pasteboard: NSPasteboard = .general) -> Bool {
+    /// Text becomes a file when it's long, or always with `textAsAttachment`.
+    func importAttachmentsFromPasteboard(into conversationID: UUID, pasteboard: NSPasteboard = .general,
+                                         textAsAttachment: Bool = false) -> Bool {
         guard conversations.contains(where: { $0.id == conversationID }) else { return false }
 
         let values = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
@@ -1744,7 +1746,8 @@ final class NoodleStore {
             }
         }
 
-        if let text = pasteboard.string(forType: .string), LongTextPolicy.requiresPreview(text) {
+        if let text = pasteboard.string(forType: .string), !text.isEmpty,
+           textAsAttachment || LongTextPolicy.requiresPreview(text) {
             do {
                 try importAttachment(data: Data(text.utf8), originalFilename: "Pasted Text.txt",
                                      mediaType: "text/plain", into: conversationID)

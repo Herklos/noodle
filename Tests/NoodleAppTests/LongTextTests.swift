@@ -71,6 +71,27 @@ import NoodleCore
         XCTAssertEqual(input.string, "Before new after")
     }
 
+    func testPasteAsAttachmentAttachesShortTextAndLeavesDraft() throws {
+        let f = try fixture()
+        let input = ComposerScrollView().editor
+        input.forcePasteAttachments = {
+            f.store.importAttachmentsFromPasteboard(into: f.directA.id, pasteboard: $0, textAsAttachment: true)
+        }
+        input.string = "Keep this draft"
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        XCTAssertTrue(board.setString("short", forType: .string))
+        XCTAssertTrue(input.pasteAsAttachment(from: board))
+        XCTAssertEqual(input.string, "Keep this draft")
+        let attachment = try XCTUnwrap(f.store.pendingAttachments(for: f.directA.id).first)
+        XCTAssertEqual(attachment.originalFilename, "Pasted Text.txt")
+        XCTAssertEqual(try Data(contentsOf: f.store.attachmentFileURL(attachment)), Data("short".utf8))
+
+        board.clearContents()
+        XCTAssertFalse(input.pasteAsAttachment(from: board))
+        XCTAssertEqual(f.store.pendingAttachments(for: f.directA.id).count, 1)
+    }
+
     func testFailedTextAttachmentPreservesDraftAndClipboardForRetry() throws {
         let f = try fixture()
         let directory = f.repository.attachmentsDirectory(conversationID: f.directA.id)

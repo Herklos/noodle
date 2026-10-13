@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Edit → Paste as Attachment (⌥⌘V), also in the message field's context menu, attaches copied text as a file however short it is.
+
 ## [0.61.0] - 2026-10-13
 
 ### Changed
