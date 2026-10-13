@@ -109,7 +109,11 @@ struct FirstBotSetupSheet: View {
                     Text("Hub").font(.headline)
                     Text("by invitation").font(.caption).foregroundStyle(.secondary)
                 }
-                SettingsStatusLabel(title: "Not joined", systemImage: "minus.circle", color: .secondary)
+                if store.hubs.hubs.isEmpty {
+                    SettingsStatusLabel(title: "Not joined", systemImage: "minus.circle", color: .secondary)
+                } else {
+                    SettingsStatusLabel(title: "Joined", systemImage: "checkmark.circle.fill", color: .green)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
