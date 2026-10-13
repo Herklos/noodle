@@ -181,6 +181,7 @@ final class MessengerDocumentationTests: XCTestCase {
             case .clearStatus, .listWakes: options = []
             case .wakeIn: options = ["20m", "--note", "Check"]
             case .wakeAt: options = ["2099-01-01T00:00:00Z", "--note", "Later"]
+            case .wakeEvery: options = ["0 9 * * *", "--note", "Daily"]
             case .cancelWake: options = [wakeID]
             }
             let result = MessengerCLI.runDirect(arguments: prefix + [command.rawValue] + options, environment: [:])

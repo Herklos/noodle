@@ -160,6 +160,9 @@ public enum MessengerCLI {
                 return .json(try repository.scheduleWake(agentID: agentID, at: dueAt ?? now.addingTimeInterval(delay ?? 0),
                                                          note: note, now: now))
 
+            case .scheduleRecurringWake(let schedule, let note):
+                return .json(try repository.scheduleWake(agentID: agentID, every: schedule, note: note))
+
             case .listWakes:
                 return .json(try repository.listWakes(agentID: agentID))
 
@@ -303,6 +306,10 @@ public enum MessengerCLI {
                     }
                     action = .scheduleWake(dueAt: date, delay: nil, note: note)
                 }
+            case .wakeEvery:
+                guard let schedule = Self.option("--wake-every", in: values),
+                      let note = Self.option("--note", in: values) else { throw MessengerCLIError.invalidArguments }
+                action = .scheduleRecurringWake(schedule: schedule, note: note)
             case .listWakes:
                 action = .listWakes
             case .cancelWake:
@@ -515,6 +522,7 @@ public enum MessengerAction: Codable, Sendable {
         case setStatus(String?)
         /// `delay` is measured when Noodle receives the request, so 5m meets the five-minute minimum.
         case scheduleWake(dueAt: Date?, delay: TimeInterval?, note: String)
+        case scheduleRecurringWake(schedule: String, note: String)
         case listWakes
         case cancelWake(UUID)
         /// Handled by the CLI through the tool bridge; never sent to the Messenger broker.

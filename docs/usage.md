@@ -143,7 +143,9 @@ tokens even when the bot has nothing to say; it does not authorize new work.
 Bots can also schedule their own wake-ups, for example to check back on something
 they are waiting for. These happen even when heartbeats are off. A bot can have
 at most three waiting at once, and after twelve in a row it waits until someone
-writes to it.
+writes to it. Ask a bot to do something on a schedule, such as a report every
+weekday at nine, and it can set a repeating wake-up that keeps coming back until
+it cancels it, at most once every five minutes.
 Noodle also attempts to resume interrupted work after a restart. Startup errors
 and **Kick** appear beside the affected bot in **Settings → Harness**. Kick is also
 available from the bot's sidebar menu; review any recovery confirmation first.

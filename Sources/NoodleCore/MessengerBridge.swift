@@ -141,7 +141,7 @@ public final class MessengerBroker: @unchecked Sendable {
         let response = MessengerCLI.perform(request.action, repository: repository, agentID: agent.id, brokered: true)
         if case .setStatus = request.action, response.exitCode == 0 { onAgentChanged?(agent.id) }
         switch request.action {
-        case .scheduleWake, .cancelWake: if response.exitCode == 0 { onWakesChanged?(agent.id) }
+        case .scheduleWake, .scheduleRecurringWake, .cancelWake: if response.exitCode == 0 { onWakesChanged?(agent.id) }
         default: break
         }
         return response
