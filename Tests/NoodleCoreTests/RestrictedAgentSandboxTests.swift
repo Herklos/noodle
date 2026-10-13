@@ -380,6 +380,21 @@ final class RestrictedAgentSandboxTests: XCTestCase {
         }
     }
 
+    func testOnlyMuseCanListTheSystemLibraryFolders() throws {
+        let listings = [#"(allow file-read-data (literal "/Library"))"#,
+                        #"(allow file-read-data (literal "/Library/Application Support"))"#]
+        for provider in [HarnessProvider.claudeCode, .fx, .grokBuild, .muse, .openCode, .antigravity] {
+            let profile = try RestrictedAgentSandbox.profile(provider: provider,
+                workspace: URL(fileURLWithPath: "/fixture/bot/workspace"), repository: URL(fileURLWithPath: "/fixture"),
+                home: URL(fileURLWithPath: "/private-login"), executable: URL(fileURLWithPath: "/native/harness"),
+                application: URL(fileURLWithPath: "/app"), temporary: URL(fileURLWithPath: "/fixture/bot/workspace/tmp"))
+            for listing in listings {
+                XCTAssertEqual(profile.contains(listing), provider == .muse, "\(provider) \(listing)")
+            }
+            XCTAssertFalse(profile.contains(#"(subpath "/Library/Application Support"#), "\(provider)")
+        }
+    }
+
     func testInstalledGrokCanInitializeInsideItsRestrictedProfile() throws {
         try checkInstalledACP(provider: .grokBuild)
     }

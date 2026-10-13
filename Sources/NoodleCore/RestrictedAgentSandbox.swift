@@ -37,6 +37,8 @@ public enum RestrictedAgentSandbox {
             readFiles += folders.flatMap { ancestorDirectories(of: URL(fileURLWithPath: $0.path)) }
         }
         if provider == .fx { readFiles.append("/Library/Keychains/System.keychain") }
+        // Muse Code 1.4.4 and later list these for system-wide settings and fail every session without them.
+        if provider == .muse { readFiles += ["/Library", "/Library/Application Support"] }
         let base = profile(workspace: workspace,
             executablePaths: [executable.path], application: application,
             readFiles: Array(Set(readFiles)).sorted(), folders: folders)
