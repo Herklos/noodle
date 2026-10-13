@@ -28,7 +28,7 @@ import NoodleRuntimeSettings
     }
 }
 
-/// Opens Noodle Browser, Computer and Applet from the Window menu; those not installed are dimmed.
+/// Opens Noodle Applet, Computer and Browser from the Window menu; those not installed are dimmed.
 struct CompanionAppCommands: Commands {
     let store: NoodleStore
     @State private var menu = CompanionAppMenu()

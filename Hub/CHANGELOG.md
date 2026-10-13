@@ -6,6 +6,10 @@
 
 - A long list in Settings → Groups shows its scroll bar again.
 
+### Changed
+
+- Settings → Companions lists Noodle Applet first, then Computer and Browser.
+
 ## [0.32.0] - 2026-10-13
 
 ### Added

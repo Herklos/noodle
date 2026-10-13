@@ -7,7 +7,7 @@ import NoodleComputerTools
 /// Separately installed apps that extend Noodle. Bundled helpers and harnesses
 /// are managed elsewhere and are not companion apps.
 public enum CompanionApp: String, CaseIterable, Identifiable {
-    case computer, applet, browser
+    case applet, computer, browser
 
     public var id: String { rawValue }
 

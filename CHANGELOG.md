@@ -16,6 +16,10 @@ All notable changes to Noodle are documented here, following
 
 - Edit → Paste as Attachment (⌥⌘V), also in the message field's context menu, attaches copied text as a file however short it is.
 
+### Changed
+
+- Settings → Companions and the Window menu list Noodle Applet first, then Computer and Browser.
+
 ## [0.61.0] - 2026-10-13
 
 ### Changed
