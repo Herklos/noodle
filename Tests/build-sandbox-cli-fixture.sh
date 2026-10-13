@@ -8,7 +8,7 @@ helpers="$application/Contents/Helpers"
 # groups, or XPC authentication. These helpers receive the production Seatbelt
 # profile from the test process, exactly as they do from the Agent Host.
 for product in NoodleMessenger; do
-    swift build --disable-sandbox --package-path "$project_root" --product "$product" >&2
+    zsh "$project_root/scripts/build-priority.sh" swift build --disable-sandbox --package-path "$project_root" --product "$product" >&2
 done
 bin_path="$(swift build --disable-sandbox --package-path "$project_root" --show-bin-path)"
 # Start empty: a helper this script no longer builds must not linger from an earlier run.

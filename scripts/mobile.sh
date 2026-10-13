@@ -37,15 +37,7 @@ require_key() {
     : "${APPLE_API_ISSUER_ID:?Missing App Store Connect issuer}"
 }
 
-# CI builds at full speed. On a laptop the build runs at background priority, which keeps it on the
-# efficiency cores, with fewer jobs and one simulator, so the machine stays usable while it works.
-build() {
-    if [[ -n "${CI:-}" ]]; then
-        xcodebuild "$@"
-    else
-        taskpolicy -b xcodebuild -jobs 4 "$@"
-    fi
-}
+build() { zsh "$project_root/scripts/build-priority.sh" xcodebuild "$@"; }
 
 # An iPhone simulator on the newest iOS, preferring one already running.
 choose_simulator() {
@@ -75,6 +67,7 @@ case "$command" in
     test)
         choose_simulator
         generate
+        # One simulator rather than clones of it, except on CI.
         parallel=()
         [[ -n "${CI:-}" ]] || parallel=(-parallel-testing-enabled NO)
         build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \

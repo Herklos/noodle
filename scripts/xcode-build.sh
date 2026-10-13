@@ -23,7 +23,7 @@ tuist="$(zsh "$project_root/scripts/install-tuist.sh")"
 (cd "$folder" && "$tuist" generate --no-open >&2)
 # Not $folder/Derived: that is Tuist's, and generating empties it, which would rebuild everything each time.
 derived_data="$project_root/.build/DerivedData/$app"
-xcodebuild -workspace "$folder/${name// /}.xcworkspace" -scheme "${name// /}" -configuration "$configuration" \
+zsh "$project_root/scripts/build-priority.sh" xcodebuild -workspace "$folder/${name// /}.xcworkspace" -scheme "${name// /}" -configuration "$configuration" \
     -derivedDataPath "$derived_data" -destination 'platform=macOS' -allowProvisioningUpdates \
     -skipPackagePluginValidation -skipMacroValidation "$@" build >&2
 destination="$project_root/.build/$app_name.app"
