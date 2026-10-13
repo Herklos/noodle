@@ -413,6 +413,7 @@ final class LinkVersion1Tests: XCTestCase {
         "kick": #"{"version":1,"request":{"kick":{"botID":"00000000-0000-0000-0000-00000000000A"}}}"#,
         "confirmKick": #"{"version":1,"request":{"confirmKick":{"botID":"00000000-0000-0000-0000-00000000000A","confirmationID":"00000000-0000-0000-0000-00000000000B"}}}"#,
         "newSession": #"{"version":1,"request":{"newSession":{"botID":"00000000-0000-0000-0000-00000000000A"}}}"#,
+        "organize": #"{"version":1,"request":{"organize":{"botID":"00000000-0000-0000-0000-00000000000A"}}}"#,
         "toolCatalog": #"{"version":1,"request":{"toolCatalog":{}}}"#,
         "assignBrowsers": #"{"version":1,"request":{"assignBrowsers":{"botID":"00000000-0000-0000-0000-00000000000A","browserIDs":["00000000-0000-0000-0000-00000000000B"]}}}"#,
         "assignComputers": #"{"request":{"assignComputers":{"botID":"00000000-0000-0000-0000-00000000000A","computerIDs":["00000000-0000-0000-0000-00000000000B"]}},"version":1}"#,
