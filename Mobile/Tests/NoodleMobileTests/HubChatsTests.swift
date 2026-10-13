@@ -18,6 +18,12 @@ private actor FakeHub {
     var downloads = 0
     var pictureFetches = 0
     var cardFetches = 0
+    var previewFetches = 0
+    /// The small picture the Hub makes of a file, as a red square.
+    static let preview = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).pngData { context in
+        UIColor.red.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+    }
     /// Bot edits as the phone sent them.
     var edits: [LinkBotDraft] = []
     /// Where the phone asked to hear of unread replies, in order.
@@ -236,6 +242,10 @@ private actor FakeHub {
             return .linkCard(LinkCardInfo(title: "Racer"))
         case .success(.linkPreview):
             return .picture(Data("racer picture".utf8))
+        case .success(.attachmentPreview(_, let id, _)):
+            guard files[id] != nil else { return .failure("No such file.") }
+            previewFetches += 1
+            return .picture(Self.preview)
         default:
             return .failure("Not in this test.")
         }
@@ -821,13 +831,57 @@ private actor RecordedSubscriptions: PushSubscriptions {
 
         let renderer = ImageRenderer(content: AttachmentView(chats: chats, thread: .bot(scout), attachment: attachment))
         renderer.scale = 1
-        let image = try #require(renderer.cgImage)
+        let pixel = try Self.centre(of: try #require(renderer.cgImage))
+        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "The bubble showed \(pixel), not the picture")
+    }
+
+    /// A picture a bot sends shows from the small copy the Hub makes, kept on the phone across launches;
+    /// the file itself comes down only when opened.
+    @Test func aPictureShowsFromTheHubsPreviewWithoutDownloadingIt() async throws {
+        let hub = FakeHub()
+        let attachment = await hub.botSends(Data(repeating: 1, count: 50_000), named: "photo.jpg", mediaType: "image/jpeg")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: directory)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let preview = try #require(try await chats.preview(of: attachment, in: scout))
+        #expect(try Data(contentsOf: preview) == FakeHub.preview)
+        #expect(try await chats.preview(of: attachment, in: scout) == preview)
+        #expect(await hub.previewFetches == 1)
+        #expect(await hub.downloads == 0)
+        #expect(chats.downloadedFile(for: attachment) == nil)
+        #expect(Self.isBackedUp(preview) == false)
+
+        let relaunched = HubChats(pairing: HubPairing(directory: directory, deviceName: "iPhone"))
+        #expect(relaunched.keptPreview(for: attachment) == preview)
+    }
+
+    /// A bubble drawn again shows the Hub's preview at once, as it does a downloaded picture.
+    @Test func aPreviewSeenBeforeShowsAtOnceWhenItsBubbleIsDrawnAgain() async throws {
+        let hub = FakeHub()
+        let attachment = await hub.botSends(Data(repeating: 1, count: 50_000), named: "photo.jpg", mediaType: "image/jpeg")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        _ = DecodedImages.downsampled(try #require(try await chats.preview(of: attachment, in: scout)), to: 720)
+
+        let renderer = ImageRenderer(content: AttachmentView(chats: chats, thread: .bot(scout), attachment: attachment))
+        renderer.scale = 1
+        let pixel = try Self.centre(of: try #require(renderer.cgImage))
+        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "The bubble showed \(pixel), not the preview")
+        #expect(await hub.downloads == 0)
+    }
+
+    private static func centre(of image: CGImage) throws -> [UInt8] {
         var pixel = [UInt8](repeating: 0, count: 4)
         let context = try #require(CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
                                              space: CGColorSpaceCreateDeviceRGB(),
                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.draw(image, in: CGRect(x: -image.width / 2, y: -image.height / 2, width: image.width, height: image.height))
-        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "The bubble showed \(pixel), not the picture")
+        return pixel
     }
 
     /// A shared noodlet's card shows at once after a relaunch, from what this phone kept of it.

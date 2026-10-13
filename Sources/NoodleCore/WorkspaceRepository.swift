@@ -1158,10 +1158,21 @@ public struct WorkspaceRepository: Sendable {
             .appendingPathComponent(attachment.storedFilename)
     }
 
+    /// Where a small picture of an attachment is kept for devices, hidden from the attachments listed.
+    public func attachmentPreviewURL(_ attachment: ConversationAttachment, pixels: Int) -> URL {
+        attachmentsDirectory(conversationID: attachment.conversationID).appendingPathComponent(".previews", isDirectory: true)
+            .appendingPathComponent("\(attachment.id.uuidString.lowercased())-\(pixels)")
+    }
+
     public func removeAttachment(_ attachment: ConversationAttachment) throws {
         let file = attachmentFileURL(attachment)
         let metadata = attachmentsDirectory(conversationID: attachment.conversationID)
             .appendingPathComponent("\(attachment.id.uuidString.lowercased()).json")
+        let previews = attachmentPreviewURL(attachment, pixels: 0).deletingLastPathComponent()
+        for preview in (try? FileManager.default.contentsOfDirectory(at: previews, includingPropertiesForKeys: nil)) ?? []
+        where preview.lastPathComponent.hasPrefix(attachment.id.uuidString.lowercased() + "-") {
+            try? FileManager.default.removeItem(at: preview)
+        }
         if FileManager.default.fileExists(atPath: file.path) {
             try FileManager.default.removeItem(at: file)
         }

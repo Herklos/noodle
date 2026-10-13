@@ -194,6 +194,10 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// The latest picture of what a link a bot shared points at, for its card, when the link
     /// itself carries none, as a noodlet's does not. Answered with `picture`.
     case linkPreview(conversationID: UUID, attachmentID: UUID)
+    /// A small picture of a conversation's file, at most `pixels` on its long side, so a device shows
+    /// it without downloading the file: a picture scaled down, a video's first frame, a PDF's first
+    /// page. Answered with `picture`, empty for other files.
+    case attachmentPreview(conversationID: UUID, attachmentID: UUID, pixels: Int)
     /// A live attachment’s title and preview, without opening it.
     case linkCard(conversationID: UUID, attachmentID: UUID)
     /// A picture a list left out, answered with `picture`.

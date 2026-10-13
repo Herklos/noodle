@@ -99,6 +99,8 @@ enum HubThread: HubConversation {
     }()
     /// Files coming down from the Hub, so a file asked for twice at once comes down once.
     @ObservationIgnored private var downloading: [UUID: Task<URL, Error>] = [:]
+    /// Previews being asked of the Hub, so one asked for twice at once is asked once.
+    @ObservationIgnored private var previewing: [UUID: Task<URL?, Error>] = [:]
     /// Messages in one page: small enough to come quickly, however long the conversation.
     private static let pageSize = 50
 
@@ -896,6 +898,41 @@ enum HubThread: HubConversation {
             if let id = UUID(uuidString: entry.folder.lastPathComponent) { knownCards.removeObject(forKey: id as NSUUID) }
             total -= entry.size
         }
+    }
+
+    /// Pixels on the long side of the Hub's previews, enough for a picture's bubble.
+    static let previewPixels = 720
+
+    /// The Hub's small picture of a file, so its bubble shows without the file coming down; kept on
+    /// this phone where the file would go. Nil when the Hub has nothing to show for it.
+    func preview(of attachment: LinkAttachment, in conversation: some HubConversation) async throws -> URL? {
+        if let kept = keptPreview(for: attachment) {
+            markUsed(attachment)
+            return kept
+        }
+        if let asking = previewing[attachment.id] { return try await asking.value }
+        let pairing = pairing, conversationID = conversation.conversationID, url = previewURL(for: attachment)
+        let asking = Task<URL?, Error> {
+            let request = LinkRequest.attachmentPreview(conversationID: conversationID, attachmentID: attachment.id, pixels: Self.previewPixels)
+            guard case .picture(let data) = try await pairing.request(request) else { throw LinkError("The Hub sent an unexpected answer.") }
+            guard let data else { return nil }
+            try prepareFolder(for: url)
+            try data.write(to: url, options: .atomic)
+            leaveOutOfBackups(url.deletingLastPathComponent())
+            return url
+        }
+        previewing[attachment.id] = asking
+        defer { previewing[attachment.id] = nil }
+        return try await asking.value
+    }
+
+    func keptPreview(for attachment: LinkAttachment) -> URL? {
+        let url = previewURL(for: attachment)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func previewURL(for attachment: LinkAttachment) -> URL {
+        filesFolder.appendingPathComponent(attachment.id.uuidString, isDirectory: true).appendingPathComponent(".preview")
     }
 
     /// The file on this phone if it is already downloaded.

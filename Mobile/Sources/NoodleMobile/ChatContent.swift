@@ -30,6 +30,8 @@ struct AttachmentView: View {
     @State private var url: URL?
     @State private var image: UIImage?
     @State private var failed = false
+    /// Coming down to be opened, as a file shown from the Hub's preview is.
+    @State private var opening = false
     @State private var previewing: URL?
     @State private var gallery: [URL] = []
     /// A live link with the card the Hub resolved for it, as a noodlet's name and picture.
@@ -56,14 +58,22 @@ struct AttachmentView: View {
             if isImage { picture } else { card }
         }
         .buttonStyle(.plain)
-        .disabled(url == nil)
+        .disabled(url == nil && image == nil)
+        .overlay { if opening { ProgressView() } }
         .quickLookPreview($previewing, in: gallery)
         .contextMenu {
-            if let url { ShareLink(item: url) }
+            if let url {
+                ShareLink(item: url)
+            } else {
+                let chats = chats, thread = thread, attachment = attachment
+                ShareLink(item: FileOnHub(filename: attachment.filename, mediaType: attachment.mediaType) {
+                    try await chats.file(for: attachment, in: thread)
+                }, preview: SharePreview(attachment.filename))
+            }
             // As on the Mac: a picture in the conversation can become its backdrop.
-            if isImage, let url {
+            if isImage {
                 Button("Use as Background", systemImage: "photo.on.rectangle") {
-                    Task { try? await chats.setBackground(photo: Data(contentsOf: url), for: thread) }
+                    Task { try? await chats.setBackground(photo: Data(contentsOf: chats.file(for: attachment, in: thread)), for: thread) }
                 }
             }
         }
@@ -187,44 +197,67 @@ struct AttachmentView: View {
         }
     }
 
-    /// Files still downloading are left out rather than holding the preview back.
+    /// A file shown from the Hub's preview comes down first, and the rest of its message alongside;
+    /// files still downloading are left out rather than holding the preview back.
     private func open() {
-        guard let url else { return }
-        gallery = LinkAttachment.previewGallery(opening: attachment, among: group).compactMap {
-            $0.id == attachment.id ? url : chats.downloadedFile(for: $0)
+        Task {
+            if url == nil {
+                let others = LinkAttachment.previewGallery(opening: attachment, among: group).filter { $0.id != attachment.id }
+                for other in others where chats.downloadedFile(for: other) == nil {
+                    Task { _ = try? await chats.file(for: other, in: thread) }
+                }
+                opening = true
+                url = try? await chats.file(for: attachment, in: thread)
+                opening = false
+            }
+            guard let url else { return }
+            gallery = LinkAttachment.previewGallery(opening: attachment, among: group).compactMap {
+                $0.id == attachment.id ? url : chats.downloadedFile(for: $0)
+            }
+            previewing = url
         }
-        previewing = url
     }
 
     /// Pixels decoded for a picture's bubble, or for a file card's thumbnail.
-    private var shownPixels: Int { isImage ? 720 : 88 }
+    private var shownPixels: Int { isImage ? 720 : 132 }
 
     /// The picture as decoded the last time this bubble was drawn, so it shows at once when it comes back.
     private var shownImage: UIImage? {
-        image ?? chats.downloadedFile(for: attachment).flatMap { DecodedImages.shown($0, at: shownPixels) }
+        image ?? (chats.downloadedFile(for: attachment) ?? chats.keptPreview(for: attachment))
+            .flatMap { DecodedImages.shown($0, at: shownPixels) }
     }
 
+    /// A file already on the phone shows from itself; a picture, video or PDF from the Hub's preview,
+    /// coming down only when opened; anything else comes down to be shown.
     private func load() async {
         do {
-            let file = try await chats.file(for: attachment, in: thread)
-            url = file
-            if let shown = DecodedImages.shown(file, at: shownPixels) {
-                image = shown
-            } else if isImage {
-                image = await Task.detached(priority: .userInitiated) { DecodedImages.downsampled(file, to: 720) }.value
+            if let file = chats.downloadedFile(for: attachment) {
+                url = file
+                image = await shown(file, isPreview: false)
+            } else if attachment.hasHubPreview, let preview = try await chats.preview(of: attachment, in: thread) {
+                image = await shown(preview, isPreview: true)
             } else {
-                image = await thumbnail(of: file)
+                let file = try await chats.file(for: attachment, in: thread)
+                url = file
+                image = await shown(file, isPreview: false)
             }
         } catch {
             failed = true
         }
     }
 
+    private func shown(_ file: URL, isPreview: Bool) async -> UIImage? {
+        if let shown = DecodedImages.shown(file, at: shownPixels) { return shown }
+        guard isImage || isPreview else { return await thumbnail(of: file) }
+        let pixels = shownPixels
+        return await Task.detached(priority: .userInitiated) { DecodedImages.downsampled(file, to: pixels) }.value
+    }
+
     private func thumbnail(of file: URL) async -> UIImage? {
         let request = QLThumbnailGenerator.Request(fileAt: file, size: CGSize(width: 88, height: 88), scale: displayScale,
                                                    representationTypes: .thumbnail)
         guard let image = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).uiImage else { return nil }
-        DecodedImages.keep(image, of: file, at: 88)
+        DecodedImages.keep(image, of: file, at: shownPixels)
         return image
     }
 
@@ -874,6 +907,29 @@ private struct SharedAttachmentRow: View {
         }
         .buttonStyle(.plain)
         .task(id: attachment.id) { resolved = await chats.sharedAttachment(attachment, in: thread) }
+    }
+}
+
+/// A conversation's file shared before it is on the phone: it comes down from the Hub as it is shared.
+struct FileOnHub: Transferable {
+    let filename: String
+    let mediaType: String
+    let download: @Sendable () async throws -> URL
+
+    private var type: UTType { UTType(mimeType: mediaType) ?? .data }
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .image) { SentTransferredFile(try await $0.download()) }
+            .exportingCondition { $0.type.conforms(to: .image) }
+            .suggestedFileName { $0.filename }
+        FileRepresentation(exportedContentType: .movie) { SentTransferredFile(try await $0.download()) }
+            .exportingCondition { $0.type.conforms(to: .movie) }
+            .suggestedFileName { $0.filename }
+        FileRepresentation(exportedContentType: .pdf) { SentTransferredFile(try await $0.download()) }
+            .exportingCondition { $0.type.conforms(to: .pdf) }
+            .suggestedFileName { $0.filename }
+        FileRepresentation(exportedContentType: .data) { SentTransferredFile(try await $0.download()) }
+            .suggestedFileName { $0.filename }
     }
 }
 

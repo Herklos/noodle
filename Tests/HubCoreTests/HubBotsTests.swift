@@ -634,6 +634,44 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: copy), bytes)
     }
 
+    /// A device shows a conversation's picture from a small copy the Hub makes rather than the whole
+    /// file; a file with nothing to show has none, and someone else's conversation is refused.
+    func testAFilesPreviewIsASmallCopyForItsConversationOnly() async throws {
+        let f = try await fixture()
+        let bot = try await createBot(f)
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2000, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 2000, height: 1000))
+        let photo = FileManager.default.temporaryDirectory.appendingPathComponent("hub-preview-\(UUID()).png")
+        addTeardownBlock { try? FileManager.default.removeItem(at: photo) }
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(photo as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let size = try XCTUnwrap(photo.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let picture = LinkAttachment(id: UUID(), filename: "Red.png", mediaType: "image/png", byteCount: size)
+        try await f.device.upload(photo, as: picture, to: bot.conversationID)
+
+        let ask = LinkRequest.attachmentPreview(conversationID: bot.conversationID, attachmentID: picture.id, pixels: 720)
+        guard case .picture(let preview?) = try await f.device.request(ask) else { return XCTFail("No preview") }
+        let image = try XCTUnwrap(CGImageSourceCreateWithData(preview as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        XCTAssertEqual(image.width, 720)
+        XCTAssertEqual(image.height, 360)
+        XCTAssertLessThan(preview.count, size)
+
+        let note = LinkAttachment(id: UUID(), filename: "Note.txt", mediaType: "text/plain", byteCount: 3)
+        _ = try await f.device.request(.upload(conversationID: bot.conversationID, attachment: note, offset: 0, data: Data("cat".utf8)))
+        let none = try await f.device.request(.attachmentPreview(conversationID: bot.conversationID, attachmentID: note.id, pixels: 720))
+        XCTAssertEqual(none, .picture(nil))
+
+        let (_, stranger) = try await person("Grace", f)
+        do {
+            _ = try await stranger.request(ask)
+            XCTFail("Someone else's file was previewed")
+        } catch {}
+    }
+
     func testAFileLargerThanTheHubTakesIsRefusedAtItsFirstPiece() async throws {
         let f = try await fixture()
         XCTAssertEqual(f.link.uploadLimit, 100_000_000)

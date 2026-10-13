@@ -1,6 +1,8 @@
 import AppletBridge
+import AVFoundation
 import BrowserBridge
 import Foundation
+import ImageIO
 import HubLink
 import NoodleCore
 import NoodleRuntime
@@ -668,6 +670,21 @@ import NoodleRuntime
     public func chunk(of attachmentID: UUID, in conversationID: UUID, at offset: Int, for user: HubUser) throws -> (Data, Int) {
         _ = try ownedConversation(conversationID, by: user)
         return try chunk(of: attachmentID, in: conversationID, at: offset)
+    }
+
+    /// A small picture of a conversation's file, so a device shows it without downloading the file.
+    /// Made once per size and kept beside the file; nil for a file with nothing to show.
+    public func preview(of attachmentID: UUID, in conversationID: UUID, pixels: Int, for user: HubUser) async throws -> Data? {
+        _ = try ownedConversation(conversationID, by: user)
+        guard let attachment = try attachments(in: conversationID)[attachmentID] else { throw LinkError("There is no such file.") }
+        let size = AttachmentPreview.size(for: pixels)
+        let kept = repository.attachmentPreviewURL(attachment, pixels: size)
+        if let data = try? Data(contentsOf: kept) { return data }
+        guard let data = await AttachmentPreview.make(of: repository.attachmentFileURL(attachment), mediaType: attachment.mediaType,
+                                                      pixels: size) else { return nil }
+        try? FileManager.default.createDirectory(at: kept.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: kept, options: .atomic)
+        return data
     }
 
     private func chunk(of attachmentID: UUID, in conversationID: UUID, at offset: Int) throws -> (Data, Int) {
@@ -1490,5 +1507,70 @@ import NoodleRuntime
         return LinkMessage(id: message.id, conversationID: message.conversationID, author: author, body: message.body,
                            createdAt: message.createdAt, delivered: message.delivery == .delivered, attachments: attachments,
                            reactions: reactions, call: call)
+    }
+}
+
+/// Small pictures of conversation files for devices: a picture scaled down, a video's first frame or
+/// a PDF's first page, as JPEG, or PNG where the picture is see-through.
+enum AttachmentPreview {
+    /// The sizes made, so a few copies serve every device: the smallest as big as asked, else the largest.
+    static let sizes = [360, 720, 1440, 2048]
+
+    static func size(for pixels: Int) -> Int { sizes.first { $0 >= pixels } ?? sizes[sizes.count - 1] }
+
+    static func make(of file: URL, mediaType: String, pixels: Int) async -> Data? {
+        let image: CGImage?
+        if mediaType.hasPrefix("image/") {
+            image = picture(file, pixels: pixels)
+        } else if mediaType.hasPrefix("video/") {
+            image = await frame(file, pixels: pixels)
+        } else if mediaType == "application/pdf" {
+            image = page(file, pixels: pixels)
+        } else {
+            return nil
+        }
+        return image.flatMap(encoded)
+    }
+
+    private static func picture(_ file: URL, pixels: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: pixels,
+        ] as CFDictionary)
+    }
+
+    private static func frame(_ file: URL, pixels: Int) async -> CGImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: pixels, height: pixels)
+        return try? await generator.image(at: .zero).image
+    }
+
+    private static func page(_ file: URL, pixels: Int) -> CGImage? {
+        guard let page = CGPDFDocument(file as CFURL)?.page(at: 1) else { return nil }
+        let box = page.getBoxRect(.cropBox)
+        guard box.width > 0, box.height > 0 else { return nil }
+        let scale = CGFloat(pixels) / max(box.width, box.height)
+        let width = Int((box.width * scale).rounded()), height = Int((box.height * scale).rounded())
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+            return nil
+        }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -box.minX, y: -box.minY)
+        context.drawPDFPage(page)
+        return context.makeImage()
+    }
+
+    private static func encoded(_ image: CGImage) -> Data? {
+        let seeThrough = ![.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo)
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, (seeThrough ? "public.png" : "public.jpeg") as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 }

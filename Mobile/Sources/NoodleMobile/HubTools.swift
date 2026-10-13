@@ -859,6 +859,11 @@ extension LinkAttachment {
         return resolved
     }
 
+    /// A picture, video or PDF, which the Hub shows a small picture of, so it need not come down to be seen.
+    var hasHubPreview: Bool {
+        voice == nil && (mediaType.hasPrefix("image/") || mediaType.hasPrefix("video/") || mediaType == "application/pdf")
+    }
+
     var liveTitle: String { card?.title ?? URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent }
 
     var liveKindName: String {

@@ -6,6 +6,7 @@
 
 - Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.
 - Phones can ask an idle bot to organize its own files, as Organize does in Noodle.
+- Phones show pictures, videos and PDFs in conversations from small previews the Hub makes, instead of downloading each whole file.
 
 ### Fixed
 

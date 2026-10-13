@@ -653,6 +653,8 @@ import os
             return .linkCard(try await hubBots().card(of: attachmentID, in: conversationID, for: try user(key)))
         case .linkPreview(let conversationID, let attachmentID):
             return .picture(try await hubBots().picture(of: attachmentID, in: conversationID, for: try user(key)))
+        case .attachmentPreview(let conversationID, let attachmentID, let pixels):
+            return .picture(try await hubBots().preview(of: attachmentID, in: conversationID, pixels: pixels, for: try user(key)))
         case .download(let conversationID, let attachmentID, let offset):
             let (data, total) = try hubBots().chunk(of: attachmentID, in: conversationID, at: offset, for: try user(key))
             return .chunk(data: data, total: total)
