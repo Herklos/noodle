@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Apple Intelligence's on-device model is no longer offered to bots by default. Add it in Settings → Harnesses → Apple Intelligence → Local Models to use it. If your bots already use it, updating adds it for you. Noodle installs this release before any later update.
+
 ### Added
 
 - Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.

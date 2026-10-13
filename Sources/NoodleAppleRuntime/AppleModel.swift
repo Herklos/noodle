@@ -34,13 +34,13 @@ public enum AppleModel {
             }
         }
         #endif
-        var models = [HarnessModel(id: "default", displayName: name, description: description,
-                                  supportedEfforts: [], defaultEffort: "", isDefault: true)]
-        if localSupported, let modelsDirectory {
-            models += ((try? AppleLocalModelStore(directory: modelsDirectory).models()) ?? []).map(\.harnessModel)
-        }
-        let reason = systemUnavailableReason
-        if reason != nil, models.count > 1 { models.removeFirst() }
+        let store = modelsDirectory.map(AppleLocalModelStore.init(directory:))
+        let systemAdded = store?.systemModelAdded == true
+        var models = systemAdded ? [HarnessModel(id: "default", displayName: name, description: description,
+                                                 supportedEfforts: [], defaultEffort: "", isDefault: true)] : []
+        if localSupported, let store { models += ((try? store.models()) ?? []).map(\.harnessModel) }
+        let reason = systemAdded ? systemUnavailableReason : "Add a model in Settings › Harnesses › Apple Intelligence."
+        if systemAdded, reason != nil, models.count > 1 { models.removeFirst() }
         return .init(models: models, unavailableReason: models.contains(where: { $0.id != "default" }) ? nil : reason,
                      version: version, localModelsSupported: localSupported)
     }

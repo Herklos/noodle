@@ -8,6 +8,7 @@ public struct AppleLocalModelsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var models: [AppleLocalModel] = []
     @State private var unreadable: [AppleLocalModel] = []
+    @State private var systemAdded = false
     @State private var checkedSupport: Bool?
     @State private var checked = false
     @State private var importing = false
@@ -34,6 +35,8 @@ public struct AppleLocalModelsView: View {
     private var storage: AppleLocalModelStore { .init(repository: store.repository.rootURL) }
     private var busy: Bool { importing || downloadingID != nil }
     private var installed: [AppleLocalModel] { models + unreadable }
+    private static let systemName = "Apple On-Device"
+    private static let systemSummary = "Built into Apple Intelligence. Fast, but weak at tools and longer tasks."
     private var available: [AppleDownloadableModel] {
         AppleDownloadableModel.available.filter { downloadable in
             !models.contains { $0.sourceRepository == downloadable.repository }
@@ -93,7 +96,7 @@ public struct AppleLocalModelsView: View {
         .interactiveDismissDisabled(busy)
         .onDisappear { downloadTask?.cancel() }
         .sheet(item: $editingAgent, onDismiss: {
-            if let id = returnToModelID, installed.contains(where: { $0.id == id }) { modelUsageID = id }
+            if let id = returnToModelID, id == "default" ? systemAdded : installed.contains(where: { $0.id == id }) { modelUsageID = id }
             returnToModelID = nil
         }) { agent in
             store.botRuntimeEditor(agent)
@@ -130,44 +133,79 @@ public struct AppleLocalModelsView: View {
                 Text(importing ? "Importing model files…" : "Checking local model support…")
                     .font(.callout).foregroundStyle(.secondary)
             }
-        } else if !supported {
-            Text("Requires macOS 27 and a Noodle build with local model support.")
-                .font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if !installed.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Installed").font(.headline)
-                ForEach(installed) { model in
-                    let users = botsUsing(model)
-                    let source = AppleDownloadableModel.available.first { $0.repository == model.sourceRepository }
-                    modelRow(name: model.name, summary: source?.summary, byteCount: model.byteCount, sourceURL: source?.sourceURL) {
-                        Button("Remove", role: .destructive) { requestRemoval(model) }
-                            .disabled(busy)
-                            .help(users.isEmpty ? "Remove Noodle’s copy of this model."
-                                  : "Used by \(users.map(\.displayName).joined(separator: ", ")).")
-                            .popover(isPresented: Binding(
-                                get: { modelUsageID == model.id },
-                                set: { if !$0, modelUsageID == model.id { modelUsageID = nil } }
-                            ), arrowEdge: .trailing) {
-                                ModelUsagePopover(subject: "Model", name: model.name, agents: botsUsing(model), edit: { agent in
-                                    returnToModelID = model.id
-                                    modelUsageID = nil
-                                    editingAgent = agent
-                                }, remove: { requestRemoval(model) }, close: { modelUsageID = nil })
-                            }
-                    }
-                    .padding(12)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        } else {
+            if !supported {
+                Text("Requires macOS 27 and a Noodle build with local model support.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if systemAdded || (supported && !installed.isEmpty) {
+                installedContent
+            }
+        }
+    }
+
+    private var installedContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Installed").font(.headline)
+            if systemAdded {
+                let users = botsUsingSystemModel()
+                modelRow(name: Self.systemName, summary: Self.systemSummary, byteCount: nil, sourceURL: nil) {
+                    Button("Remove", role: .destructive) { removeSystemModel() }
+                        .disabled(busy)
+                        .help(users.isEmpty ? "Stop offering Apple’s on-device model to bots."
+                              : "Used by \(users.map(\.displayName).joined(separator: ", ")).")
+                        .popover(isPresented: Binding(
+                            get: { modelUsageID == "default" },
+                            set: { if !$0, modelUsageID == "default" { modelUsageID = nil } }
+                        ), arrowEdge: .trailing) {
+                            ModelUsagePopover(subject: "Model", name: Self.systemName, agents: botsUsingSystemModel(), edit: { agent in
+                                returnToModelID = "default"
+                                modelUsageID = nil
+                                editingAgent = agent
+                            }, remove: { removeSystemModel() }, close: { modelUsageID = nil })
+                        }
                 }
+                .padding(12)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+            }
+            ForEach(supported ? installed : []) { model in
+                let users = botsUsing(model)
+                let source = AppleDownloadableModel.available.first { $0.repository == model.sourceRepository }
+                modelRow(name: model.name, summary: source?.summary, byteCount: model.byteCount, sourceURL: source?.sourceURL) {
+                    Button("Remove", role: .destructive) { requestRemoval(model) }
+                        .disabled(busy)
+                        .help(users.isEmpty ? "Remove Noodle’s copy of this model."
+                              : "Used by \(users.map(\.displayName).joined(separator: ", ")).")
+                        .popover(isPresented: Binding(
+                            get: { modelUsageID == model.id },
+                            set: { if !$0, modelUsageID == model.id { modelUsageID = nil } }
+                        ), arrowEdge: .trailing) {
+                            ModelUsagePopover(subject: "Model", name: model.name, agents: botsUsing(model), edit: { agent in
+                                returnToModelID = model.id
+                                modelUsageID = nil
+                                editingAgent = agent
+                            }, remove: { requestRemoval(model) }, close: { modelUsageID = nil })
+                        }
+                }
+                .padding(12)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
             }
         }
     }
 
     @ViewBuilder
     private var availableContent: some View {
-        if !available.isEmpty {
+        if !(checking || importing), !systemAdded || !available.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Available").font(.headline)
+                if !systemAdded {
+                    modelRow(name: Self.systemName, summary: Self.systemSummary, byteCount: nil, sourceURL: nil) {
+                        Button("Add") { setSystemModel(added: true) }.disabled(busy)
+                    }
+                    .padding(12)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                }
                 ForEach(available) { downloadable in
                     VStack(alignment: .leading, spacing: 8) {
                         modelRow(name: downloadable.name, summary: downloadable.summary, byteCount: downloadable.byteCount,
@@ -199,9 +237,9 @@ public struct AppleLocalModelsView: View {
     }
 
     /// A model from the catalogue carries its summary and source; an imported one has only its name and size.
-    private func modelRow(name: String, summary: String?, byteCount: Int64, sourceURL: URL?, recommended: Bool = false,
+    private func modelRow(name: String, summary: String?, byteCount: Int64?, sourceURL: URL?, recommended: Bool = false,
                           @ViewBuilder action: () -> some View) -> some View {
-        let size = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+        let size = byteCount.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -217,14 +255,16 @@ public struct AppleLocalModelsView: View {
                     Text(summary).font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack(spacing: 8) {
-                    Text(sourceURL == nil ? size : "4-bit · \(size)").foregroundStyle(.secondary)
-                    if let sourceURL {
-                        Link("Details", destination: sourceURL)
-                            .help("Model details and license on Hugging Face")
+                if let size {
+                    HStack(spacing: 8) {
+                        Text(sourceURL == nil ? size : "4-bit · \(size)").foregroundStyle(.secondary)
+                        if let sourceURL {
+                            Link("Details", destination: sourceURL)
+                                .help("Model details and license on Hugging Face")
+                        }
                     }
+                    .font(.caption)
                 }
-                .font(.caption)
             }
             Spacer(minLength: 4)
             action()
@@ -300,6 +340,31 @@ public struct AppleLocalModelsView: View {
     private func reload() throws {
         models = try storage.models()
         unreadable = try storage.unreadableModels()
+        systemAdded = storage.systemModelAdded
+    }
+
+    private func botsUsingSystemModel() -> [AgentRecord] {
+        store.agents.filter { $0.harnessIdentifier == "apple" && ($0.modelIdentifier ?? "default") == "default" }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    private func removeSystemModel() {
+        guard !busy else { return }
+        guard botsUsingSystemModel().isEmpty else {
+            modelUsageID = "default"
+            return
+        }
+        modelUsageID = nil
+        setSystemModel(added: false)
+    }
+
+    private func setSystemModel(added: Bool) {
+        error = nil
+        do {
+            try storage.setSystemModelAdded(added)
+            try reload()
+            Task { await store.runtime.checkExternalInstallation(.apple) }
+        } catch { self.error = error.localizedDescription }
     }
 
     private func botsUsing(_ model: AppleLocalModel) -> [AgentRecord] {

@@ -94,9 +94,13 @@ final class AppleSandboxTests: XCTestCase {
     }
 
     func testAvailabilityThroughSeparateSandbox() throws {
-        let result = try AppleHarnessProbe.inspect(executable: helper, application: application)
+        let models = FileManager.default.temporaryDirectory.appendingPathComponent("system-model-\(UUID())", isDirectory: true)
+            .resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: models) }
+        try AppleLocalModelStore(directory: models).setSystemModelAdded(true)
+        let result = try AppleHarnessProbe.inspect(executable: helper, application: application, modelsDirectory: models)
         XCTAssertEqual(result.models.map(\.id), ["default"])
-        XCTAssertEqual(result.unavailableReason, AppleModel.inspection(version: "test").unavailableReason)
+        XCTAssertEqual(result.unavailableReason, AppleModel.inspection(version: "test", modelsDirectory: models).unavailableReason)
     }
 
     func testMetalDelegationCannotGrantWeightsOrOutsideFiles() throws {

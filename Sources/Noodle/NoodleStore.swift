@@ -582,6 +582,8 @@ final class NoodleStore {
         do {
             try repository.prepare()
             agents = try repository.loadAgents()
+            // TODO(0.62.0): remove with AppleLocalModelStore.keepSystemModelForExistingBots. Milestone: 0.61.0.
+            try AppleLocalModelStore(repository: repository.rootURL).keepSystemModelForExistingBots(agents)
             runtime.archivedAgentIDs = Set(agents.filter { $0.archivedAt != nil }.map(\.id))
             activityWindows.synchronize(agents: agents)
             runtime.reloadAccess()
