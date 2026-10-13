@@ -309,6 +309,8 @@ public struct WorkspaceRepository: Sendable {
         _ = try synchronizeClaudeSkillLinks(in: directory)
 
         try messengerFiles.writeData(Data(Self.messengerSkill.utf8), named: "SKILL.md")
+        try WorkspaceMailbox(workspace: directory, path: ".agents/skills/preferences-and-memory", create: true)
+            .writeData(Data(Self.preferencesAndMemorySkill.utf8), named: "SKILL.md")
         if let launcherExecutableURL {
             try messengerFiles.symlink("messenger", destination: launcherExecutableURL.path)
         }
@@ -581,13 +583,53 @@ public struct WorkspaceRepository: Sendable {
 
         ## Preferences and memory
 
-        Read `preferences.md` at the start of each session and reread it after changes. Apply it as this bot's standing user preferences, such as tone, formatting, and working style; newer explicit user requests take precedence. When the user asks you to remember a preference, update `preferences.md`. Use `memory.md` for durable facts, decisions, and ongoing context. Noodle creates `preferences.md` with only a heading if missing and preserves both files during workspace synchronization; keep persistent notes there, not in generated instructions. Do not record safety stops, refusals or runtime failures in either file as reasons to avoid a task; a new session should be free to try again.
+        Read `preferences.md` at the start of each session and reread it after changes. Apply it as this bot's standing instructions, such as tone, formatting, working style and recurring work you were asked to keep doing; newer explicit user requests take precedence. When the user asks you to remember a preference, update `preferences.md`. Use `memory.md` for durable facts, decisions, and ongoing context. Before changing either file, read `.agents/skills/preferences-and-memory/SKILL.md` and follow it. Noodle creates `preferences.md` with only a heading if missing and preserves both files during workspace synchronization; keep persistent notes there, not in generated instructions. Do not record safety stops, refusals or runtime failures in either file as reasons to avoid a task; a new session should be free to try again.
 
         ## Messages
 
         \(MessengerDocumentation.bootstrapInstructions)
         """
     }
+
+    private static let preferencesAndMemorySkill = """
+        ---
+        name: preferences-and-memory
+        description: Decide what goes in preferences.md and memory.md, and keep both short enough to reread every session.
+        ---
+
+        # Preferences and memory
+
+        Both files are reread at the start of every session, so every line costs attention each time. Keep them current, short and free of history.
+
+        ## What goes where
+
+        - `preferences.md` holds standing instructions from the user: tone, formatting, working style, people and places to prefer or avoid, approvals you need, and recurring work you were asked to keep doing. Write each as a present-tense rule you can follow without the conversation it came from.
+        - `memory.md` holds facts, decisions and the current state of ongoing work: who is who, what was agreed, what is waiting on whom, and where details live.
+        - Anything else gets its own file; see below.
+        - Things you can find again in the workspace, the conversation history or the web do not need copying.
+
+        ## Other files
+
+        When something fits neither file, keep it in a file of its own in the workspace and name it in `memory.md` with one line on what it holds. Good candidates are trackers for work done item by item, such as leads, applications or tasks; research notes and drafts; reference material you return to; and checklists for recurring work. A file nobody lists is lost to the next session. Pick a plain name, keep one file per purpose, and when a file is finished with, delete it or mark it done in `memory.md`.
+
+        ## Updating preferences
+
+        - When the user changes a rule, rewrite or replace the rule it supersedes in place. Never append a newer version below an older one and leave both.
+        - Merge rules that say the same thing. Keep the user's own wording for anything precise, such as a threshold, a name or an address.
+        - Attribution and dates are only worth keeping where they settle which instruction wins.
+        - For recurring work, say what one full round is, so a later session can do it without guessing.
+
+        ## Updating memory
+
+        - Update an existing entry when its state changes instead of adding a new dated entry about the same thing.
+        - Do not log checks that found nothing new. Record the outcome only when something changed, was decided or needs follow-up.
+        - Remove entries that no longer hold, such as closed items, finished waits and superseded plans.
+
+        ## Keeping both short
+
+        - When either file passes about 200 lines, or you notice repeated or superseded entries, compact it before adding more: merge duplicates, drop what no longer holds, and move detail you still need into a separate file named from `memory.md`.
+        - Compacting must not lose a standing instruction, an open commitment or anything the user asked you to remember.
+        """
 
     private static var messengerSkill: String {
         """

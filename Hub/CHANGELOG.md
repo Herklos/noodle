@@ -5,6 +5,11 @@
 ### Added
 
 - Bots can set repeating wake-ups on a cron schedule, such as every weekday at nine, for work you ask them to do regularly. A repeating wake-up keeps coming back until the bot cancels it, at most once every five minutes.
+- Bots get a built-in skill for keeping their preferences and memory files: a new instruction replaces the one it supersedes, checks that found nothing are not logged, and long files get compacted.
+
+### Fixed
+
+- On a heartbeat, a bot you asked to keep doing something, such as a daily search, does the next round in full instead of stopping after a quick look.
 
 ## [0.30.0] - 2026-10-12
 

@@ -106,6 +106,16 @@ final class RepositoryTests: XCTestCase {
         XCTAssertTrue(messengerGuide.contains("private backstory"))
         XCTAssertTrue(messengerGuide.contains("named participant roster"))
         XCTAssertFalse(messengerGuide.contains("noodle_get_latest"))
+        let notesGuide = try String(
+            contentsOf: directory.appendingPathComponent(".agents/skills/preferences-and-memory/SKILL.md"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(agentsGuide.contains(".agents/skills/preferences-and-memory/SKILL.md"))
+        XCTAssertTrue(agentsGuide.contains("recurring work"))
+        XCTAssertTrue(notesGuide.hasPrefix("---\nname: preferences-and-memory\n"))
+        XCTAssertTrue(notesGuide.contains("replace the rule it supersedes"))
+        XCTAssertTrue(notesGuide.contains("Do not log checks that found nothing new"))
+        XCTAssertTrue(notesGuide.contains("When something fits neither file, keep it in a file of its own"))
         XCTAssertEqual(created.conversation.participantIDs, [created.agent.id])
     }
 
