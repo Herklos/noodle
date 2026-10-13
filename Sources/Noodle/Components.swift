@@ -327,8 +327,10 @@ struct MessageBubble: View {
     @ViewBuilder private func segmentBubble(_ segment: MessageMarkdownCache.Segment) -> some View {
         switch segment {
         case .text(let text, let source):
-            MessageText(message: message, text: text, source: source)
+            // Links on the accent bubble are white and underlined; the link blue is unreadable on it.
+            MessageText(message: message, text: isUser ? Self.underliningLinks(text) : text, source: source)
                 .foregroundStyle(isUser ? .white : .primary)
+                .tint(isUser ? .white : nil)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 8)
                 .background { messageBackground }
@@ -341,6 +343,12 @@ struct MessageBubble: View {
                 .background { messageBackground }
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
+    }
+
+    private static func underliningLinks(_ text: AttributedString) -> AttributedString {
+        var text = text
+        for run in text.runs where run.link != nil { text[run.range].underlineStyle = .single }
+        return text
     }
 
     private var linkPreviewURL: URL? {

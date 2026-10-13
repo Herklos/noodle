@@ -11,6 +11,7 @@ All notable changes to Noodle are documented here, following
 - Clicking a bot's picture in either desktop widget opens its chat, just like clicking its name.
 - Long lists in Settings → Bots and Settings → Groups show their scroll bar again.
 - The welcome no longer says Not joined under Noodle Hub when this Mac has joined one.
+- Links in your own messages are white and underlined instead of blue on the coloured bubble.
 
 ### Added
 
