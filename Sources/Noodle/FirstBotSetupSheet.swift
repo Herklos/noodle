@@ -12,6 +12,9 @@ struct FirstBotSetupSheet: View {
     /// The bots made once the account is ready, shown for a moment before the group opens.
     @State private var team: [AgentRecord] = []
     @State private var teamGroupID: UUID?
+    @State private var joiningHub = false
+    /// The Hubs joined before the join sheet opened.
+    @State private var hubsBeforeJoining = 0
 
     init(setup: HarnessSetupController, runtime: AgentRuntimeCoordinator) {
         _model = State(initialValue: FirstBotSetup(setup: setup, runtime: runtime))
@@ -72,6 +75,7 @@ struct FirstBotSetupSheet: View {
     private var harnessStep: some View {
         VStack(spacing: 16) {
             HStack(spacing: 10) {
+                hubTile
                 ForEach(FirstBotSetup.featured) { provider in
                     tile(for: provider)
                 }
@@ -80,6 +84,41 @@ struct FirstBotSetupSheet: View {
                 .buttonStyle(.link)
                 .keyboardShortcut(.cancelAction)
         }
+        // The Hub's harnesses are enough to make bots, so joining one finishes the welcome.
+        .sheet(isPresented: $joiningHub, onDismiss: {
+            if store.hubs.hubs.count > hubsBeforeJoining { store.finishFirstBotSetup() }
+        }) {
+            HubJoinSheet().environment(store)
+        }
+    }
+
+    /// Instead of an account here, the harnesses a Noodle Hub lends.
+    private var hubTile: some View {
+        Button {
+            store.hubs.clearJoinError()
+            hubsBeforeJoining = store.hubs.hubs.count
+            joiningHub = true
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 26))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+                    .accessibilityHidden(true)
+                VStack(spacing: 2) {
+                    Text("Noodle Hub").font(.headline)
+                    Text("by invitation").font(.caption).foregroundStyle(.secondary)
+                }
+                SettingsStatusLabel(title: "Not joined", systemImage: "minus.circle", color: .secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .contentShape(Rectangle())
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .help("Use the harnesses a Noodle Hub lends you")
+        .accessibilityLabel("Join a Noodle Hub")
     }
 
     private func tile(for provider: HarnessProvider) -> some View {
