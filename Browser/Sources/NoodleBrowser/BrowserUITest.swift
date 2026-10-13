@@ -55,6 +55,7 @@ import SwiftUI
             }
             settingsWindow.close()
             try await verifyWebSurface(presentation, window: window)
+            try await verifyAddressField(presentation, window: window)
             try await verifyTabTargets(presentation, window: window)
             try await verifyPersonRow(presentation, window: window)
             // Delete the currently displayed profile while its window is mounted.
@@ -63,7 +64,7 @@ import SwiftUI
             for profile in library.profiles { try await delegate.runtime.removeBrowser(profile.id) }
             window.close()
             delegate.runtime.shutdown()
-            print("BROWSER_UI_PASSED: web surface, tab padding input, empty tab strip double-click, independent tab closing, single window, Settings, Update and standard menus, deletion while mounted")
+            print("BROWSER_UI_PASSED: web surface, address field collapsing to the domain, tab padding input, empty tab strip double-click, independent tab closing, single window, Settings, Update and standard menus, deletion while mounted")
             print("BROWSER_UI_ARTIFACTS: \(library.root.path)")
             exit(0)
         } catch { fputs("BROWSER_UI_FAILED: \(error.localizedDescription)\n", stderr); exit(1) }
@@ -228,6 +229,36 @@ import SwiftUI
                 NSApp.postEvent(event, atStart: false)
             }
         }
+    }
+    /// Clicking into the address shows it in full; clicking somewhere that takes no focus, like the empty tab
+    /// strip, returns it to the domain.
+    private static func verifyAddressField(_ presentation: BrowserPresentation, window: NSWindow) async throws {
+        guard let tab = presentation.currentTab, let content = window.contentView else { throw BrowserError("Missing selected tab.") }
+        func find(_ view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.accessibilityIdentifier() == "browser.address" { return field }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        guard let frame = content.superview, let field = find(frame) else { throw BrowserError("Missing address field.") }
+        let frames = ["browser.tab.close.\(tab.id)", "browser.tab.new"].compactMap { identifier in
+            elements(content).first(where: { attribute($0, .identifier) as? String == identifier })
+                .flatMap { ($0.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue }
+        }
+        guard frames.count == 2, frames[1].minX - frames[0].maxX > 40 else { throw BrowserError("Missing empty tab strip space.") }
+        let empty = window.convertPoint(fromScreen: .init(x: (frames[0].maxX + frames[1].minX) / 2, y: frames[1].midY))
+        // Clicks posted to an inactive app never arrive.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        try await BrowserSmokeTest.eventually("address fixture key window") { NSApp.isActive && window.isKeyWindow }
+        try await BrowserSmokeTest.eventually("the address field showing the domain") { field.stringValue == "browser-fixture.invalid" }
+        try click(field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil), in: window)
+        try await BrowserSmokeTest.eventually("the address field showing the full address while editing") {
+            field.currentEditor() != nil && field.stringValue == "https://browser-fixture.invalid/"
+        }
+        try click(empty, in: window)
+        try await BrowserSmokeTest.eventually("the address field collapsing to the domain after clicking the tab strip") {
+            field.currentEditor() == nil && field.stringValue == "browser-fixture.invalid"
+        }
+        guard presentation.profile?.tabs.count == 1 else { throw BrowserError("Clicking the empty tab strip opened a tab.") }
     }
     private static func verifyWebSurface(_ presentation: BrowserPresentation, window: NSWindow) async throws {
         guard let tab = presentation.currentTab else { throw BrowserError("Missing selected tab.") }

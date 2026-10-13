@@ -423,13 +423,27 @@ private struct BrowserAddressText: NSViewRepresentable {
 
     final class Field: NSTextField {
         var address = ""
+        private var clicks: Any?
         override func becomeFirstResponder() -> Bool {
             guard super.becomeFirstResponder() else { return false }
             alignment = .natural
             font = .systemFont(ofSize: NSFont.systemFontSize)
             stringValue = address
             currentEditor()?.selectAll(nil)
+            // A click on something that takes no focus, like the tab strip or a toolbar button, leaves the field
+            // editing. Like Safari, any click outside ends it: focus goes to what was clicked, or to nothing.
+            clicks = clicks ?? NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+                guard let self, let window, event.window === window, currentEditor() != nil,
+                      let hit = window.contentView?.superview?.hitTest(event.locationInWindow),
+                      hit !== self, !hit.isDescendant(of: self) else { return event }
+                window.makeFirstResponder(hit.acceptsFirstResponder ? hit : nil)
+                return event
+            }
             return true
+        }
+        override func textDidEndEditing(_ notification: Notification) {
+            if let clicks { NSEvent.removeMonitor(clicks); self.clicks = nil }
+            super.textDidEndEditing(notification)
         }
         override func mouseDown(with event: NSEvent) {
             let editing = currentEditor() != nil
