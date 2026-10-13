@@ -390,24 +390,117 @@ private struct BrowserAddressField: View {
     @ObservedObject var presentation: BrowserPresentation
     let url: String
     let loading: Bool
-    @State private var address = ""
-    @FocusState private var focused: Bool
+    @State private var showingPageInfo = false
+    private var host: String {
+        guard let host = URL(string: url)?.host(), !host.isEmpty else { return url == "about:blank" ? "" : url }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: url.hasPrefix("https://") ? "lock" : "magnifyingglass").font(.caption).foregroundStyle(.secondary)
-            TextField("Search or enter address", text: $address)
-                .textFieldStyle(.plain).focused($focused).onSubmit { presentation.navigate(address); focused = false }
-                .accessibilityLabel("Address").accessibilityIdentifier("browser.address")
+            Button { showingPageInfo = true } label: { Image(systemName: "text.alignleft").font(.body).frame(width: 18, height: 18) }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Page Information").disabled(host.isEmpty)
+                .popover(isPresented: $showingPageInfo, arrowEdge: .bottom) {
+                    BrowserPageInfo(host: host, secure: url.hasPrefix("https://") && presentation.currentTab?.web.hasOnlySecureContent == true)
+                }
+            BrowserAddressText(host: host, address: url == "about:blank" ? "" : url, focusRequest: presentation.addressFocusRequest) { presentation.navigate($0) }
             Button {
                 if loading { presentation.currentTab?.web.stopLoading() } else { presentation.currentTab?.web.reload() }
-            } label: { Image(systemName: loading ? "xmark" : "arrow.clockwise").font(.caption) }
-                .buttonStyle(.plain).help(loading ? "Stop Loading" : "Reload")
+            } label: { Image(systemName: loading ? "xmark" : "arrow.clockwise").font(.body).frame(width: 18, height: 18) }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help(loading ? "Stop Loading" : "Reload")
         }.padding(.horizontal, 12).padding(.vertical, 9)
             .frame(minWidth: 120, idealWidth: 360, maxWidth: 560)
             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 9))
-            .onAppear { address = url == "about:blank" ? "" : url }
-            .onChange(of: url) { _, value in if !focused { address = value == "about:blank" ? "" : value } }
-            .onChange(of: presentation.addressFocusRequest) { _, _ in focused = true }
+    }
+}
+
+/// Like Safari's, the field shows only the site's domain, centred, until it is edited; editing starts with the
+/// full address selected. AppKit, because SwiftUI focus state misses clicks into a toolbar text field.
+private struct BrowserAddressText: NSViewRepresentable {
+    let host: String
+    let address: String
+    let focusRequest: Int
+    let submit: (String) -> Void
+
+    final class Field: NSTextField {
+        var address = ""
+        override func becomeFirstResponder() -> Bool {
+            guard super.becomeFirstResponder() else { return false }
+            alignment = .natural
+            font = .systemFont(ofSize: NSFont.systemFontSize)
+            stringValue = address
+            currentEditor()?.selectAll(nil)
+            return true
+        }
+        override func mouseDown(with event: NSEvent) {
+            let editing = currentEditor() != nil
+            super.mouseDown(with: event)
+            // The first click selects the whole address instead of placing the caret where it landed.
+            if !editing { currentEditor()?.selectAll(nil) }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: BrowserAddressText
+        var focusRequest: Int
+        init(_ parent: BrowserAddressText) { self.parent = parent; focusRequest = parent.focusRequest }
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.insertNewline(_:)): parent.submit(control.stringValue)
+            case #selector(NSResponder.cancelOperation(_:)): break
+            default: return false
+            }
+            control.window?.makeFirstResponder(nil)
+            return true
+        }
+        func controlTextDidEndEditing(_ notification: Notification) {
+            if let field = notification.object as? Field { parent.showHost(field) }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> Field {
+        let field = Field()
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.lineBreakMode = .byTruncatingMiddle
+        field.cell?.isScrollable = true
+        field.placeholderString = "Search or enter address"
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.setAccessibilityLabel("Address")
+        field.setAccessibilityIdentifier("browser.address")
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateNSView(_ field: Field, context: Context) {
+        context.coordinator.parent = self
+        field.address = address
+        if field.currentEditor() == nil { showHost(field) }
+        if context.coordinator.focusRequest != focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            field.window?.makeFirstResponder(field)
+        }
+    }
+
+    func showHost(_ field: Field) {
+        field.alignment = .center
+        field.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        field.stringValue = host
+    }
+}
+
+private struct BrowserPageInfo: View {
+    let host: String
+    let secure: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(host).font(.headline)
+            Label(secure ? "Connection is secure" : "Connection is not secure", systemImage: secure ? "lock.fill" : "lock.open")
+                .foregroundStyle(secure ? Color.secondary : Color.orange)
+        }.padding(14).frame(width: 280, alignment: .leading)
     }
 }
 

@@ -5,6 +5,7 @@
 ### Changed
 
 - A tab that opens, whether you or a bot opened it, scrolls into sight in a long tab strip, as does a tab when it's selected.
+- The address bar shows just the site's domain in the middle, as in Safari, and the full address when you click into it. A page button on its left shows the site and whether its connection is secure, and the reload button is bigger.
 
 ## [0.17.0] - 2026-10-12
 
