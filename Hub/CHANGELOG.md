@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.
+
 ### Fixed
 
+- Bots no longer settle into only checking their inbox on every heartbeat after a long run of quiet ones; each heartbeat now names the work to do.
 - Restricted Muse Code bots start again. Muse Code 1.4.4 and later stopped with "Agent Definition filesystem source failed".
 
 ## [0.31.0] - 2026-10-13

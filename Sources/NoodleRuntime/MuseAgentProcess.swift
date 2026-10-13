@@ -190,6 +190,7 @@ public final class MuseAgentProcess: AgentRuntimeProcess {
     }
     public func heartbeat() { if canReceiveHeartbeat { startTurn(.heartbeat) } }
     public func wake() { if canReceiveHeartbeat { startTurn(.wake) } }
+    public func organize() { if canReceiveHeartbeat { startTurn(.organize) } }
 
     private func openSession() {
         openingExistingSession = sessionID != nil
@@ -245,7 +246,7 @@ public final class MuseAgentProcess: AgentRuntimeProcess {
         guard running else { return }
         trace.record(.wakeSubmitted)
         if reason.isScheduled { onHeartbeat() }
-        update(.working, reason == .runtimeRecovered ? "Recovering interrupted work" : "Checking for new messages")
+        update(.working, reason.activityDetail)
     }
     private func request(_ purpose: Purpose, method: String, params: [String: Any]) {
         sequence += 1; requests[sequence] = purpose

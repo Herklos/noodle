@@ -115,7 +115,10 @@ final class RepositoryTests: XCTestCase {
         XCTAssertTrue(notesGuide.hasPrefix("---\nname: preferences-and-memory\n"))
         XCTAssertTrue(notesGuide.contains("replace the rule it supersedes"))
         XCTAssertTrue(notesGuide.contains("Do not log checks that found nothing new"))
-        XCTAssertTrue(notesGuide.contains("When something fits neither file, keep it in a file of its own"))
+        XCTAssertTrue(notesGuide.contains("When something fits none of these files, keep it in a file of its own"))
+        XCTAssertTrue(agentsGuide.contains("Read `assignments.md`"))
+        XCTAssertTrue(notesGuide.contains("`assignments.md` holds"))
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("assignments.md"), encoding: .utf8), "# Assignments\n\n")
         XCTAssertEqual(created.conversation.participantIDs, [created.agent.id])
     }
 
@@ -243,6 +246,18 @@ final class RepositoryTests: XCTestCase {
         try Data().write(to: preferencesFile)
         try repository.synchronizeAgentWorkspace(created.agent)
         XCTAssertEqual(try Data(contentsOf: preferencesFile), Data())
+    }
+
+    func testWorkspaceRefreshSeedsMissingAssignmentsAndKeepsTheBotsOwn() throws {
+        let created = try repository.createAgent(named: "Assignments Bot", backstory: "Backstory")
+        let file = repository.directory(for: created.agent).appendingPathComponent("assignments.md")
+        try FileManager.default.removeItem(at: file)
+        try repository.synchronizeAgentWorkspace(created.agent)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "# Assignments\n\n")
+        let assignments = "# Assignments\n\n- Find three new candidates each round.\n"
+        try assignments.write(to: file, atomically: true, encoding: .utf8)
+        try repository.synchronizeAgentWorkspace(created.agent)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), assignments)
     }
 
     func testMissingGeneratedInstructionsAreRebuiltFromConfiguration() throws {

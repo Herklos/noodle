@@ -29,6 +29,17 @@ import XCTest
         XCTAssertTrue(text.contains("type=\"wake\""), text)
     }
 
+    func testOrganizeSendsTheOrganizeEventAndIsNotAHeartbeat() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
+        p.start(); try await f.openCodex(wire)
+        p.organize(); try wire.reply("turn/start", result: ["turn": ["id": "turn-one"]])
+        try await f.wait { p.snapshot.phase == .working }
+        let turn = try XCTUnwrap(wire.last("turn/start")["params"] as? [String: Any])
+        let text = try XCTUnwrap(((turn["input"] as? [[String: Any]])?.first)?["text"] as? String)
+        XCTAssertTrue(text.hasPrefix(AgentWakeReason.organize.eventText), text)
+        XCTAssertEqual(f.heartbeats, 0)
+    }
+
     func testStartupPreservesAccessPolicyAndResumesSavedThread() async throws {
         for extended in [false, true] {
             let f = try fixture(), wire = HarnessWire(), p = f.codex(wire, extended: extended)

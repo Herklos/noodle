@@ -91,12 +91,31 @@ public enum AgentWakeReason: String, CaseIterable, Sendable {
     /// A wake the bot scheduled for itself.
     case wake
     case runtimeRecovered = "runtime-recovered"
+    /// The person asked the bot to tidy its own workspace files.
+    case organize
 
     /// Turns Noodle starts on a timer rather than for a message; they do not count as interaction.
     public var isScheduled: Bool { self == .heartbeat || self == .wake }
 
     /// Names the Messenger skill so a bot whose harness never surfaced it still knows where to look.
-    public var eventText: String { "<noodle-event type=\"\(rawValue)\" skill=\".agents/skills/messenger/SKILL.md\" />" }
+    /// A bot reads the skill once a session, and a long session of quiet heartbeats drifts into
+    /// only checking the inbox, so every heartbeat names the work itself.
+    public var eventText: String {
+        let event = "<noodle-event type=\"\(rawValue)\" skill=\".agents/skills/messenger/SKILL.md\" />"
+        guard self == .heartbeat else { return event }
+        return event + "\nCheck Messenger once, then do the next full round of each assignment in assignments.md."
+    }
+
+    /// What the bot's activity shows while the turn runs.
+    public var activityDetail: String {
+        switch self {
+        case .heartbeat: "Heartbeat: checking for follow-up work"
+        case .wake: "Waking as scheduled"
+        case .runtimeRecovered: "Recovering interrupted work"
+        case .inboxChanged: "Checking for new messages"
+        case .organize: "Organizing workspace files"
+        }
+    }
 
     public static var heartbeatInstructions: String { AgentWakeReason.heartbeat.reference.guidance }
 

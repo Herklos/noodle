@@ -816,6 +816,16 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
+    /// Organize waits for an idle bot, like a heartbeat, so it never cuts into work.
+    public func canOrganize(_ agentID: UUID) -> Bool {
+        processes[agentID]?.canReceiveHeartbeat == true && !changingAccess.contains(agentID)
+    }
+
+    public func organize(_ agentID: UUID) {
+        guard canOrganize(agentID) else { return }
+        processes[agentID]?.organize()
+    }
+
     /// Ordinary Kick remains immediate; replacing a missing session requires a
     /// concrete confirmation. Account failures explain the prerequisite first.
     public func kick(agent: AgentRecord, repository: WorkspaceRepository) -> AgentKickRequest? {

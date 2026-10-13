@@ -6,8 +6,14 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Bots keep the work you ask them to keep doing in their own assignments file, and every heartbeat does the next round of each item. Bots move such work there from their preferences the next time a heartbeat finds it.
+- Organize in a bot's conversation menu asks an idle bot to tidy its own files: recurring work moves into assignments, memory is brought up to date and stale files go. The bot sends a short note on what changed.
+
 ### Fixed
 
+- Bots no longer settle into only checking their inbox on every heartbeat after a long run of quiet ones; each heartbeat now names the work to do.
 - Restricted Muse Code bots start again. Muse Code 1.4.4 and later stopped with "Agent Definition filesystem source failed".
 
 ## [0.60.0] - 2026-10-13

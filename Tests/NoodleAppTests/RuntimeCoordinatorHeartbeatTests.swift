@@ -111,6 +111,18 @@ import XCTest
         XCTAssertEqual(try f.repository.listWakes(agentID: agent.id).due.map(\.note), ["Check the build"])
     }
 
+    func testOrganizeOnlyReachesAnIdleBot() throws {
+        let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
+        XCTAssertFalse(f.runtime.canOrganize(agent.id))
+        f.runtime.organize(agent.id)
+        XCTAssertEqual(process.organizes, 0, "A busy bot is never interrupted")
+        process.canReceiveHeartbeat = true
+        XCTAssertTrue(f.runtime.canOrganize(agent.id))
+        f.runtime.organize(agent.id)
+        XCTAssertEqual(process.organizes, 1)
+        XCTAssertEqual(process.heartbeats, 0)
+    }
+
     func testPerBotSettingsDoNotResetOtherBotsAndReenableStartsFreshCountdown() throws {
         let f = try fixture(), a = try f.agent("A"), b = try f.agent("B")
         let first = try f.start(a), second = try f.start(b)

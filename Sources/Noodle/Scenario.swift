@@ -841,6 +841,7 @@ extension Scenario {
     func promoteNotification(_ id: UUID) {}
     func heartbeat() {}
     func wake() {}
+    func organize() {}
 }
 
 // MARK: - Session

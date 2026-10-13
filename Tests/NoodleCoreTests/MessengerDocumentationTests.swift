@@ -40,6 +40,17 @@ final class MessengerDocumentationTests: XCTestCase {
         XCTAssertTrue(guidance.contains("standing assignment"))
         XCTAssertTrue(guidance.contains("do its next round in full"))
         XCTAssertTrue(guidance.contains("finish silently"))
+        XCTAssertTrue(guidance.contains("assignments.md"))
+    }
+
+    /// Organize moves recurring work out of preferences.md and tidies the rest without dropping anything owed.
+    func testOrganizeTidiesTheBotsOwnFiles() {
+        let guidance = AgentWakeReason.organize.reference.guidance
+        for file in ["assignments.md", "preferences.md", "memory.md", ".agents/skills/preferences-and-memory/SKILL.md"] {
+            XCTAssertTrue(guidance.contains(file), file)
+        }
+        XCTAssertTrue(guidance.contains("open commitment"))
+        XCTAssertTrue(MessengerDocumentation.skillInstructions.contains("### organize"))
     }
 
     /// The shared rules once, then one line per effect saying when to use it.

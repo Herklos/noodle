@@ -188,6 +188,11 @@ public final class AntigravityAgentProcess: AgentRuntimeProcess {
         startTurn(reason: .wake)
     }
 
+    public func organize() {
+        guard canReceiveHeartbeat else { return }
+        startTurn(reason: .organize)
+    }
+
     /// The stream accepts prompts only, and rejects control messages, so a turn
     /// cannot be interrupted. An urgent message starts the next turn instead.
     private func sendPendingNotificationIfPossible() {
@@ -208,13 +213,7 @@ public final class AntigravityAgentProcess: AgentRuntimeProcess {
             trace.record(.wakeSubmitted)
             turnIsActive = true
             if reason.isScheduled { onHeartbeat() }
-            let detail = switch reason {
-            case .heartbeat: "Heartbeat: checking for follow-up work"
-            case .wake: "Waking as scheduled"
-            case .runtimeRecovered: "Recovering interrupted work"
-            case .inboxChanged: "Checking for new messages"
-            }
-            update(.working, detail)
+            update(.working, reason.activityDetail)
         } catch {
             if reason == .inboxChanged { notifications.enqueue() }
             reportUnexpectedTermination(error.localizedDescription)

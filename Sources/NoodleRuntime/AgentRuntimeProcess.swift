@@ -16,6 +16,8 @@ public protocol AgentRuntimeProcess: AnyObject {
     func heartbeat()
     /// Starts a turn for a wake the bot scheduled, when it can take one like a heartbeat.
     func wake()
+    /// Starts a turn asking the bot to tidy its own workspace files, when it can take one like a heartbeat.
+    func organize()
     /// Only harnesses with voices take calls; the rest keep these defaults.
     func startVoiceCall(_ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws
     func sendToVoiceCall(_ text: String)

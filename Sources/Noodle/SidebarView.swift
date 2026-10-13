@@ -116,6 +116,9 @@ struct SidebarView: View {
                     store.revealWorkspace(for: agent)
                 }
                 Divider()
+                Button("Organize") { store.runtime.organize(agent.id) }
+                    .disabled(!store.runtime.canOrganize(agent.id))
+                Divider()
                 if store.runtime.snapshot(for: agent.id).phase == .failed {
                     Button("Kick") {
                         kickRequest = store.runtime.kick(agent: agent, repository: store.repository)

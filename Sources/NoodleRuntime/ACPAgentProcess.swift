@@ -186,6 +186,7 @@ public final class ACPAgentProcess: AgentRuntimeProcess {
     }
     public func heartbeat() { if canReceiveHeartbeat { startTurn(.heartbeat) } }
     public func wake() { if canReceiveHeartbeat { startTurn(.wake) } }
+    public func organize() { if canReceiveHeartbeat { startTurn(.organize) } }
 
     private func openSession() {
         var params: [String: Any] = ["cwd": workspaceURL.path, "mcpServers": []]
@@ -225,7 +226,7 @@ public final class ACPAgentProcess: AgentRuntimeProcess {
         guard running else { return }
         trace.record(.wakeSubmitted)
         if reason.isScheduled { onHeartbeat() }
-        update(.working, reason == .runtimeRecovered ? "Recovering interrupted work" : (reason == .heartbeat ? "Heartbeat: checking for follow-up work" : (reason == .wake ? "Waking as scheduled" : "Checking for new messages")))
+        update(.working, reason.activityDetail)
     }
     private func request(_ purpose: Purpose, method: String, params: [String: Any]) {
         sequence += 1

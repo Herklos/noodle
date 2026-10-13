@@ -300,8 +300,9 @@ public struct WorkspaceRepository: Sendable {
         let agentsFiles = try WorkspaceMailbox(workspace: directory, path: ".agents", create: true)
         let messengerFiles = try WorkspaceMailbox(workspace: directory, path: ".agents/skills/messenger", create: true)
 
-        if !workspaceFiles.contains("preferences.md") {
-            try workspaceFiles.writeData(Data(Self.initialAgentPreferences.utf8), named: "preferences.md", replaceExisting: false)
+        for (name, initial) in [("preferences.md", Self.initialAgentPreferences), ("assignments.md", Self.initialAgentAssignments)]
+            where !workspaceFiles.contains(name) {
+            try workspaceFiles.writeData(Data(initial.utf8), named: name, replaceExisting: false)
         }
         try workspaceFiles.writeData(Data((Self.renderedAgentInstructions(backstory: backstory, owner: configuration.owner) + folderInstructions + ToolProviderSkills.instructions(workspace: directory)).utf8), named: "AGENTS.md")
         try workspaceFiles.symlink("CLAUDE.md", destination: "AGENTS.md")
@@ -551,6 +552,7 @@ public struct WorkspaceRepository: Sendable {
     }
 
     private static let initialAgentPreferences = "# Preferences\n\n"
+    private static let initialAgentAssignments = "# Assignments\n\n"
 
     private static func renderedAgentInstructions(backstory: String, owner: AgentOwner?) -> String {
         let normalizedBackstory = backstory.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -583,7 +585,7 @@ public struct WorkspaceRepository: Sendable {
 
         ## Preferences and memory
 
-        Read `preferences.md` at the start of each session and reread it after changes. Apply it as this bot's standing instructions, such as tone, formatting, working style and recurring work you were asked to keep doing; newer explicit user requests take precedence. When the user asks you to remember a preference, update `preferences.md`. Use `memory.md` for durable facts, decisions, and ongoing context. Before changing either file, read `.agents/skills/preferences-and-memory/SKILL.md` and follow it. Noodle creates `preferences.md` with only a heading if missing and preserves both files during workspace synchronization; keep persistent notes there, not in generated instructions. Do not record safety stops, refusals or runtime failures in either file as reasons to avoid a task; a new session should be free to try again.
+        Read `preferences.md` at the start of each session and reread it after changes. Apply it as this bot's standing instructions, such as tone, formatting and working style; newer explicit user requests take precedence. When the user asks you to remember a preference, update `preferences.md`. Read `assignments.md` at the start of each session too: it lists recurring work you were asked to keep doing, and each heartbeat does its next round. Use `memory.md` for durable facts, decisions, and ongoing context. Before changing any of these files, read `.agents/skills/preferences-and-memory/SKILL.md` and follow it. Noodle creates `preferences.md` and `assignments.md` with only a heading if missing and preserves all three files during workspace synchronization; keep persistent notes there, not in generated instructions. Do not record safety stops, refusals or runtime failures in either file as reasons to avoid a task; a new session should be free to try again.
 
         ## Messages
 
@@ -594,30 +596,35 @@ public struct WorkspaceRepository: Sendable {
     private static let preferencesAndMemorySkill = """
         ---
         name: preferences-and-memory
-        description: Decide what goes in preferences.md and memory.md, and keep both short enough to reread every session.
+        description: Decide what goes in preferences.md, assignments.md and memory.md, and keep them short enough to reread every session.
         ---
 
         # Preferences and memory
 
-        Both files are reread at the start of every session, so every line costs attention each time. Keep them current, short and free of history.
+        These files are reread at the start of every session, so every line costs attention each time. Keep them current, short and free of history.
 
         ## What goes where
 
-        - `preferences.md` holds standing instructions from the user: tone, formatting, working style, people and places to prefer or avoid, approvals you need, and recurring work you were asked to keep doing. Write each as a present-tense rule you can follow without the conversation it came from.
+        - `preferences.md` holds standing instructions from the user on how to work: tone, formatting, working style, people and places to prefer or avoid, and approvals you need. Write each as a present-tense rule you can follow without the conversation it came from.
+        - `assignments.md` holds recurring work you were asked to keep doing until told otherwise. Each heartbeat does the next round of every item, so write each as what one full round is, how often if not every heartbeat, which approvals it needs, and when it ends. Keep progress and results out of it.
         - `memory.md` holds facts, decisions and the current state of ongoing work: who is who, what was agreed, what is waiting on whom, and where details live.
         - Anything else gets its own file; see below.
         - Things you can find again in the workspace, the conversation history or the web do not need copying.
 
         ## Other files
 
-        When something fits neither file, keep it in a file of its own in the workspace and name it in `memory.md` with one line on what it holds. Good candidates are trackers for work done item by item, such as leads, applications or tasks; research notes and drafts; reference material you return to; and checklists for recurring work. A file nobody lists is lost to the next session. Pick a plain name, keep one file per purpose, and when a file is finished with, delete it or mark it done in `memory.md`.
+        When something fits none of these files, keep it in a file of its own in the workspace and name it in `memory.md` with one line on what it holds. Good candidates are trackers for work done item by item, such as leads, applications or tasks; research notes and drafts; reference material you return to; and checklists for recurring work. A file nobody lists is lost to the next session. Pick a plain name, keep one file per purpose, and when a file is finished with, delete it or mark it done in `memory.md`.
 
         ## Updating preferences
 
         - When the user changes a rule, rewrite or replace the rule it supersedes in place. Never append a newer version below an older one and leave both.
         - Merge rules that say the same thing. Keep the user's own wording for anything precise, such as a threshold, a name or an address.
         - Attribution and dates are only worth keeping where they settle which instruction wins.
-        - For recurring work, say what one full round is, so a later session can do it without guessing.
+
+        ## Updating assignments
+
+        - Add an item when the user asks for work to be done regularly or kept up, and say what one full round is, so a later session can do it without guessing.
+        - Rewrite an item in place when the user changes it, and remove it when the user stops it or it ends.
 
         ## Updating memory
 
@@ -627,7 +634,7 @@ public struct WorkspaceRepository: Sendable {
 
         ## Keeping both short
 
-        - When either file passes about 200 lines, or you notice repeated or superseded entries, compact it before adding more: merge duplicates, drop what no longer holds, and move detail you still need into a separate file named from `memory.md`.
+        - When a file passes about 200 lines, or you notice repeated or superseded entries, compact it before adding more: merge duplicates, drop what no longer holds, and move detail you still need into a separate file named from `memory.md`.
         - Compacting must not lose a standing instruction, an open commitment or anything the user asked you to remember.
         """
 

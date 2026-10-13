@@ -129,7 +129,7 @@ final class AgentHeartbeatTests: XCTestCase {
     }
 
     func testHeartbeatIsNotMistakenForAnInboxChange() {
-        XCTAssertEqual(AgentWakeReason.heartbeat.eventText, "<noodle-event type=\"heartbeat\" skill=\".agents/skills/messenger/SKILL.md\" />")
+        XCTAssertTrue(AgentWakeReason.heartbeat.eventText.hasPrefix("<noodle-event type=\"heartbeat\" skill=\".agents/skills/messenger/SKILL.md\" />"))
         XCTAssertEqual(AgentWakeReason.inboxChanged.eventText, "<noodle-event type=\"inbox-changed\" skill=\".agents/skills/messenger/SKILL.md\" />")
         XCTAssertEqual(AgentWakeReason.runtimeRecovered.eventText, "<noodle-event type=\"runtime-recovered\" skill=\".agents/skills/messenger/SKILL.md\" />")
         XCTAssertTrue(AgentWakeReason.heartbeatInstructions.contains("finish silently"))
@@ -138,6 +138,18 @@ final class AgentHeartbeatTests: XCTestCase {
         XCTAssertTrue(AgentWakeReason.recoveryInstructions.contains("Verify what already completed before repeating consequential side effects"))
         XCTAssertTrue(AgentWakeReason.recoveryInstructions.contains("app quit or was killed"))
         XCTAssertTrue(AgentWakeReason.recoveryInstructions.contains("do not wait for the user to repeat the request"))
+    }
+
+    /// The guidance is read once per session, so each heartbeat names the file to work from.
+    func testEveryHeartbeatPointsAtAssignments() {
+        XCTAssertTrue(AgentWakeReason.heartbeat.eventText.contains("assignments.md"))
+        XCTAssertFalse(AgentWakeReason.wake.eventText.contains("assignments.md"))
+        XCTAssertFalse(AgentWakeReason.inboxChanged.eventText.contains("assignments.md"))
+    }
+
+    func testOrganizeIsAskedForAndNotScheduled() {
+        XCTAssertTrue(AgentWakeReason.organize.eventText.hasPrefix("<noodle-event type=\"organize\" skill=\".agents/skills/messenger/SKILL.md\" />"))
+        XCTAssertFalse(AgentWakeReason.organize.isScheduled)
     }
 
     private func tracked() -> AgentHeartbeatScheduler {

@@ -33,6 +33,7 @@ final class FakeProcess: AgentRuntimeProcess {
     func promoteNotification(_ id: UUID) {}
     func heartbeat() {}
     func wake() {}
+    func organize() {}
     func startVoiceCall(_ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws {
         callRequests.append(request)
         callEvents = events
