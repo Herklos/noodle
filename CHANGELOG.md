@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - Clicking a bot's picture in either desktop widget opens its chat, just like clicking its name.
+- Long lists in Settings → Bots and Settings → Groups show their scroll bar again.
 
 ### Added
 

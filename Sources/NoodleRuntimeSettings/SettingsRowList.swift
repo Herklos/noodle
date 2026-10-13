@@ -7,20 +7,14 @@ public struct SettingsRowList<Item: Identifiable, Row: View>: View {
     let items: [Item]
     @ViewBuilder var row: (Item) -> Row
 
-    private let scrollIndicatorGutter: CGFloat = 20
-
     public var body: some View {
         SettingsBotListLayout {
             ViewThatFits(in: .vertical) {
                 rows
-                ScrollView {
-                    rows
-                        .padding(.trailing, scrollIndicatorGutter)
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                // Extend the scrollbar into the form's trailing margin while
-                // keeping the rows aligned with the other settings controls.
-                .padding(.trailing, -scrollIndicatorGutter)
+                // The section clips anything past the row, so the scroll bar
+                // has to stay inside it to be seen.
+                ScrollView { rows }
+                    .scrollBounceBehavior(.basedOnSize)
             }
         }
         .toggleStyle(.switch)

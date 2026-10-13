@@ -65,6 +65,21 @@ import NoodleCore
         XCTAssertLessThan(settings.fittingSize.height, 500)
     }
 
+    func testALongListShowsItsScrollBarInsideTheSection() async throws {
+        let f = try fixture()
+        for index in 1...20 { _ = try f.group(name: "Group \(index)") }
+        let settings = host(GroupsSettingsView().environment(f.store).frame(width: 680))
+        _ = try await control("Group 20, archived", in: settings)
+        // The list's own scroll view is the one whose rows are taller than it is.
+        let list = try XCTUnwrap(descendants(of: settings).compactMap { $0 as? NSScrollView }.first {
+            ($0.documentView?.frame.height ?? 0) > $0.contentView.bounds.height + 100
+        })
+        let scroller = try XCTUnwrap(list.verticalScroller)
+        XCTAssertFalse(scroller.isHidden)
+        XCTAssertGreaterThanOrEqual(scroller.visibleRect.width, scroller.frame.width,
+                                    "scroller \(scroller.frame) clipped to \(scroller.visibleRect)")
+    }
+
     func testAnArchivedChatShowsWhyInADisabledComposer() async throws {
         let f = try fixture()
         XCTAssertTrue(f.store.setArchived(true, agentID: f.a.id))
@@ -181,6 +196,10 @@ import NoodleCore
         view.cacheDisplay(in: view.bounds, to: bitmap)
         try bitmap.representation(using: .png, properties: [:])?.write(
             to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap(descendants)
     }
 
     private func confirm(_ title: String, with button: String, in window: NSWindow) async throws {
