@@ -128,7 +128,7 @@ figure { margin: 0; }
 .feature > .wrap:last-child { padding-bottom: 110px; }
 .feature.alt, .download.alt { background: var(--bg-alt); }
 .feature h2, .privacy h2, .download h2, .headline { font-size: 48px; line-height: 1.08349; font-weight: 600; letter-spacing: -0.003em; }
-.lead { margin-top: 16px; font-family: var(--display); font-size: 21px; line-height: 1.381; font-weight: 600; letter-spacing: .011em; color: var(--gray); text-wrap: balance; }
+.lead { margin-top: 16px; font-family: var(--display); font-size: 21px; line-height: 1.381; font-weight: 600; letter-spacing: .011em; color: var(--gray); text-wrap: pretty; }
 .feat-icon { width: 48px; height: 48px; margin: 0 auto 18px; }
 .app-name { margin-bottom: 8px; font-family: var(--display); font-size: 17px; line-height: 1.23536; font-weight: 600; letter-spacing: -0.022em; color: var(--gray); }
 .meta { margin-top: 16px; font-size: 14px; line-height: 1.28577; letter-spacing: -0.016em; color: var(--gray); }

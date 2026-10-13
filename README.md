@@ -6,7 +6,7 @@
 
 **Your personal AI agents.**
 
-They get things done, run on your own devices, and you can share them with the people you choose.
+Personal AI agents that get things done on your Mac. Add a Hub to share subscriptions and local models with your household or team.
 
 <a href="https://github.com/pdparchitect/noodle/releases/latest/download/Noodle-arm64.dmg"><img alt="Download Noodle for Mac" src="https://img.shields.io/badge/Download%20for%20Mac-0071e3?style=for-the-badge&logo=apple&logoColor=white" height="48"></a>
 
