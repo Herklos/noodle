@@ -41,6 +41,24 @@ import Testing
         #expect(fetches == 2)
     }
 
+    /// The same page linked in another conversation uses the card already fetched for it; deleting
+    /// either conversation leaves the other's card.
+    @MainActor @Test func aLinkInTwoConversationsIsFetchedOnce() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = UUID(), second = UUID()
+        var fetches = 0
+        let previews = LinkPreviews(folder: folder) { _ in fetches += 1; return Self.card }
+        _ = await previews.card(for: Self.page, in: first)
+        #expect(await previews.card(for: Self.page, in: second) == Self.card)
+        #expect(fetches == 1)
+
+        previews.forget(first)
+        let relaunched = LinkPreviews(folder: folder) { _ in fetches += 1; return nil }
+        #expect(await relaunched.card(for: Self.page, in: second) == Self.card)
+        #expect(fetches == 1)
+    }
+
     /// Cards last a week, then are fetched again, so they do not go stale.
     @MainActor @Test func linkCardsAreFetchedAgainAfterAWeek() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -79,14 +97,15 @@ import Testing
         defer { try? FileManager.default.removeItem(at: folder) }
         let kept = UUID(), gone = UUID()
         var fetches = 0
+        let other = URL(string: "https://www.example.com/fridge")!
         let previews = LinkPreviews(folder: folder) { _ in fetches += 1; return Self.card }
         _ = await previews.card(for: Self.page, in: kept)
-        _ = await previews.card(for: Self.page, in: gone)
+        _ = await previews.card(for: other, in: gone)
         previews.keep(only: [kept])
 
         let relaunched = LinkPreviews(folder: folder) { _ in fetches += 1; return nil }
         #expect(await relaunched.card(for: Self.page, in: kept) == Self.card)
-        #expect(await relaunched.card(for: Self.page, in: gone).image == nil)
+        #expect(await relaunched.card(for: other, in: gone).image == nil)
         #expect(fetches == 3)
     }
 

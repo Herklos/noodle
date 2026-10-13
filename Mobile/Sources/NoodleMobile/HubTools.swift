@@ -140,9 +140,9 @@ extension HubChats {
 
     /// Shared links use the same metadata as their cards, without starting their live views.
     func sharedAttachment(_ attachment: LinkAttachment, in conversation: some HubConversation) async -> LinkAttachment {
-        if let known = cards[attachment.id] {
+        if let known = knownCards.object(forKey: attachment.id as NSUUID), known.isFresh {
             var resolved = attachment
-            resolved.card = known
+            resolved.card = known.card
             return resolved
         }
         let pairing = pairing
@@ -152,7 +152,7 @@ extension HubChats {
             resolved.card?.image = image
         }
         if let card = resolved.card {
-            cards[attachment.id] = card
+            remember(KnownCard(card, isFresh: true), for: attachment)
             keep(card, for: attachment)
         }
         return resolved
@@ -161,11 +161,14 @@ extension HubChats {
     /// The card as this phone last had it, kept across launches, so its picture shows at once while it
     /// is asked for again.
     func keptCard(for attachment: LinkAttachment) -> LinkCardInfo? {
-        if let card = cards[attachment.id] { return card }
-        if let known = keptCards[attachment.id] { return known }
+        if let known = knownCards.object(forKey: attachment.id as NSUUID) { return known.card }
         let card = (try? Data(contentsOf: cardURL(for: attachment))).flatMap { try? JSONDecoder().decode(LinkCardInfo.self, from: $0) }
-        keptCards[attachment.id] = .some(card)
+        remember(KnownCard(card, isFresh: false), for: attachment)
         return card
+    }
+
+    private func remember(_ known: KnownCard, for attachment: LinkAttachment) {
+        knownCards.setObject(known, forKey: attachment.id as NSUUID, cost: (known.card?.image?.count ?? 0) + (known.card?.icon?.count ?? 0))
     }
 
     /// Where this Hub's noodlets are kept on this phone.
@@ -173,11 +176,20 @@ extension HubChats {
 
     /// The latest picture of what a link points at, for a card that carries none, as a noodlet's.
     func picture(for attachment: LinkAttachment, in conversation: some HubConversation) async throws -> Data? {
-        if let known = pictures[attachment.id] { return known }
         guard case .picture(let data) = try await pairing.request(.linkPreview(conversationID: conversation.conversationID, attachmentID: attachment.id))
         else { throw LinkError("The Hub sent an unexpected answer.") }
-        pictures[attachment.id] = data
         return data
+    }
+}
+
+/// A shared card as this phone knows it: asked of the Hub this launch, or read back from what was kept.
+final class KnownCard {
+    let card: LinkCardInfo?
+    let isFresh: Bool
+
+    init(_ card: LinkCardInfo?, isFresh: Bool) {
+        self.card = card
+        self.isFresh = isFresh
     }
 }
 

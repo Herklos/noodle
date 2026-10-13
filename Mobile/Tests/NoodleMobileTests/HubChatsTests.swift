@@ -774,14 +774,60 @@ private actor RecordedSubscriptions: PushSubscriptions {
         try? await chats.send("Look", files: [OutgoingFile(url: draft, filename: "d.png", mediaType: "image/png")], to: scout)
         let unsent = try #require(chats.messages(of: scout).first { $0.body == "Look" }?.attachments.first)
 
-        #expect(try kept.deletingLastPathComponent().deletingLastPathComponent()
-            .resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+        // The Hub has the downloads; a message not yet sent is the only copy of its files.
+        #expect(Self.isBackedUp(kept) == false)
+        #expect(Self.isBackedUp(try #require(chats.downloadedFile(for: unsent))) == true)
 
         chats.dropOldFiles(over: 2500)
         #expect(chats.downloadedFile(for: older) != nil)
         #expect(chats.downloadedFile(for: unsent) != nil)
         #expect(chats.downloadedFile(for: old) == nil)
         #expect(chats.downloadedFile(for: recent) == nil)
+    }
+
+    /// Files an earlier version kept without leaving them out of backups are left out at the next launch.
+    @Test func filesKeptBeforeAreLeftOutOfBackupsAtLaunch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let old = directory.appendingPathComponent("Files/\(UUID().uuidString)/photo.png")
+        try FileManager.default.createDirectory(at: old.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 100).write(to: old)
+        #expect(Self.isBackedUp(old) == true)
+
+        HubChats(pairing: HubPairing(directory: directory, deviceName: "iPhone")).dropOldFiles()
+        #expect(Self.isBackedUp(old) == false)
+    }
+
+    /// Whether the folder a file is kept in goes into the phone's backups.
+    private static func isBackedUp(_ file: URL) -> Bool? {
+        let folder = URL(fileURLWithPath: file.deletingLastPathComponent().path)
+        return (try? folder.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup).map { !$0 }
+    }
+
+    /// A picture's bubble drawn again, as when scrolled back into view, shows the picture before any
+    /// task has run, rather than a placeholder.
+    @Test func aPictureSeenBeforeShowsAtOnceWhenItsBubbleIsDrawnAgain() async throws {
+        let red = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).pngData { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        let hub = FakeHub()
+        let attachment = await hub.botSends(red, named: "red.png", mediaType: "image/png")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        // As the first time its bubble showed: downloaded and decoded.
+        _ = DecodedImages.downsampled(try await chats.file(for: attachment, in: scout), to: 720)
+
+        let renderer = ImageRenderer(content: AttachmentView(chats: chats, thread: .bot(scout), attachment: attachment))
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                             space: CGColorSpaceCreateDeviceRGB(),
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: -image.width / 2, y: -image.height / 2, width: image.width, height: image.height))
+        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "The bubble showed \(pixel), not the picture")
     }
 
     /// A shared noodlet's card shows at once after a relaunch, from what this phone kept of it.

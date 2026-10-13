@@ -90,11 +90,13 @@ enum HubThread: HubConversation {
     /// Where the earliest message this phone has sits in each conversation; earlier ones load as
     /// the person scrolls back. None means it has them all.
     private var start: [UUID: Int] = [:]
-    /// Card pictures, fetched as their cards come into view.
-    @ObservationIgnored var pictures: [UUID: Data] = [:]
-    @ObservationIgnored var cards: [UUID: LinkCardInfo] = [:]
-    /// Cards read back from this phone, nil where none was kept.
-    @ObservationIgnored var keptCards: [UUID: LinkCardInfo?] = [:]
+    /// Shared cards with their pictures, as fetched when they come into view or read back from this
+    /// phone. Dropped under memory pressure, a card is read back again.
+    @ObservationIgnored let knownCards: NSCache<NSUUID, KnownCard> = {
+        let cache = NSCache<NSUUID, KnownCard>()
+        cache.totalCostLimit = 16 * 1024 * 1024
+        return cache
+    }()
     /// Files coming down from the Hub, so a file asked for twice at once comes down once.
     @ObservationIgnored private var downloading: [UUID: Task<URL, Error>] = [:]
     /// Messages in one page: small enough to come quickly, however long the conversation.
@@ -863,6 +865,7 @@ enum HubThread: HubConversation {
             defer { try? FileManager.default.removeItem(at: staging) }
             try await pairing.download(attachment, from: conversationID, to: staging)
             try keep(staging, as: attachment)
+            leaveOutOfBackups(url.deletingLastPathComponent())
             return url
         }
         downloading[attachment.id] = download
@@ -874,7 +877,8 @@ enum HubThread: HubConversation {
     static let keptFilesLimit = 512 * 1024 * 1024
 
     /// Drops the least recently shown files past the limit; the Hub still has them, so they come down
-    /// again if shown. Files of messages not yet sent are the only copies and stay.
+    /// again if shown. Files of messages not yet sent are the only copies: they stay, and stay in the
+    /// phone's backups, which every other file is left out of, including those kept by earlier versions.
     func dropOldFiles(over limit: Int = HubChats.keptFilesLimit) {
         let unsentIDs = Set(unsent.values.flatMap { $0.attachments.map(\.id.uuidString) })
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
@@ -884,11 +888,12 @@ enum HubThread: HubConversation {
             let used = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             return (folder: folder, size: size, used: used)
         }
+        for entry in folders where !unsentIDs.contains(entry.folder.lastPathComponent) { leaveOutOfBackups(entry.folder) }
         var total = folders.reduce(0) { $0 + $1.size }
         folders.sort { $0.used < $1.used }
         for entry in folders where total > limit && !unsentIDs.contains(entry.folder.lastPathComponent) {
             try? FileManager.default.removeItem(at: entry.folder)
-            if let id = UUID(uuidString: entry.folder.lastPathComponent) { keptCards[id] = nil }
+            if let id = UUID(uuidString: entry.folder.lastPathComponent) { knownCards.removeObject(forKey: id as NSUUID) }
             total -= entry.size
         }
     }
@@ -917,13 +922,16 @@ enum HubThread: HubConversation {
         let url = cardURL(for: attachment)
         guard (try? prepareFolder(for: url)) != nil else { return }
         try? JSONEncoder().encode(card).write(to: url, options: .atomic)
-        keptCards[attachment.id] = .some(card)
+        leaveOutOfBackups(url.deletingLastPathComponent())
     }
 
-    /// Makes the folder for a kept file. Everything kept here is a copy the Hub has, so none of it is backed up.
     private func prepareFolder(for url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var folder = filesFolder
+    }
+
+    /// A copy the Hub has stays out of the phone's backups; restored, it downloads again when shown.
+    private func leaveOutOfBackups(_ folder: URL) {
+        var folder = folder
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? folder.setResourceValues(values)

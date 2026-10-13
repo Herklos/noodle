@@ -9,7 +9,8 @@
 ### Changed
 
 - Pictures in conversations show at once when scrolled back into view, and shared noodlet, browser and computer cards keep their last picture after the app restarts.
-- Files downloaded from your Hub are no longer included in iPhone backups, and the least recently viewed are removed once they take more than 512 MB; they download again when opened.
+- Files downloaded from your Hub are no longer included in iPhone backups, and the least recently viewed are removed once they take more than 512 MB; they download again when opened. Files of messages not yet sent stay in backups.
+- A web page linked in several conversations is previewed once.
 
 ### What to Test
 

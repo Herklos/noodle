@@ -421,7 +421,8 @@ struct LinkCard: Codable, Equatable {
     private let fetch: Fetch
     private let now: () -> Date
     private var cards: [URL: Saved] = [:]
-    private var pending: [URL: Task<LinkCard, Never>] = [:]
+    /// Fetches under way, by page, so a page linked in two conversations at once is fetched once.
+    private var pending: [URL: Task<LinkCard?, Never>] = [:]
 
     init(folder: URL, fetch: @escaping Fetch = LinkPreviews.fetched, now: @escaping () -> Date = Date.init) {
         self.folder = folder
@@ -435,17 +436,33 @@ struct LinkCard: Codable, Equatable {
             cards[file] = saved
             return saved.card
         }
-        let task = pending[file] ?? Task {
-            guard let card = await fetch(url) else { return LinkCard(site: url) }
-            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? JSONEncoder().encode(Saved(card: card, savedAt: now())).write(to: file, options: .atomic)
-            return card
+        // The same page linked in another conversation: its card is copied, so each conversation's
+        // cards still go with it.
+        if let saved = savedElsewhere(file), isFresh(saved) {
+            save(saved, to: file)
+            return saved.card
         }
-        pending[file] = task
-        let card = await task.value
-        cards[file] = Saved(card: card, savedAt: now())
-        pending[file] = nil
-        return card
+        let task = pending[url] ?? Task { await fetch(url) }
+        pending[url] = task
+        let fetched = await task.value
+        pending[url] = nil
+        let saved = Saved(card: fetched ?? LinkCard(site: url), savedAt: now())
+        if fetched != nil { save(saved, to: file) } else { cards[file] = saved }
+        return saved.card
+    }
+
+    private func save(_ saved: Saved, to file: URL) {
+        cards[file] = saved
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(saved).write(to: file, options: .atomic)
+    }
+
+    /// The same page's card kept with another conversation.
+    private func savedElsewhere(_ file: URL) -> Saved? {
+        let name = file.lastPathComponent
+        if let known = cards.first(where: { $0.key.lastPathComponent == name && isFresh($0.value) }) { return known.value }
+        return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .lazy.compactMap { Self.saved(at: $0.appendingPathComponent(name)) }.first(where: isFresh)
     }
 
     func forget(_ conversationID: UUID) {
