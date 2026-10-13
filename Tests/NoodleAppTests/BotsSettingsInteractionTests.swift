@@ -65,7 +65,7 @@ import NoodleCore
         XCTAssertLessThan(settings.fittingSize.height, 500)
     }
 
-    func testALongListShowsItsScrollBarInsideTheSection() async throws {
+    func testALongListShowsItsScrollBarOnTheSectionEdge() async throws {
         let f = try fixture()
         for index in 1...20 { _ = try f.group(name: "Group \(index)") }
         let settings = host(GroupsSettingsView().environment(f.store).frame(width: 680))
@@ -78,6 +78,9 @@ import NoodleCore
         XCTAssertFalse(scroller.isHidden)
         XCTAssertGreaterThanOrEqual(scroller.visibleRect.width, scroller.frame.width,
                                     "scroller \(scroller.frame) clipped to \(scroller.visibleRect)")
+        // The section's box is the first clipping view around the list.
+        let section = try XCTUnwrap(sequence(first: list, next: \.superview).dropFirst().first { $0.clipsToBounds })
+        XCTAssertEqual(scroller.convert(scroller.bounds, to: nil).maxX, section.convert(section.bounds, to: nil).maxX)
     }
 
     func testAnArchivedChatShowsWhyInADisabledComposer() async throws {

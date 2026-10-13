@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import NoodleCore
 
@@ -6,18 +7,30 @@ import NoodleCore
 public struct SettingsRowList<Item: Identifiable, Row: View>: View {
     let items: [Item]
     @ViewBuilder var row: (Item) -> Row
+    @State private var scrollerStyle = NSScroller.preferredScrollerStyle
+
+    /// The form's trailing row inset, the most the section shows past a row.
+    private let sectionMargin: CGFloat = 10
 
     public var body: some View {
         SettingsBotListLayout {
             ViewThatFits(in: .vertical) {
                 rows
-                // The section clips anything past the row, so the scroll bar
-                // has to stay inside it to be seen.
-                ScrollView { rows }
-                    .scrollBounceBehavior(.basedOnSize)
+                // The scroll bar sits on the section's edge. An overlay bar
+                // floats over the margin; a legacy one takes its own width,
+                // so the rows give up only what the margin cannot cover.
+                ScrollView {
+                    rows
+                        .padding(.trailing, scrollerStyle == .overlay ? sectionMargin : 0)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .padding(.trailing, -sectionMargin)
             }
         }
         .toggleStyle(.switch)
+        .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+            scrollerStyle = NSScroller.preferredScrollerStyle
+        }
     }
 
     public init(_ items: [Item], @ViewBuilder row: @escaping (Item) -> Row) {
