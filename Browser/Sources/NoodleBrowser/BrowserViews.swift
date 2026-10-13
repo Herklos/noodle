@@ -307,40 +307,54 @@ struct BrowserTabStrip: View {
             ?? min(Self.tabWidths.upperBound, max(Self.tabWidths.lowerBound, shared))
     }
 
+    /// The tab that opened between two lists of tabs, the last if several did.
+    static func opened(from old: [UUID], to new: [UUID]) -> UUID? {
+        new.last { !old.contains($0) }
+    }
+
     var body: some View {
         HStack(spacing: 4) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 3) {
-                    ForEach(tabs) { tab in
-                        ZStack(alignment: .trailing) {
-                            Button { select(tab.id) } label: {
-                                HStack(spacing: 7) {
-                                    BrowserTabIcon(image: icons[tab.id], loading: tab.loading)
-                                    Text(tab.title).font(.system(size: 12.5)).lineLimit(1)
-                                    Spacer(minLength: 0)
+            ScrollViewReader { scroller in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 3) {
+                        ForEach(tabs) { tab in
+                            ZStack(alignment: .trailing) {
+                                Button { select(tab.id) } label: {
+                                    HStack(spacing: 7) {
+                                        BrowserTabIcon(image: icons[tab.id], loading: tab.loading)
+                                        Text(tab.title).font(.system(size: 12.5)).lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.leading, 10).padding(.trailing, 30).frame(width: tabWidth, height: 32)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.leading, 10).padding(.trailing, 30).frame(width: tabWidth, height: 32)
-                                .contentShape(Rectangle())
-                            }
-                            .accessibilityIdentifier("browser.tab.\(tab.id)")
-                            .located(.tab(tab.id), in: $targets)
-                            Button { closingWidth = tabWidth; close(tab.id) } label: {
-                                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                                    .frame(width: 24, height: 32).contentShape(Rectangle())
-                            }.padding(.trailing, 4).help("Close Tab")
-                                .accessibilityIdentifier("browser.tab.close.\(tab.id)")
-                                .located(.close(tab.id), in: $targets)
-                        }.buttonStyle(.plain)
-                            .background(selectedTabID == tab.id ? Color.primary.opacity(0.10) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: browserTabCornerRadius, style: .continuous))
+                                .accessibilityIdentifier("browser.tab.\(tab.id)")
+                                .located(.tab(tab.id), in: $targets)
+                                Button { closingWidth = tabWidth; close(tab.id) } label: {
+                                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                        .frame(width: 24, height: 32).contentShape(Rectangle())
+                                }.padding(.trailing, 4).help("Close Tab")
+                                    .accessibilityIdentifier("browser.tab.close.\(tab.id)")
+                                    .located(.close(tab.id), in: $targets)
+                            }.buttonStyle(.plain)
+                                .background(selectedTabID == tab.id ? Color.primary.opacity(0.10) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: browserTabCornerRadius, style: .continuous))
+                        }
+                        // Only the space after the last tab opens a tab; the tabs are
+                        // siblings, so double-clicking one never reaches this gesture.
+                        Color.clear.frame(height: 32).contentShape(Rectangle())
+                            .onTapGesture(count: 2) { closingWidth = nil; newTab() }
+                            .accessibilityHidden(true)
+                    }.frame(minWidth: width, alignment: .leading)
+                }.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                    // A new or newly selected tab comes into sight, wherever in a long strip it opened.
+                    .onChange(of: tabs.map(\.id)) { old, new in
+                        if let id = Self.opened(from: old, to: new) { withAnimation { scroller.scrollTo(id) } }
                     }
-                    // Only the space after the last tab opens a tab; the tabs are
-                    // siblings, so double-clicking one never reaches this gesture.
-                    Color.clear.frame(height: 32).contentShape(Rectangle())
-                        .onTapGesture(count: 2) { closingWidth = nil; newTab() }
-                        .accessibilityHidden(true)
-                }.frame(minWidth: width, alignment: .leading)
-            }.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                    .onChange(of: selectedTabID) { _, id in
+                        if let id { withAnimation { scroller.scrollTo(id) } }
+                    }
+            }
             Button { closingWidth = nil; newTab() } label: { Image(systemName: "plus") }.buttonStyle(.borderless).help("New Tab").padding(.horizontal, 8)
                 .accessibilityIdentifier("browser.tab.new")
                 .located(.newTab, in: $targets)

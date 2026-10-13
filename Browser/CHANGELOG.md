@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A tab that opens, whether you or a bot opened it, scrolls into sight in a long tab strip, as does a tab when it's selected.
+
 ## [0.17.0] - 2026-10-12
 
 ### Added

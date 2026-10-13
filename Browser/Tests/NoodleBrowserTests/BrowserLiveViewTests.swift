@@ -48,6 +48,17 @@ import XCTest
         XCTAssertEqual(other.count, short.count, "tabs differ in width")
     }
 
+    /// A tab that opens, even one a bot opens behind the selected tab, is scrolled into sight;
+    /// closing or reordering tabs leaves the strip where it is.
+    func testTheStripRevealsATabThatOpens() {
+        let a = UUID(), b = UUID(), c = UUID(), d = UUID()
+        XCTAssertEqual(BrowserTabStrip.opened(from: [a, b], to: [a, b, c]), c)
+        XCTAssertEqual(BrowserTabStrip.opened(from: [a, b], to: [a, c, b]), c)
+        XCTAssertEqual(BrowserTabStrip.opened(from: [a], to: [a, c, d]), d)
+        XCTAssertNil(BrowserTabStrip.opened(from: [a, b, c], to: [a, c]))
+        XCTAssertNil(BrowserTabStrip.opened(from: [a, b], to: [b, a]))
+    }
+
     /// The points across the middle of the strip that land on a tab or its close button.
     private func extent(of id: UUID, in tabs: [BrowserTabInfo]) async throws -> ClosedRange<Int> {
         let strip = BrowserTabStripPicture(), middle = BrowserTabStrip.height / 2
