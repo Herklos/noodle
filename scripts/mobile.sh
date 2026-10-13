@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Tests, packages and uploads the phone app, from the Xcode project Tuist generates from Mobile/Project.swift.
 #   run                        builds Noodle Dev and opens it on an iPhone simulator
-#   test                       runs its tests on an iPhone simulator
+#   test [ARGUMENT ...]        runs its tests on an iPhone simulator; arguments go to xcodebuild, as
+#                              -only-testing:NoodleMobileTests/HubChatsTests
 #   package VERSION BUILD DIR  archives a release, exports Noodle-Mobile.ipa and its checksum into DIR and
 #                              has App Store Connect validate it
 #   upload IPA                 sends a packaged app to App Store Connect, where TestFlight picks it up
@@ -13,7 +14,7 @@
 set -euo pipefail
 project_root="${0:A:h:h}"
 folder="$project_root/Mobile"
-command="${1:?Usage: scripts/mobile.sh run | test | package VERSION BUILD DIR | upload IPA}"
+command="${1:?Usage: scripts/mobile.sh run | test [ARGUMENT ...] | package VERSION BUILD DIR | upload IPA}"
 shift
 
 # Regenerating rewrites the project, which makes Xcode rebuild everything, so it happens only when the
@@ -72,7 +73,7 @@ case "$command" in
         [[ -n "${CI:-}" ]] || parallel=(-parallel-testing-enabled NO)
         build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
             -derivedDataPath "$folder/Derived" -destination "id=$simulator" "${parallel[@]}" \
-            -retry-tests-on-failure -test-iterations 2 -collect-test-diagnostics never test
+            -retry-tests-on-failure -test-iterations 2 -collect-test-diagnostics never "$@" test
         ;;
     package)
         version="${1:?Missing version}" build="${2:?Missing build number}" output="${3:?Missing output folder}"
