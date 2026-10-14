@@ -4,17 +4,9 @@
 
 # Noodle
 
-**Personal AI agents.**
-
-Personal AI agents that get things done on your Mac. Add a Hub to share subscriptions and local models with your household or team.
+<p><b>Personal AI agents.</b></p>
 
 <a href="https://github.com/pdparchitect/noodle/releases/latest/download/Noodle-arm64.dmg"><img alt="Download Noodle for Mac" src="https://img.shields.io/badge/Download%20for%20Mac-0071e3?style=for-the-badge&logo=apple&logoColor=white" height="48"></a>
-
-<p>
-  <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-%E2%89%A526-0a0a0a?style=flat-square&logo=apple&logoColor=white">
-  <img alt="iOS 26+, beta" src="https://img.shields.io/badge/iOS-%E2%89%A526%20beta-0a0a0a?style=flat-square&logo=apple&logoColor=white">
-  <img alt="Free and open source, Apache 2.0" src="https://img.shields.io/badge/free%20%26%20open%20source-Apache%202.0-0a0a0a?style=flat-square">
-</p>
 
 [Website](https://usenoodle.app) · [Apps](#apps) · [Documentation](docs/README.md) · [Security](docs/security.md) · [Privacy](docs/privacy.md) · [Devlog](https://x.com/search?q=from%3Apdp%20noodle&f=live)
 
