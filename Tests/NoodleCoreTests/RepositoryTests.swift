@@ -54,6 +54,22 @@ final class RepositoryTests: XCTestCase {
         XCTAssertThrowsError(try repository.loadConversations())
     }
 
+    func testAgentInstructionsNameAndDescribeTheBot() throws {
+        let created = try repository.createAgent(named: "Build Bot", publicDescription: "Keeps the builds green.")
+        let instructions = repository.directory(for: created.agent).appendingPathComponent("AGENTS.md")
+        let initial = try String(contentsOf: instructions, encoding: .utf8)
+        XCTAssertTrue(initial.contains("## Name\n\nBuild Bot\n"))
+        XCTAssertTrue(initial.contains("## Description\n\nKeeps the builds green.\n"))
+
+        let renamed = try repository.updateAgent(
+            created.agent, displayName: "Release Bot", harnessIdentifier: nil, modelIdentifier: nil, reasoningEffort: nil)
+        try repository.synchronizeAgentWorkspace(renamed)
+        let updated = try String(contentsOf: instructions, encoding: .utf8)
+        XCTAssertTrue(updated.contains("## Name\n\nRelease Bot\n"))
+        XCTAssertFalse(updated.contains("Build Bot"))
+        XCTAssertFalse(updated.contains("## Description"))
+    }
+
     func testAgentWorkspaceUsesStableOpaqueIdentifier() throws {
         let created = try repository.createAgent(named: "Build Bot")
         let directory = repository.directory(for: created.agent)

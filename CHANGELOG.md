@@ -11,6 +11,10 @@ All notable changes to Noodle are documented here, following
 - Bots can stop a computer assigned to them when they are done with it. This needs the Noodle Computer update released alongside.
 - A bot that starts a computer and then leaves it unused is reminded to stop it: after it has run for 30 minutes with nothing using it for 15. This needs the Noodle Computer update released alongside.
 
+### Changed
+
+- Bots know their own name and description, not just their backstory.
+
 ### Fixed
 
 - Opening a noodlet a bot is still testing asks whether to close the bot's test session, instead of refusing with an error. This needs the Noodle Applet update released alongside.
