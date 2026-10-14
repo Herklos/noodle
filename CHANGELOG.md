@@ -8,6 +8,7 @@ All notable changes to Noodle are documented here, following
 
 ### Changed
 
+- The personal-assistant agenda, freelance pipeline and Almanac landing page in the demo scenarios have clearer layouts and more polished artwork.
 - The Usage window's bot menu shows each bot's icon beside its name.
 - The Usage chart's day breakdown stays inside the chart instead of running off the top of the window.
 - Messages now fade into the wallpaper as they scroll beneath the toolbar, in place of the shaded band at the top of the window. Nothing fades while no message is beneath it.
