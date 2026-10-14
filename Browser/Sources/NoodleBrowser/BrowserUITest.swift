@@ -55,8 +55,9 @@ import SwiftUI
             }
             settingsWindow.close()
             try await verifyWebSurface(presentation, window: window)
-            try await verifyAddressField(presentation, window: window)
+            // The tab check starts from an inactive app, so it runs before anything activates it.
             try await verifyTabTargets(presentation, window: window)
+            try await verifyAddressField(presentation, window: window)
             try await verifyPersonRow(presentation, window: window)
             // Delete the currently displayed profile while its window is mounted.
             // This catches retained WKWebViews that prevent data-store removal.
