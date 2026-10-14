@@ -9,6 +9,10 @@
 - Bots and apps outside Noodle can stop a computer, as they could already start one. A computer you are watching live is left running.
 - A bot or app outside Noodle that starts a computer and then leaves it unused is reminded to stop it, after the computer has run for 30 minutes with nothing using it for 15. Computers you start yourself are left alone.
 
+### Fixed
+
+- An app outside Noodle that is turned away is told why, instead of sometimes getting "The connection closed."
+
 ## [0.28.0] - 2026-10-12
 
 ### Added

@@ -50,7 +50,13 @@ public enum ExternalConnection {
             throw ExternalToolsError("The app is not accepting agents.")
         }
         try verify(fd)
-        try send(data, fd)
+        do {
+            try send(data, fd)
+        } catch {
+            // A refusing server answers and closes without reading; its answer is still waiting.
+            guard let answer = try? receive(fd) else { throw error }
+            return answer
+        }
         return try receive(fd)
     }
 

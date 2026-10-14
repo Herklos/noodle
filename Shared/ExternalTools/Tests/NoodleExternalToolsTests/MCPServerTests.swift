@@ -125,6 +125,31 @@ private func reply(_ server: MCPServer, _ message: [String: Any]) async throws -
         withExtendedLifetime(server) {}
     }
 
+    /// A server that answers and closes before the request is written still has its answer read.
+    @Test func anAnswerSentBeforeTheRequestIsStillRead() async throws {
+        let folder = URL(fileURLWithPath: "/tmp").appendingPathComponent("x-" + UUID().uuidString.prefix(8))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("x.sock")
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { Darwin.close(fd) }
+        #expect(try ExternalConnection.withAddress(url, { Darwin.bind(fd, $0, $1) }) == 0)
+        #expect(Darwin.listen(fd, 1) == 0)
+        let closed = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            let peer = Darwin.accept(fd, nil, nil)
+            ExternalConnection.configure(peer, seconds: 5)
+            try? ExternalConnection.send(ExternalConnection.failure("Not ours."), peer)
+            Darwin.close(peer)
+            closed.signal()
+        }
+        let answer = try await Task.detached {
+            try ExternalConnection.call(Data("hello".utf8), socket: url, seconds: 5, verify: { _ in closed.wait() })
+        }.value
+        let object = try JSONSerialization.jsonObject(with: answer) as? [String: Any]
+        #expect(object?["error"] as? String == "Not ours.")
+    }
+
     /// A caller holding every connection open gets in nobody else's way unanswered: the next one is told why.
     @Test func aFullServerSaysItIsBusy() async throws {
         let folder = URL(fileURLWithPath: "/tmp").appendingPathComponent("x-" + UUID().uuidString.prefix(8))

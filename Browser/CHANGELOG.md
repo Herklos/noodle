@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-14
+
+### Fixed
+
+- An app outside Noodle that is turned away is told why, instead of sometimes getting "The connection closed."
+
 ## [0.18.1] - 2026-10-14
 
 ### Fixed
