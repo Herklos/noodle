@@ -209,7 +209,7 @@ import XCTest
     /// Retry errors apply only to the current thread's active turn and never
     /// rewrite the saved thread. An error before the turn acknowledgement still
     /// applies once acknowledged. A final error keeps the unfinished marker
-    /// until Codex reports the failed turn, which clears it but stays failed.
+    /// until Codex reports the failed turn, which clears it and leaves the bot ready.
     func testRetryErrorsAreScopedToTheActiveTurnAndKeepUnfinishedWork() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
         try await active(f, wire, p)
@@ -242,7 +242,7 @@ import XCTest
         wire.emit(["method": "turn/completed", "params": ["threadId": "fixture-thread",
             "turn": ["id": "turn-two", "status": "failed", "error": ["message": "Connection failed"]]]])
         try await f.wait { !f.recovery(.codex).hasUnfinishedTurn }
-        XCTAssertEqual(p.snapshot.phase, .failed)
+        XCTAssertEqual(p.snapshot.phase, .ready)
         XCTAssertTrue(f.failures.isEmpty)
     }
 
@@ -270,8 +270,20 @@ import XCTest
         let body = #"{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'custom/model' model is not supported."}}"#
         wire.emit(["method": "turn/completed", "params": ["threadId": "fixture-thread",
             "turn": ["id": "turn-one", "status": "failed", "error": ["message": body]]]])
-        try await f.wait { p.snapshot.phase == .failed }
-        XCTAssertEqual(p.snapshot.detail, "The 'custom/model' model is not supported.")
+        try await f.wait { p.snapshot.detail == "The 'custom/model' model is not supported." }
+    }
+
+    /// A failed turn leaves Codex running, so the bot shows the error yet takes
+    /// the next message and heartbeat instead of waiting for Kick.
+    func testFailedTurnLeavesTheBotReadyForNextMessage() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
+        try await active(f, wire, p)
+        wire.emit(["method": "turn/completed", "params": ["threadId": "fixture-thread",
+            "turn": ["id": "turn-one", "status": "failed", "error": ["message": "workspace routing discovery timed out"]]]])
+        try await f.wait { !f.recovery(.codex).hasUnfinishedTurn }; await f.drain()
+        XCTAssertEqual(p.snapshot.detail, "workspace routing discovery timed out")
+        XCTAssertTrue(p.canReceiveHeartbeat)
+        p.notify(); try await f.wait { wire.count("turn/start") == 2 }
     }
 
     func testDisconnectPreservesRecoveryAndIsReportedOnlyOnce() async throws {

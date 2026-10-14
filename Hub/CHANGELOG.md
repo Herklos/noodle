@@ -13,6 +13,10 @@
 - Bots on the Hub know their own name and description, not just their backstory.
 - Bots on the Hub say they are on a slow request and keep answering messages while it runs, using their harness's background tasks where it has them, instead of going quiet until it finishes.
 
+### Fixed
+
+- A Codex bot on the Hub whose request fails, for example after a network timeout, answers the next message instead of staying stuck until Kick.
+
 ## [0.33.0] - 2026-10-14
 
 ### Fixed

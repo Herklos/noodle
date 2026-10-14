@@ -463,13 +463,12 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             default: .turnEndedUnknown
             }
             trace.finish(outcome)
-            if status == "failed" {
-                let error = turn?["error"] as? [String: Any]
-                fail(Self.serviceErrorMessage(error?["message"] as? String) ?? "Codex turn failed")
-            } else {
-                update(.ready, "Codex ready")
-                sendPendingNotificationIfPossible()
-            }
+            // Codex stays running after a failed turn, so the next message or
+            // heartbeat tries again; only the error is left showing.
+            let error = turn?["error"] as? [String: Any]
+            update(.ready, status == "failed"
+                ? Self.serviceErrorMessage(error?["message"] as? String) ?? "Codex turn failed" : "Codex ready")
+            sendPendingNotificationIfPossible()
         }
     }
 
