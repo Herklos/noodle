@@ -189,7 +189,12 @@ public struct UsageView: View {
                 Text("All Bots").tag(UUID?.none)
                 Divider()
                 ForEach(agents) { agent in
-                    Text(agent.displayName).tag(Optional(agent.id))
+                    Label {
+                        Text(agent.displayName)
+                    } icon: {
+                        if let image = BotAvatar.menuImage(for: agent) { Image(nsImage: image) }
+                    }
+                    .tag(Optional(agent.id))
                 }
             }
             .pickerStyle(.menu)
@@ -267,7 +272,7 @@ public struct UsageView: View {
             if let selected {
                 RuleMark(x: .value("Date", selected, unit: unit))
                     .foregroundStyle(.clear)
-                    .annotation(position: .top, spacing: 4, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                    .annotation(position: .top, spacing: 4, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                         tooltip(report.bars.filter { $0.bucket == selected }, date: selected, groups: report.groups)
                     }
             }

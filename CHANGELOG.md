@@ -8,6 +8,8 @@ All notable changes to Noodle are documented here, following
 
 ### Changed
 
+- The Usage window's bot menu shows each bot's icon beside its name.
+- The Usage chart's day breakdown stays inside the chart instead of running off the top of the window.
 - Messages now fade into the wallpaper as they scroll beneath the toolbar, in place of the shaded band at the top of the window. Nothing fades while no message is beneath it.
 - On voice calls, bots introduce themselves by their own name and speak from their description and backstory, instead of calling themselves Codex.
 
