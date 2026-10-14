@@ -153,10 +153,10 @@ import Observation
     public func canCall(agent: UUID) -> Bool { entries.first { $0.agent == agent }?.canCall == true }
 
     /// Calls the bot of a conversation here on the Hub. What happens comes down the channel as
-    /// `LinkCallEvent`s; cancelling it hangs up.
-    public func openCall(in conversation: UUID, offer: String) async throws -> LinkChannel {
+    /// `LinkCallEvent`s among the bot's `LinkCallAudio`, which the person's goes up; cancelling it hangs up.
+    public func openCall(in conversation: UUID) async throws -> LinkChannel {
         guard let thread = thread(local: conversation) else { throw LinkError("That conversation is not on this Hub.") }
-        return try await pairing.channel(.startCall(LinkCallStart(conversationID: thread.remote, offer: offer)))
+        return try await pairing.channel(.startCall(LinkCallStart(conversationID: thread.remote)))
     }
 
     /// Opens a noodlet a bot shared in a conversation here to run on this Mac.

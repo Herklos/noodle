@@ -2,6 +2,7 @@ import Foundation
 import HubCore
 import NoodleCore
 import NoodleRuntime
+import NoodleVoicePeer
 import XCTest
 
 /// Stands in for a harness, so the Mac's own runtime can be told to fail and seen to restart.
@@ -67,4 +68,20 @@ extension XCTestCase {
         addTeardownBlock { await MainActor.run { runtime.stopAll() } }
         return (runtime, { processes })
     }
+}
+
+/// Stands in for a call's WebRTC connection: records what it heard and what it was answered.
+final class FakeCallPeer: VoiceCallPeering, @unchecked Sendable {
+    var onVoice: (@Sendable ([Int16]) -> Void)?
+    var onFailure: (@MainActor @Sendable () -> Void)?
+    private let lock = NSLock()
+    private var _heard: [Int16] = []
+    private(set) var answers: [String] = []
+    private(set) var closes = 0
+    var heard: [Int16] { lock.withLock { _heard } }
+
+    func makeOffer() async throws -> String { "peer-offer" }
+    func accept(answer: String) async throws { answers.append(answer) }
+    func hear(_ samples: [Int16]) { lock.withLock { _heard += samples } }
+    func close() { closes += 1 }
 }

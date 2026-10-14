@@ -201,6 +201,7 @@ let project = Project(
                 .package(product: "HubCore"),
                 .package(product: "NoodleAgentBridge"),
                 .package(product: "NoodleAudioCapture"),
+                .package(product: "NoodleVoicePeer"),
                 .package(product: "NoodleLaunchChecks"),
                 .package(product: "NoodleSettingsUI"),
                 .package(product: "HubLink"),

@@ -2,9 +2,10 @@ import AppKit
 import AVFoundation
 import Foundation
 import HubLink
+import NoodleAudioCapture
 import NoodleCore
 import NoodleRuntime
-import WebKit
+import NoodleVoicePeer
 
 @MainActor protocol VoiceCallRuntime: AnyObject {
     func startVoiceCall(agentID: UUID, _ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws
@@ -15,53 +16,58 @@ import WebKit
 extension AgentRuntimeCoordinator: VoiceCallRuntime {}
 
 /// A call's channel to the Hub keeping its bot.
-protocol VoiceCallChannel: AnyObject {
+protocol VoiceCallChannel: AnyObject, Sendable {
     var frames: AsyncThrowingStream<Data, Error> { get }
+    func send(_ payload: Data)
     func cancel()
 }
 
 extension LinkChannel: VoiceCallChannel {}
 
-/// Sends a call to a bot on this Mac to its runtime, and one to a bot kept on a Hub through
-/// that Hub, which runs the bot, keeps the call's card and hears what is typed meanwhile.
-@MainActor final class VoiceCallRouter: VoiceCallRuntime {
+/// What a call is about, before it is connected.
+struct VoiceCallSetup: Equatable {
+    /// Nil leaves the voice to the harness.
+    var voice: String?
+    var conversationID: UUID
+    var personName: String
+    var recentLines: [VoiceCallLine] = []
+
+    func request(offer: String) -> VoiceCallRequest {
+        VoiceCallRequest(offer: offer, voice: voice, conversationID: conversationID, personName: personName, recentLines: recentLines)
+    }
+}
+
+/// Connects a call to its bot's voice. A bot on this Mac gets a WebRTC connection here to its
+/// harness's voice service; a bot kept on a Hub is called through that Hub, which holds the
+/// connection, and the audio goes over the link. Either way the person's voice goes in through
+/// the function a call returns, and the bot's comes out into the call's playout.
+@MainActor final class VoiceCallRouter {
     private let local: any VoiceCallRuntime
     private let isOnHub: @MainActor (UUID) -> Bool
-    private let openHubCall: @MainActor (UUID, VoiceCallRequest) async throws -> any VoiceCallChannel
+    private let openHubCall: @MainActor (UUID, VoiceCallSetup) async throws -> any VoiceCallChannel
+    private let makePeer: @MainActor () -> any VoiceCallPeering
+    private var peers: [UUID: any VoiceCallPeering] = [:]
     private var channels: [UUID: any VoiceCallChannel] = [:]
-    private var calls: [UUID: Task<Void, Never>] = [:]
+    /// The latest call per bot; one that ended or was replaced while connecting stops there.
+    private var attempts: [UUID: UUID] = [:]
 
     init(local: any VoiceCallRuntime, isOnHub: @escaping @MainActor (UUID) -> Bool,
-         openHubCall: @escaping @MainActor (UUID, VoiceCallRequest) async throws -> any VoiceCallChannel) {
+         openHubCall: @escaping @MainActor (UUID, VoiceCallSetup) async throws -> any VoiceCallChannel,
+         makePeer: @escaping @MainActor () -> any VoiceCallPeering = { VoiceCallPeer() }) {
         self.local = local
         self.isOnHub = isOnHub
         self.openHubCall = openHubCall
+        self.makePeer = makePeer
     }
 
-    func startVoiceCall(agentID: UUID, _ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws {
-        guard isOnHub(agentID) else { return try local.startVoiceCall(agentID: agentID, request, events: events) }
+    func startVoiceCall(agentID: UUID, _ setup: VoiceCallSetup, playout: LinkCallPlayout,
+                        events: @escaping @MainActor (VoiceCallEvent) -> Void) async throws -> @Sendable ([Int16]) -> Void {
         endVoiceCall(agentID: agentID)
-        calls[agentID] = Task { [weak self] in
-            do {
-                guard let self else { return }
-                let channel = try await self.openHubCall(agentID, request)
-                guard !Task.isCancelled else { return channel.cancel() }
-                self.channels[agentID] = channel
-                for try await frame in channel.frames {
-                    guard let event = LinkCallEvent(frame) else { continue }
-                    switch event {
-                    case .answer(let sdp): events(.answer(sdp))
-                    case .started: events(.started)
-                    case .line(let line): events(.line(VoiceCallLine(line.speaker == .you ? .person : .bot, line.text, at: line.at)))
-                    case .ended(let detail): events(.ended(detail)); return
-                    }
-                }
-                events(.ended(nil))
-            } catch {
-                guard !Task.isCancelled else { return }
-                events(.ended(error.localizedDescription))
-            }
-        }
+        let attempt = UUID()
+        attempts[agentID] = attempt
+        return isOnHub(agentID)
+            ? try await callHub(agentID, setup, playout: playout, attempt: attempt, events: events)
+            : try await callHere(agentID, setup, playout: playout, attempt: attempt, events: events)
     }
 
     func sendToVoiceCall(agentID: UUID, _ text: String) {
@@ -70,17 +76,95 @@ extension LinkChannel: VoiceCallChannel {}
     }
 
     func endVoiceCall(agentID: UUID) {
-        guard isOnHub(agentID) else { return local.endVoiceCall(agentID: agentID) }
-        calls.removeValue(forKey: agentID)?.cancel()
+        attempts[agentID] = nil
         channels.removeValue(forKey: agentID)?.cancel()
+        guard let peer = peers.removeValue(forKey: agentID) else { return }
+        peer.close()
+        local.endVoiceCall(agentID: agentID)
+    }
+
+    private func callHere(_ agentID: UUID, _ setup: VoiceCallSetup, playout: LinkCallPlayout, attempt: UUID,
+                          events: @escaping @MainActor (VoiceCallEvent) -> Void) async throws -> @Sendable ([Int16]) -> Void {
+        let peer = makePeer()
+        peer.onVoice = { playout.append($0) }
+        peer.onFailure = { [weak self] in
+            guard let self, attempts[agentID] == attempt else { return }
+            endVoiceCall(agentID: agentID)
+            events(.ended("The call connection was lost."))
+        }
+        peers[agentID] = peer
+        do {
+            try await peer.place({ offer, runtimeEvents in
+                guard attempts[agentID] == attempt else { throw CancellationError() }
+                try local.startVoiceCall(agentID: agentID, setup.request(offer: offer), events: runtimeEvents)
+            }) { [weak self] event in
+                guard let self, attempts[agentID] == attempt else { return }
+                if case .ended = event {
+                    attempts[agentID] = nil
+                    peers.removeValue(forKey: agentID)?.close()
+                }
+                events(event)
+            }
+        } catch {
+            if attempts[agentID] == attempt {
+                attempts[agentID] = nil
+                peers[agentID] = nil
+            }
+            peer.close()
+            throw error
+        }
+        return { peer.hear($0) }
+    }
+
+    private func callHub(_ agentID: UUID, _ setup: VoiceCallSetup, playout: LinkCallPlayout, attempt: UUID,
+                         events: @escaping @MainActor (VoiceCallEvent) -> Void) async throws -> @Sendable ([Int16]) -> Void {
+        let encoder = try LinkCallEncoder(), decoder = try LinkCallDecoder()
+        let channel = try await openHubCall(agentID, setup)
+        guard attempts[agentID] == attempt else {
+            channel.cancel()
+            throw CancellationError()
+        }
+        channels[agentID] = channel
+        let ended: @MainActor (String?) -> Void = { [weak self] detail in
+            guard let self, attempts[agentID] == attempt else { return }
+            attempts[agentID] = nil
+            channels.removeValue(forKey: agentID)?.cancel()
+            events(.ended(detail))
+        }
+        // The bot's voice is decoded as it arrives, off the main actor; only events go there.
+        Task.detached {
+            do {
+                for try await frame in channel.frames {
+                    if let packet = LinkCallAudio.packet(in: frame) {
+                        if let samples = try? decoder.decode(packet) { playout.append(samples) }
+                        continue
+                    }
+                    guard let event = LinkCallEvent(frame) else { continue }
+                    switch event {
+                    case .started: await events(.started)
+                    case .line(let line): await events(.line(VoiceCallLine(line.speaker == .you ? .person : .bot, line.text, at: line.at)))
+                    case .ended(let detail): await ended(detail); return
+                    }
+                }
+                await ended(nil)
+            } catch {
+                await ended(error is CancellationError ? nil : error.localizedDescription)
+            }
+        }
+        return { samples in
+            for packet in (try? encoder.encode(samples)) ?? [] { channel.send(LinkCallAudio.frame(packet)) }
+        }
     }
 }
 
-/// Captures the microphone and plays the bot's voice for one call.
+/// The person's end of a call: the microphone, and the speakers playing the bot's voice.
 @MainActor protocol VoiceCallMedia: AnyObject {
     var onFailure: ((String) -> Void)? { get set }
-    func prepareOffer() async throws -> String
-    func accept(answer: String) async throws
+    /// Where the bot's voice waits to be played.
+    var playout: LinkCallPlayout { get }
+    /// Asks for the microphone and starts listening and playing; what the person says goes to
+    /// `hear`, 48 kHz mono, from the audio thread.
+    func start(hear: @escaping @Sendable ([Int16]) -> Void) async throws
     func setMuted(_ muted: Bool)
     func close()
     /// Tells the person the call has connected.
@@ -102,7 +186,7 @@ extension LinkChannel: VoiceCallChannel {}
     }
 
     private(set) var call: Call?
-    @ObservationIgnored private let runtime: any VoiceCallRuntime
+    @ObservationIgnored private let router: VoiceCallRouter
     @ObservationIgnored private let makeMedia: @MainActor () -> any VoiceCallMedia
     @ObservationIgnored private let report: @MainActor (String) -> Void
     @ObservationIgnored private let record: @MainActor (Call) -> UUID?
@@ -110,12 +194,12 @@ extension LinkChannel: VoiceCallChannel {}
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var media: (any VoiceCallMedia)?
 
-    init(runtime: any VoiceCallRuntime, makeMedia: @escaping @MainActor () -> any VoiceCallMedia,
+    init(router: VoiceCallRouter, makeMedia: @escaping @MainActor () -> any VoiceCallMedia,
          report: @escaping @MainActor (String) -> Void,
          record: @escaping @MainActor (Call) -> UUID? = { _ in nil },
          finish: @escaping @MainActor (Call, UUID, Date) -> Void = { _, _, _ in },
          now: @escaping () -> Date = Date.init) {
-        self.runtime = runtime
+        self.router = router
         self.makeMedia = makeMedia
         self.report = report
         self.record = record
@@ -131,20 +215,24 @@ extension LinkChannel: VoiceCallChannel {}
         self.call = call
         self.media = media
         media.onFailure = { [weak self] in self?.end(call.id, failure: $0, stopRuntime: true) }
+        let speaking = SpokenAudio()
         Task { [weak self] in
-            let offer: String
-            do { offer = try await media.prepareOffer() } catch {
+            // The microphone first: without it there is no call to place.
+            do { try await media.start(hear: speaking.hear) } catch {
                 self?.end(call.id, failure: error.localizedDescription, stopRuntime: false)
                 return
             }
             guard let self, self.call?.id == call.id else { return }
             do {
-                try runtime.startVoiceCall(agentID: agentID, VoiceCallRequest(
-                    offer: offer, voice: voice, conversationID: conversationID,
-                    personName: personName, recentLines: recentLines
-                )) { [weak self] in self?.handle($0, of: call.id) }
+                let send = try await router.startVoiceCall(
+                    agentID: agentID, VoiceCallSetup(voice: voice, conversationID: conversationID, personName: personName,
+                                                     recentLines: recentLines),
+                    playout: media.playout) { [weak self] in self?.handle($0, of: call.id) }
+                guard self.call?.id == call.id else { return }
+                speaking.connect(send)
             } catch {
-                end(call.id, failure: error.localizedDescription, stopRuntime: false)
+                guard self.call?.id == call.id else { return }
+                end(call.id, failure: error is CancellationError ? nil : error.localizedDescription, stopRuntime: false)
             }
         }
     }
@@ -163,19 +251,15 @@ extension LinkChannel: VoiceCallChannel {}
     /// The bot reads chat messages through its inbox; the voice hears about them here.
     func shared(in conversationID: UUID, body: String, attachmentNames: [String]) {
         guard let call, call.conversationID == conversationID else { return }
-        runtime.sendToVoiceCall(agentID: call.agentID,
-                                VoiceCallDocumentation.typedMessage(body: body, attachmentNames: attachmentNames))
+        router.sendToVoiceCall(agentID: call.agentID,
+                               VoiceCallDocumentation.typedMessage(body: body, attachmentNames: attachmentNames))
     }
 
     private func handle(_ event: VoiceCallEvent, of id: UUID) {
         guard call?.id == id else { return }
         switch event {
-        case .answer(let sdp):
-            guard let media else { return }
-            Task {
-                do { try await media.accept(answer: sdp) }
-                catch { end(id, failure: error.localizedDescription, stopRuntime: true) }
-            }
+        case .answer:
+            break
         case .started:
             guard call?.startedAt == nil else { return }
             call?.startedAt = now()
@@ -193,7 +277,7 @@ extension LinkChannel: VoiceCallChannel {}
 
     private func end(_ id: UUID, failure: String?, stopRuntime: Bool) {
         guard let call, call.id == id else { return }
-        if stopRuntime { runtime.endVoiceCall(agentID: call.agentID) }
+        if stopRuntime { router.endVoiceCall(agentID: call.agentID) }
         if let messageID = call.messageID { finish(call, messageID, now()) }
         media?.close()
         media = nil
@@ -202,87 +286,149 @@ extension LinkChannel: VoiceCallChannel {}
     }
 }
 
-/// WebKit provides WebRTC, echo cancellation and playback. Its page lives in an
-/// invisible window because WebKit suspends audio in a web view that is not on screen.
-@MainActor final class WebRTCVoiceCallMedia: NSObject, VoiceCallMedia, WKNavigationDelegate, WKUIDelegate {
+/// Where what the person says goes: nowhere until the call is connected.
+final class SpokenAudio: @unchecked Sendable {
+    private let lock = NSLock()
+    private var send: (@Sendable ([Int16]) -> Void)?
+
+    func connect(_ send: @escaping @Sendable ([Int16]) -> Void) { lock.withLock { self.send = send } }
+    func hear(_ samples: [Int16]) { lock.withLock { send }?(samples) }
+}
+
+/// The microphone chosen for dictation, with the Mac's own voice processing cancelling the bot's
+/// voice from it, as on a FaceTime call, and the bot's voice on the speakers.
+@MainActor final class EngineVoiceCallMedia: VoiceCallMedia {
     var onFailure: ((String) -> Void)?
-    private var window: NSWindow?
-    private var webView: WKWebView?
-    private var loading: CheckedContinuation<Void, Error>?
+    let playout = LinkCallPlayout()
+    private let audio = VoiceAudioQueue()
+    private let microphone = MicrophoneTap()
+    private var capture: NoodleAudioCapture?
+    private var engine: AVAudioEngine?
+    /// Plays the bot's voice when the microphone has an engine of its own.
+    private var speakerEngine: AVAudioEngine?
+    private var configurationObserver: NSObjectProtocol?
 
-    func prepareOffer() async throws -> String {
+    func start(hear: @escaping @Sendable ([Int16]) -> Void) async throws {
         try await Self.requestMicrophone()
-        let configuration = WKWebViewConfiguration()
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-        configuration.userContentController.add(MessageRelay(self), name: "call")
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1), styleMask: .borderless,
-                              backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.alphaValue = 0
-        window.ignoresMouseEvents = true
-        window.isExcludedFromWindowsMenu = true
-        window.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
-        window.contentView = webView
-        window.orderFrontRegardless()
-        self.window = window
-        self.webView = webView
-        try await withCheckedThrowingContinuation { continuation in
-            loading = continuation
-            webView.loadHTMLString(LinkCallMedia.page, baseURL: LinkCallMedia.baseURL)
+        microphone.hear = hear
+        let microphone = microphone, playout = playout
+        let (engine, capture, speakerEngine) = try await audio.run { () throws -> (AVAudioEngine, NoodleAudioCapture, AVAudioEngine?) in
+            do {
+                let (engine, capture) = try Self.makeEngine(microphone: microphone, playout: playout)
+                return (engine, capture, nil)
+            } catch {
+                // Some pairs of microphone and speakers refuse voice processing, or one engine for
+                // both, as a headset's microphone with the display's speakers: listen as dictation
+                // does, and play the voice apart. Headphones need no echo cancellation.
+                let speaker = try Self.makeSpeaker(playout: playout)
+                let engine = AVAudioEngine()
+                _ = try VoiceInputDevice.configure(engine)
+                let capture = NoodleAudioCapture(engine: engine)
+                do {
+                    try capture.start(withBufferSize: 960) { buffer, _ in microphone.deliver(buffer) }
+                } catch {
+                    speaker.stop()
+                    throw error
+                }
+                return (engine, capture, speaker)
+            }
         }
-        guard let offer = try await webView.callAsyncJavaScript("return await offer()", contentWorld: .page) as? String else {
-            throw VoiceCallUnavailable()
+        self.engine = engine
+        self.capture = capture
+        self.speakerEngine = speakerEngine
+        // A device change stops the engine, and voice processing reports one as it settles: start
+        // listening again, in the new format.
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restart() }
         }
-        return offer
     }
 
-    func accept(answer: String) async throws {
-        _ = try await webView?.callAsyncJavaScript("await answer(sdp); return true", arguments: ["sdp": answer], contentWorld: .page)
+    private func restart() {
+        guard let capture else { return }
+        let microphone = microphone
+        Task { [weak self, audio] in
+            do {
+                try await audio.run { try capture.start(withBufferSize: 960) { buffer, _ in microphone.deliver(buffer) } }
+            } catch {
+                guard let self, self.capture === capture else { return }
+                self.onFailure?("The microphone or speakers changed and the call could not go on.")
+            }
+        }
     }
 
-    func setMuted(_ muted: Bool) {
-        webView?.evaluateJavaScript("mute(\(muted))")
+    /// Core Audio can block indefinitely, so this runs on the voice audio queue.
+    /// One engine for both, with voice processing cancelling the bot's voice from the microphone.
+    nonisolated private static func makeEngine(microphone: MicrophoneTap,
+                                               playout: LinkCallPlayout) throws -> (AVAudioEngine, NoodleAudioCapture) {
+        let engine = AVAudioEngine()
+        try engine.inputNode.setVoiceProcessingEnabled(true)
+        // Other apps' sound stays as it was.
+        engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration =
+            AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+        _ = try VoiceInputDevice.configure(engine)
+        attachVoice(playout, to: engine)
+        let capture = NoodleAudioCapture(engine: engine)
+        try capture.start(withBufferSize: 960) { buffer, _ in microphone.deliver(buffer) }
+        return (engine, capture)
     }
 
-    func announceConnected() {
-        webView?.evaluateJavaScript("chime()")
+    nonisolated private static func makeSpeaker(playout: LinkCallPlayout) throws -> AVAudioEngine {
+        let engine = AVAudioEngine()
+        attachVoice(playout, to: engine)
+        engine.prepare()
+        try engine.start()
+        return engine
     }
+
+    nonisolated private static func attachVoice(_ playout: LinkCallPlayout, to engine: AVAudioEngine) {
+        let format = AVAudioFormat(standardFormatWithSampleRate: Double(LinkCallAudio.sampleRate), channels: 1)!
+        let speaker = AVAudioSourceNode(format: format) { _, _, frameCount, buffers in
+            let out = UnsafeMutableAudioBufferListPointer(buffers)[0]
+            let samples = out.mData!.assumingMemoryBound(to: Float.self)
+            let count = Int(frameCount)
+            let voice = UnsafeMutableBufferPointer<Int16>.allocate(capacity: count)
+            defer { voice.deallocate() }
+            playout.read(into: voice)
+            for index in 0..<count { samples[index] = Float(voice[index]) / 32_768 }
+            return noErr
+        }
+        engine.attach(speaker)
+        engine.connect(speaker, to: engine.mainMixerNode, format: format)
+    }
+
+    func setMuted(_ muted: Bool) { microphone.isMuted = muted }
+
+    func announceConnected() { playout.append(Self.chime) }
 
     func close() {
-        webView?.evaluateJavaScript("hangUp()")
-        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "call")
-        webView = nil
-        window?.orderOut(nil)
-        window?.contentView = nil
-        window = nil
-        finishLoading(VoiceCallUnavailable())
+        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
+        configurationObserver = nil
+        microphone.hear = nil
+        let capture = capture, speakerEngine = speakerEngine
+        audio.post {
+            capture?.stop()
+            speakerEngine?.stop()
+        }
+        self.capture = nil
+        self.speakerEngine = nil
+        engine = nil
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finishLoading(nil) }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finishLoading(error) }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        finishLoading(error)
-    }
-
-    /// Async form: the completion-handler form can stop matching WebKit's selector and deny the microphone.
-    func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
-                 initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
-        webView === self.webView && type == .microphone ? .grant : .deny
-    }
-
-    private func finishLoading(_ error: Error?) {
-        guard let loading else { return }
-        self.loading = nil
-        if let error { loading.resume(throwing: error) } else { loading.resume() }
-    }
-
-    fileprivate func received(_ body: Any) {
-        guard (body as? [String: Any])?["failed"] != nil, webView != nil else { return }
-        onFailure?("The call connection was lost.")
-    }
+    /// Two rising notes, played on the speakers only.
+    private static let chime: [Int16] = {
+        let rate = Double(LinkCallAudio.sampleRate)
+        return (0..<Int(rate * 0.43)).map { index in
+            let time = Double(index) / rate
+            let sum = [(660.0, 0.0), (880.0, 0.13)].reduce(0.0) { sum, note in
+                let local = time - note.1
+                guard local >= 0, local < 0.3 else { return sum }
+                let level = local < 0.02 ? local / 0.02 * 0.18 : 0.18 * pow(0.001 / 0.18, (local - 0.02) / 0.26)
+                return sum + sin(2 * .pi * note.0 * local) * min(level, 0.18)
+            }
+            return Int16(max(-1, min(1, sum)) * 32_767)
+        }
+    }()
 
     private static func requestMicrophone() async throws {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -298,15 +444,48 @@ extension LinkChannel: VoiceCallChannel {}
             "Microphone access is off. Enable Noodle in System Settings → Privacy & Security → Microphone."
         }
     }
+}
 
-    /// The content controller retains its handlers; the relay keeps the media releasable.
-    private final class MessageRelay: NSObject, WKScriptMessageHandler {
-        weak var media: WebRTCVoiceCallMedia?
-        init(_ media: WebRTCVoiceCallMedia) { self.media = media }
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            let body = message.body
-            MainActor.assumeIsolated { media?.received(body) }
+/// Turns the microphone's buffers, in whatever format the device gives, into the call's audio.
+final class MicrophoneTap: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _hear: (@Sendable ([Int16]) -> Void)?
+    private var _muted = false
+    private var converter: AVAudioConverter?
+    private static let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(LinkCallAudio.sampleRate),
+                                              channels: 1, interleaved: true)!
+
+    var hear: (@Sendable ([Int16]) -> Void)? {
+        get { lock.withLock { _hear } }
+        set { lock.withLock { _hear = newValue } }
+    }
+
+    var isMuted: Bool {
+        get { lock.withLock { _muted } }
+        set { lock.withLock { _muted = newValue } }
+    }
+
+    /// Called on the audio thread. Voice processing can hand over several channels; the first is the voice.
+    func deliver(_ buffer: AVAudioPCMBuffer) {
+        guard let hear, !isMuted, let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        let rate = buffer.format.sampleRate
+        guard let mono = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1),
+              let input = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buffer.frameLength) else { return }
+        input.frameLength = buffer.frameLength
+        input.floatChannelData![0].update(from: channel, count: Int(buffer.frameLength))
+        if converter?.inputFormat.sampleRate != rate { converter = AVAudioConverter(from: mono, to: Self.target) }
+        guard let converter else { return }
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * Double(LinkCallAudio.sampleRate) / rate) + 32
+        guard let output = AVAudioPCMBuffer(pcmFormat: Self.target, frameCapacity: capacity) else { return }
+        var given = false
+        _ = converter.convert(to: output, error: nil) { _, state in
+            if given { state.pointee = .noDataNow; return nil }
+            given = true
+            state.pointee = .haveData
+            return input
         }
+        guard output.frameLength > 0 else { return }
+        hear(Array(UnsafeBufferPointer(start: output.int16ChannelData![0], count: Int(output.frameLength))))
     }
 }
 

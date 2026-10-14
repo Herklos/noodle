@@ -496,12 +496,15 @@ import XCTest
         func presentation(forName name: String) async -> VoicePresentation? { .feminine }
     }
 
-    /// A phone calls a bot on the Mac: the Mac starts the call with the bot's voice, passes back
-    /// what is said, keeps the call in the conversation, and hears what is typed meanwhile.
+    /// A phone calls a bot on the Mac: the Mac connects the call to the bot's voice itself, carries
+    /// the audio both ways on the call's channel, passes back what is said, keeps the call in the
+    /// conversation, and hears what is typed meanwhile.
     func testAPhoneCallsABotAndTheHubKeepsTheCallInItsConversation() async throws {
         let (runtime, processes) = try fakeRuntime()
         let (f, _) = try await fixture(bots: [], runtime: runtime)
         f.personal.bots.voiceGuesser = FeminineNames()
+        let peer = FakeCallPeer()
+        f.personal.bots.makeCallPeer = { peer }
         let (agent, process) = try startedBot(f, in: runtime, processes)
         let quiet = try f.repository.createAgent(named: "Eli", harnessIdentifier: "claude-code").agent
         guard case .bots(let bots) = try await f.device.request(.bots),
@@ -511,28 +514,38 @@ import XCTest
         XCTAssertTrue(kai.canCall)
         XCTAssertFalse(eli.canCall, "Its harness has no voices")
 
-        let refused = try await f.device.channel(.startCall(LinkCallStart(conversationID: eli.conversationID, offer: "offer-sdp")))
+        let refused = try await f.device.channel(.startCall(LinkCallStart(conversationID: eli.conversationID)))
         guard case .ended(let reason)? = try await firstCallEvent(on: refused) else { return XCTFail("a bot without voices took a call") }
         XCTAssertNotNil(reason)
 
-        let channel = try await f.device.channel(.startCall(LinkCallStart(conversationID: kai.conversationID, offer: "offer-sdp")))
+        let channel = try await f.device.channel(.startCall(LinkCallStart(conversationID: kai.conversationID)))
         await waitUntil { process.callRequests.count == 1 }
         let request = try XCTUnwrap(process.callRequests.first)
-        XCTAssertEqual(request.offer, "offer-sdp")
+        XCTAssertEqual(request.offer, "peer-offer", "The Hub's own connection makes the offer")
         XCTAssertEqual(request.conversationID, kai.conversationID)
         XCTAssertEqual(request.personName, f.personal.owner.name)
         XCTAssertEqual(request.voice, "juniper", "A bot without a voice gets one matching its name")
         XCTAssertEqual(try f.repository.loadAgentVoice(agent), "juniper")
 
         process.callEvents?(.answer("answer-sdp"))
+        await waitUntil { peer.answers == ["answer-sdp"] }
+        XCTAssertEqual(peer.answers, ["answer-sdp"], "The voice service's answer is for the Hub's connection, not the phone")
         process.callEvents?(.started)
         process.callEvents?(.line(.init(.person, "Can you check the build?")))
+        // The phone's voice goes up the channel to the bot's voice service, and the bot's comes down it.
+        let tone = (0..<1920).map { Int16(sin(Double($0) * 2 * .pi * 440 / 48_000) * 8000) }
+        let encoder = try LinkCallEncoder()
+        for packet in try encoder.encode(tone) + encoder.encode(tone) { channel.send(LinkCallAudio.frame(packet)) }
+        await waitUntil { peer.heard.count >= 960 }
+        XCTAssertGreaterThanOrEqual(peer.heard.count, 960)
+        peer.onVoice?(tone + tone)
         var received: [LinkCallEvent] = []
+        var voice = 0
         for try await frame in channel.frames {
-            received.append(try XCTUnwrap(LinkCallEvent(frame)))
-            if received.count == 3 { break }
+            if LinkCallAudio.packet(in: frame) != nil { voice += 1 } else { received.append(try XCTUnwrap(LinkCallEvent(frame))) }
+            if received.count == 2, voice >= 3 { break }
         }
-        XCTAssertEqual(received.prefix(2), [.answer("answer-sdp"), .started])
+        XCTAssertEqual(received.first, .started)
         guard case .line(let line) = received.last else { return XCTFail("no line") }
         XCTAssertEqual(line.speaker, .you)
         XCTAssertEqual(line.text, "Can you check the build?")
@@ -548,6 +561,7 @@ import XCTest
         channel.cancel()
         await waitUntil { process.callEnds == 1 }
         XCTAssertEqual(process.callEnds, 1)
+        XCTAssertEqual(peer.closes, 1)
         await waitUntil { (try? cards().first?.call?.endedAt) != nil }
         let card = try XCTUnwrap(cards().first)
         XCTAssertNotNil(card.call?.endedAt)

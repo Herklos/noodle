@@ -1,16 +1,13 @@
+import AVFoundation
 import Foundation
 
-/// Asks the Hub to call one of the user's bots. The device captures and plays the audio itself:
-/// it goes between the device and the bot's voice service, never through the Hub, which only
-/// passes the session descriptions and what is said.
+/// Asks the Hub to call one of the user's bots. The device captures and plays the audio, which
+/// goes up and down the call's channel as `LinkCallAudio`; the Hub connects it to the bot's voice.
 public struct LinkCallStart: Codable, Equatable, Sendable {
     public var conversationID: UUID
-    /// The device's WebRTC offer.
-    public var offer: String
 
-    public init(conversationID: UUID, offer: String) {
+    public init(conversationID: UUID) {
         self.conversationID = conversationID
-        self.offer = offer
     }
 }
 
@@ -67,10 +64,8 @@ public struct LinkCallVoice: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// What comes down a call's channel, one JSON frame each. Closing the channel hangs up.
+/// What comes down a call's channel, one JSON frame each, among the audio. Closing the channel hangs up.
 public enum LinkCallEvent: Codable, Equatable, Sendable {
-    /// The voice service's WebRTC answer to the device's offer.
-    case answer(String)
     case started
     case line(LinkCallLine)
     /// The detail is nil when the call ended without an error.
@@ -84,149 +79,136 @@ public enum LinkCallEvent: Codable, Equatable, Sendable {
     }
 }
 
-/// The page that captures the microphone and plays the bot's voice on a device, in a hidden
-/// web view: WebKit gives every Noodle app WebRTC, echo cancellation and playback. `offer(processVoice)`
-/// returns the WebRTC offer, `answer(sdp)` completes the call, `stopMicrophone()` and `startMicrophone(bool)` swap it, `mute(bool)`, `chime()` and
-/// `hangUp()` do as named. Media readiness posts `{connected: true}` and a lost connection or
-/// rejected playback posts `{failed: true}` to the `call` handler.
-public enum LinkCallMedia {
-    /// A secure origin, which the microphone needs.
-    public static let baseURL = URL(string: "https://call.noodle.invalid/")
+/// A call's audio, both ways on its channel: the person's voice up, the bot's down. Each frame is
+/// one Opus packet of 20 ms at 48 kHz mono, behind a zero byte, which no JSON event starts with.
+public enum LinkCallAudio {
+    public static let sampleRate = 48_000
+    public static let frameSamples = 960
 
-    // The voice model's clock only advances while audio arrives, and WebKit stops
-    // sending on digital silence, so a faint noise floor keeps it flowing while muted.
-    public static let page = """
-    <!doctype html><html><body><audio id="voice" autoplay></audio><script>
-    let peer, microphone, source, context, gain;
-    let closed = false, microphoneGeneration = 0, audioMuted = false, playingVoice = false, reportedReady = false;
-    function failed() { if (!closed) window.webkit.messageHandlers.call.postMessage({failed: true}); }
-    function ready() {
-      if (!closed && !reportedReady && microphone && source && peer && peer.connectionState === 'connected' && playingVoice && context.state === 'running') {
-        reportedReady = true;
-        window.webkit.messageHandlers.call.postMessage({connected: true});
-      }
+    public static func frame(_ packet: Data) -> Data { Data([0]) + packet }
+
+    public static func packet(in frame: Data) -> Data? {
+        guard frame.first == 0 else { return nil }
+        return frame.dropFirst()
     }
-    async function playVoice() {
-      if (closed) return;
-      try {
-        await document.getElementById('voice').play();
-        if (closed) return;
-        playingVoice = true;
-        ready();
-      } catch { failed(); }
+
+    static let pcm = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(sampleRate), channels: 1, interleaved: true)!
+
+    static let opus: AVAudioFormat = {
+        var description = AudioStreamBasicDescription(
+            mSampleRate: Double(sampleRate), mFormatID: kAudioFormatOpus, mFormatFlags: 0, mBytesPerPacket: 0,
+            mFramesPerPacket: UInt32(frameSamples), mBytesPerFrame: 0, mChannelsPerFrame: 1, mBitsPerChannel: 0, mReserved: 0)
+        return AVAudioFormat(streamDescription: &description)!
+    }()
+}
+
+/// Turns audio, in pieces of any length, into the call's packets. Use it from one thread at a time.
+public final class LinkCallEncoder: @unchecked Sendable {
+    private let converter: AVAudioConverter
+    private var pending: [Int16] = []
+
+    public init() throws {
+        guard let converter = AVAudioConverter(from: LinkCallAudio.pcm, to: LinkCallAudio.opus) else {
+            throw LinkError("This device cannot encode call audio.")
+        }
+        converter.bitRate = 32_000
+        self.converter = converter
     }
-    // Permission requests cannot be cancelled. Stop their tracks if their call or route ended
-    // while permission was pending, rather than connecting a stale microphone to the mixer.
-    async function capture(processVoice) {
-      const generation = ++microphoneGeneration;
-      const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: processVoice, noiseSuppression: processVoice, autoGainControl: processVoice}});
-      if (closed || generation !== microphoneGeneration) {
-        stream.getTracks().forEach(track => track.stop());
-        return null;
-      }
-      return {stream, generation};
+
+    public func encode(_ samples: [Int16]) throws -> [Data] {
+        pending += samples
+        var packets: [Data] = []
+        let size = LinkCallAudio.frameSamples
+        while pending.count >= size {
+            let input = AVAudioPCMBuffer(pcmFormat: LinkCallAudio.pcm, frameCapacity: AVAudioFrameCount(size))!
+            input.frameLength = AVAudioFrameCount(size)
+            pending.withUnsafeBufferPointer { input.int16ChannelData![0].update(from: $0.baseAddress!, count: size) }
+            pending.removeFirst(size)
+            let packet = AVAudioCompressedBuffer(format: LinkCallAudio.opus, packetCapacity: 1,
+                                                 maximumPacketSize: max(converter.maximumOutputPacketSize, 1500))
+            var given = false
+            var error: NSError?
+            let status = converter.convert(to: packet, error: &error) { _, state in
+                if given { state.pointee = .noDataNow; return nil }
+                given = true
+                state.pointee = .haveData
+                return input
+            }
+            if status == .error { throw error ?? LinkError("Call audio could not be encoded.") }
+            if packet.byteLength > 0 { packets.append(Data(bytes: packet.data, count: Int(packet.byteLength))) }
+        }
+        return packets
     }
-    function useMicrophone(captured) {
-      if (!captured) return false;
-      const {stream, generation} = captured;
-      // Awaiting capture yields once more after its helper resolves. Recheck here as hangup
-      // or another route request can run between permission completion and attachment.
-      if (closed || generation !== microphoneGeneration) {
-        stream.getTracks().forEach(track => track.stop());
-        return false;
-      }
-      if (microphone) microphone.getTracks().forEach(track => track.stop());
-      if (source) source.disconnect();
-      microphone = stream;
-      source = null;
-      return true;
+}
+
+/// Turns the call's packets back into audio. Use it from one thread at a time.
+public final class LinkCallDecoder: @unchecked Sendable {
+    private let converter: AVAudioConverter
+
+    public init() throws {
+        guard let converter = AVAudioConverter(from: LinkCallAudio.opus, to: LinkCallAudio.pcm) else {
+            throw LinkError("This device cannot decode call audio.")
+        }
+        self.converter = converter
     }
-    // A device whose system cancels echo itself passes false, keeping WebKit's own voice
-    // processing, which narrows playback to a phone line, off.
-    async function offer(processVoice = true) {
-      if (!useMicrophone(await capture(processVoice))) return null;
-      context = new AudioContext();
-      // iOS pauses the context whenever the device changes its audio set-up, as on switching to
-      // the loudspeaker; paused, nothing reaches the bot, so it resumes at once.
-      context.onstatechange = () => {
-        if (!closed && (context.state === 'suspended' || context.state === 'interrupted')) context.resume().catch(failed);
-        ready();
-      };
-      await context.resume();
-      if (closed) return null;
-      const destination = context.createMediaStreamDestination();
-      gain = context.createGain();
-      gain.gain.value = audioMuted ? 0 : 1;
-      source = context.createMediaStreamSource(microphone);
-      source.connect(gain).connect(destination);
-      const noise = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
-      const samples = noise.getChannelData(0);
-      for (let i = 0; i < samples.length; i++) samples[i] = (Math.random() * 2 - 1) * 0.002;
-      const floor = context.createBufferSource();
-      floor.buffer = noise; floor.loop = true; floor.connect(destination); floor.start();
-      peer = new RTCPeerConnection();
-      destination.stream.getAudioTracks().forEach(track => peer.addTrack(track, destination.stream));
-      peer.createDataChannel('oai-events');
-      peer.ontrack = event => {
-        if (closed) return;
-        const voice = document.getElementById('voice');
-        voice.srcObject = event.streams[0];
-        playingVoice = false;
-        playVoice();
-      };
-      peer.onconnectionstatechange = () => { if (peer.connectionState === 'failed') failed(); else ready(); };
-      await peer.setLocalDescription(await peer.createOffer());
-      if (closed) return null;
-      await new Promise(resolve => {
-        if (peer.iceGatheringState === 'complete') return resolve();
-        peer.onicegatheringstatechange = () => { if (peer.iceGatheringState === 'complete') resolve(); };
-        setTimeout(resolve, 3000);
-      });
-      return closed ? null : peer.localDescription.sdp;
+
+    public func decode(_ packet: Data) throws -> [Int16] {
+        guard !packet.isEmpty else { return [] }
+        let compressed = AVAudioCompressedBuffer(format: LinkCallAudio.opus, packetCapacity: 1, maximumPacketSize: packet.count)
+        packet.withUnsafeBytes { compressed.data.copyMemory(from: $0.baseAddress!, byteCount: packet.count) }
+        compressed.byteLength = UInt32(packet.count)
+        compressed.packetCount = 1
+        compressed.packetDescriptions?.pointee = AudioStreamPacketDescription(
+            mStartOffset: 0, mVariableFramesInPacket: 0, mDataByteSize: UInt32(packet.count))
+        let output = AVAudioPCMBuffer(pcmFormat: LinkCallAudio.pcm, frameCapacity: AVAudioFrameCount(LinkCallAudio.frameSamples))!
+        var given = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, state in
+            if given { state.pointee = .noDataNow; return nil }
+            given = true
+            state.pointee = .haveData
+            return compressed
+        }
+        if status == .error { throw error ?? LinkError("Call audio could not be decoded.") }
+        return Array(UnsafeBufferPointer(start: output.int16ChannelData![0], count: Int(output.frameLength)))
     }
-    async function answer(sdp) { await peer.setRemoteDescription({type: 'answer', sdp}); }
-    // Swap the microphone for one with voice processing on or off, mid-call, in two steps so the
-    // device can change its audio set-up in between. The noise floor keeps audio flowing meanwhile.
-    function stopMicrophone() {
-      ++microphoneGeneration;
-      if (microphone) microphone.getTracks().forEach(track => track.stop());
-      if (source) source.disconnect();
-      microphone = null;
-      source = null;
+}
+
+/// The bot's voice waiting to be played. Packets arrive unevenly, so playing starts only once a
+/// cushion has built up, and again after running dry; far behind, the oldest audio goes.
+public final class LinkCallPlayout: @unchecked Sendable {
+    private let cushion: Int
+    private let limit: Int
+    private let lock = NSLock()
+    private var samples: [Int16] = []
+    private var playing = false
+
+    /// By default 60 ms of cushion and at most half a second behind.
+    public init(cushion: Int = LinkCallAudio.sampleRate * 6 / 100, limit: Int = LinkCallAudio.sampleRate / 2) {
+        self.cushion = cushion
+        self.limit = limit
     }
-    async function startMicrophone(processVoice) {
-      if (!useMicrophone(await capture(processVoice))) return;
-      source = context.createMediaStreamSource(microphone);
-      source.connect(gain);
-      if (context.state !== 'running') await context.resume();
-      if (closed) return;
-      // The device pauses the bot's voice too when it changes its audio set-up.
-      const voice = document.getElementById('voice');
-      if (voice.srcObject) await playVoice();
+
+    public func append(_ more: [Int16]) {
+        lock.withLock {
+            samples += more
+            if samples.count > limit { samples.removeFirst(samples.count - limit) }
+        }
     }
-    function mute(muted) { audioMuted = muted; if (gain) gain.gain.value = muted ? 0 : 1; }
-    // Played on the speakers, not into the call, so the bot never hears it.
-    function chime() {
-      if (closed || !context) return;
-      const start = context.currentTime;
-      [[660, 0], [880, 0.13]].forEach(([frequency, offset]) => {
-        const tone = context.createOscillator(), level = context.createGain();
-        tone.type = 'sine';
-        tone.frequency.value = frequency;
-        level.gain.setValueAtTime(0, start + offset);
-        level.gain.linearRampToValueAtTime(0.18, start + offset + 0.02);
-        level.gain.exponentialRampToValueAtTime(0.001, start + offset + 0.28);
-        tone.connect(level).connect(context.destination);
-        tone.start(start + offset);
-        tone.stop(start + offset + 0.3);
-      });
+
+    /// Fills `out`, with silence for whatever is not there yet.
+    public func read(into out: inout [Int16]) {
+        out.withUnsafeMutableBufferPointer { read(into: $0) }
     }
-    function hangUp() {
-      closed = true;
-      if (peer) peer.close();
-      stopMicrophone();
-      if (context) { context.onstatechange = null; context.close(); }
+
+    public func read(into out: UnsafeMutableBufferPointer<Int16>) {
+        lock.withLock {
+            if !playing, samples.count >= cushion { playing = true }
+            let count = playing ? min(samples.count, out.count) : 0
+            for index in 0..<count { out[index] = samples[index] }
+            for index in count..<out.count { out[index] = 0 }
+            samples.removeFirst(count)
+            if playing, samples.isEmpty, count < out.count { playing = false }
+        }
     }
-    </script></body></html>
-    """
 }

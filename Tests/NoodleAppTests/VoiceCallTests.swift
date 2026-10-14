@@ -1,7 +1,7 @@
 import Foundation
 import NoodleCore
 import HubLink
-import WebKit
+import NoodleVoicePeer
 import XCTest
 @testable import Noodle
 @testable import NoodleRuntime
@@ -23,19 +23,39 @@ import XCTest
 
 @MainActor final class VoiceCallMediaFake: VoiceCallMedia {
     var onFailure: ((String) -> Void)?
-    var offerError: Error?
-    var answers: [String] = []
+    let playout = LinkCallPlayout(cushion: 1)
+    var startError: Error?
+    var hear: (@Sendable ([Int16]) -> Void)?
     var muted: [Bool] = []
     var closed = 0
     var connectedAnnouncements = 0
-    func prepareOffer() async throws -> String {
-        if let offerError { throw offerError }
-        return "offer-sdp"
+    func start(hear: @escaping @Sendable ([Int16]) -> Void) async throws {
+        if let startError { throw startError }
+        self.hear = hear
     }
-    func accept(answer: String) async throws { answers.append(answer) }
     func setMuted(_ muted: Bool) { self.muted.append(muted) }
     func close() { closed += 1 }
     func announceConnected() { connectedAnnouncements += 1 }
+    func played(_ count: Int) -> [Int16] {
+        var out = [Int16](repeating: 0, count: count)
+        playout.read(into: &out)
+        return out
+    }
+}
+
+/// Stands in for a call's WebRTC connection to the voice service.
+final class VoiceCallPeerFake: VoiceCallPeering, @unchecked Sendable {
+    var onVoice: (@Sendable ([Int16]) -> Void)?
+    var onFailure: (@MainActor @Sendable () -> Void)?
+    private let lock = NSLock()
+    private var _heard: [Int16] = []
+    private(set) var answers: [String] = []
+    private(set) var closes = 0
+    var heard: [Int16] { lock.withLock { _heard } }
+    func makeOffer() async throws -> String { "peer-offer" }
+    func accept(answer: String) async throws { answers.append(answer) }
+    func hear(_ samples: [Int16]) { lock.withLock { _heard += samples } }
+    func close() { closes += 1 }
 }
 
 @MainActor final class VoiceGuesserFake: VoicePresentationGuessing {
@@ -44,13 +64,19 @@ import XCTest
     func presentation(forName name: String) async -> VoicePresentation? { answers?[name] }
 }
 
-@MainActor final class VoiceCallChannelFake: VoiceCallChannel {
+final class VoiceCallChannelFake: VoiceCallChannel, @unchecked Sendable {
     let frames: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
-    var cancelled = 0
+    private let lock = NSLock()
+    private var _sent: [Data] = []
+    private var _cancelled = 0
+    var sent: [Data] { lock.withLock { _sent } }
+    var cancelled: Int { lock.withLock { _cancelled } }
     init() { (frames, continuation) = AsyncThrowingStream.makeStream() }
     func push(_ event: LinkCallEvent) { continuation.yield(event.encoded) }
-    nonisolated func cancel() { MainActor.assumeIsolated { cancelled += 1; continuation.finish(throwing: CancellationError()) } }
+    func push(audio frame: Data) { continuation.yield(frame) }
+    func send(_ payload: Data) { lock.withLock { _sent.append(payload) } }
+    func cancel() { lock.withLock { _cancelled += 1 }; continuation.finish(throwing: CancellationError()) }
 }
 
 private struct FixtureError: LocalizedError {
@@ -61,11 +87,17 @@ private struct FixtureError: LocalizedError {
 @MainActor final class VoiceCallTests: XCTestCase {
     private var runtime = VoiceCallRuntimeFake()
     private var media: [VoiceCallMediaFake] = []
+    private var peers: [VoiceCallPeerFake] = []
     private var reports: [String] = []
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
 
+    private func router() -> VoiceCallRouter {
+        VoiceCallRouter(local: runtime, isOnHub: { _ in false }, openHubCall: { _, _ in VoiceCallChannelFake() },
+                        makePeer: { [unowned self] in let next = VoiceCallPeerFake(); peers.append(next); return next })
+    }
+
     private func controller() -> VoiceCallController {
-        VoiceCallController(runtime: runtime, makeMedia: { [unowned self] in
+        VoiceCallController(router: router(), makeMedia: { [unowned self] in
             let next = VoiceCallMediaFake(); media.append(next); return next
         }, report: { [unowned self] in reports.append($0) }, now: { [date] in date })
     }
@@ -74,6 +106,8 @@ private struct FixtureError: LocalizedError {
         XCTAssertTrue(predicate())
     }
 
+    /// A bot on this Mac: the call's own WebRTC connection makes the offer and takes the answer,
+    /// the microphone's audio goes to it and its voice to the speakers.
     func testCallConnectsThroughMediaAndRuntimeAndShowsSpokenLines() async throws {
         let calls = controller(), agentID = UUID(), conversationID = UUID()
         calls.start(agentID: agentID, conversationID: conversationID, voice: "cove", personName: "Alex",
@@ -83,15 +117,21 @@ private struct FixtureError: LocalizedError {
         try await wait { runtime.requests.count == 1 }
         let request = try XCTUnwrap(runtime.requests.first)
         XCTAssertEqual(request.agentID, agentID)
-        XCTAssertEqual(request.request.offer, "offer-sdp")
+        XCTAssertEqual(request.request.offer, "peer-offer")
         XCTAssertEqual(request.request.voice, "cove")
         XCTAssertEqual(request.request.conversationID, conversationID)
         XCTAssertEqual(request.request.personName, "Alex")
         XCTAssertEqual(request.request.recentLines, [.init(.person, "Hello")])
 
         runtime.events?(.answer("answer-sdp"))
-        try await wait { media.first?.answers == ["answer-sdp"] }
+        try await wait { peers.first?.answers == ["answer-sdp"] }
         XCTAssertEqual(media.first?.connectedAnnouncements, 0)
+        try await wait { media.first?.hear != nil }
+        media.first?.hear?([1, 2, 3])
+        try await wait { peers.first?.heard == [1, 2, 3] }
+        XCTAssertEqual(peers.first?.heard, [1, 2, 3])
+        peers.first?.onVoice?([5, 6])
+        XCTAssertEqual(media.first?.played(2), [5, 6])
         runtime.events?(.started)
         runtime.events?(.started)
         XCTAssertEqual(media.first?.connectedAnnouncements, 1)
@@ -113,6 +153,7 @@ private struct FixtureError: LocalizedError {
         XCTAssertNil(calls.call)
         XCTAssertEqual(runtime.ended, [agentID])
         XCTAssertEqual(media.first?.closed, 1)
+        XCTAssertEqual(peers.first?.closes, 1)
         runtime.events?(.ended(nil))
         XCTAssertEqual(reports, [])
     }
@@ -142,8 +183,8 @@ private struct FixtureError: LocalizedError {
     }
 
     func testMicrophoneFailureNeverStartsTheRuntimeSide() async throws {
-        let calls = VoiceCallController(runtime: runtime, makeMedia: { [unowned self] in
-            let next = VoiceCallMediaFake(); next.offerError = FixtureError("Microphone access is off."); media.append(next); return next
+        let calls = VoiceCallController(router: router(), makeMedia: { [unowned self] in
+            let next = VoiceCallMediaFake(); next.startError = FixtureError("Microphone access is off."); media.append(next); return next
         }, report: { [unowned self] in reports.append($0) }, now: { [date] in date })
         calls.start(agentID: UUID(), conversationID: UUID(), voice: "cove", personName: "Alex", recentLines: [])
         try await wait { calls.call == nil }
@@ -183,6 +224,7 @@ private struct FixtureError: LocalizedError {
             publicDescription: "", backstory: "", voice: .some("maple")))
         XCTAssertEqual(f.store.voice(for: f.a), "maple")
         let process = try f.runtime.start(f.a)
+        f.store.makeCallPeer = { VoiceCallPeerFake() }
         f.store.startVoiceCall(in: f.directA, media: VoiceCallMediaFake())
         try await wait { process.voiceCallRequests.count == 1 }
         XCTAssertEqual(process.voiceCallRequests.first?.voice, "maple")
@@ -198,6 +240,7 @@ private struct FixtureError: LocalizedError {
         XCTAssertNil(noVoices)
 
         let process = try f.runtime.start(f.a)
+        f.store.makeCallPeer = { VoiceCallPeerFake() }
         XCTAssertNil(f.store.voice(for: f.a))
         f.store.startVoiceCall(in: f.directA, media: VoiceCallMediaFake())
         try await wait { process.voiceCallRequests.count == 1 }
@@ -258,25 +301,41 @@ private struct FixtureError: LocalizedError {
         XCTAssertEqual(live[card.id], nil)
     }
 
+    /// A bot on a Hub is called through it: the Hub holds the voice connection, and the audio
+    /// goes over the link both ways. A bot here gets its own connection.
     func testCallsToABotOnAHubGoThroughTheHubAndOthersToTheirRuntime() async throws {
         let hubBot = UUID(), localBot = UUID(), channel = VoiceCallChannelFake()
-        var opened: [(UUID, VoiceCallRequest)] = []
-        let router = VoiceCallRouter(local: runtime, isOnHub: { $0 == hubBot }, openHubCall: { agent, request in
-            opened.append((agent, request))
+        var opened: [(UUID, VoiceCallSetup)] = []
+        let router = VoiceCallRouter(local: runtime, isOnHub: { $0 == hubBot }, openHubCall: { agent, setup in
+            opened.append((agent, setup))
             return channel
-        })
+        }, makePeer: { [unowned self] in let next = VoiceCallPeerFake(); peers.append(next); return next })
         var events: [VoiceCallEvent] = []
-        let request = VoiceCallRequest(offer: "offer-sdp", voice: nil, conversationID: UUID(), personName: "Alex")
-        try router.startVoiceCall(agentID: hubBot, request) { events.append($0) }
-        try await wait { opened.count == 1 }
-        XCTAssertEqual(opened.first?.1.offer, "offer-sdp")
+        let setup = VoiceCallSetup(voice: nil, conversationID: UUID(), personName: "Alex")
+        let playout = LinkCallPlayout(cushion: 1)
+        let send = try await router.startVoiceCall(agentID: hubBot, setup, playout: playout) { events.append($0) }
+        XCTAssertEqual(opened.first?.1, setup)
         XCTAssertTrue(runtime.requests.isEmpty)
+        XCTAssertTrue(peers.isEmpty, "The Hub holds the connection")
 
-        channel.push(.answer("answer-sdp"))
         channel.push(.started)
         channel.push(.line(LinkCallLine(speaker: .you, text: "Hi", at: date)))
-        try await wait { events.count == 3 }
-        XCTAssertEqual(events, [.answer("answer-sdp"), .started, .line(.init(.person, "Hi", at: date))])
+        let tone = (0..<960).map { Int16(sin(Double($0) * 2 * .pi * 440 / 48_000) * 8000) }
+        let encoder = try LinkCallEncoder()
+        for packet in try encoder.encode(tone + tone + tone) { channel.push(audio: LinkCallAudio.frame(packet)) }
+        try await wait { events.count == 2 }
+        XCTAssertEqual(events, [.started, .line(.init(.person, "Hi", at: date))])
+        var played = [Int16](repeating: 0, count: 960)
+        for _ in 0..<200 {
+            playout.read(into: &played)
+            if played.contains(where: { $0 != 0 }) { break }
+            await Task.yield()
+        }
+        XCTAssertTrue(played.contains { abs(Int($0)) > 1000 }, "The bot's voice reaches the speakers")
+
+        send(tone + tone)
+        XCTAssertFalse(channel.sent.isEmpty)
+        XCTAssertTrue(channel.sent.allSatisfy { LinkCallAudio.packet(in: $0) != nil }, "The person's voice goes up as audio frames")
 
         // The Hub hears typed messages from the conversation itself.
         router.sendToVoiceCall(agentID: hubBot, "typed")
@@ -285,23 +344,19 @@ private struct FixtureError: LocalizedError {
         XCTAssertEqual(channel.cancelled, 1)
         XCTAssertEqual(runtime.ended, [])
 
-        try router.startVoiceCall(agentID: localBot, request) { _ in }
+        _ = try await router.startVoiceCall(agentID: localBot, setup, playout: playout) { _ in }
+        XCTAssertEqual(runtime.requests.map(\.request.offer), ["peer-offer"])
         router.sendToVoiceCall(agentID: localBot, "typed")
         router.endVoiceCall(agentID: localBot)
         XCTAssertEqual(runtime.requests.map(\.agentID), [localBot])
         XCTAssertEqual(runtime.sent, ["typed"])
         XCTAssertEqual(runtime.ended, [localBot])
+        XCTAssertEqual(peers.first?.closes, 1)
     }
 
     func testCallTimeKeepsOneWidthUntilAnHour() {
         XCTAssertEqual([0, 5, 65, 599, 3599, 3725].map { VoiceCallTimer.format(TimeInterval($0)) },
                        ["00:00", "00:05", "01:05", "09:59", "59:59", "1:02:05"])
-    }
-
-    func testWebKitCallsTheMicrophoneDecision() {
-        // A completion-handler form can silently stop matching the selector, leaving WebKit to deny capture.
-        XCTAssertTrue(WebRTCVoiceCallMedia().responds(
-            to: NSSelectorFromString("webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:")))
     }
 
     func testCallsAreOfferedForRunningDirectBotsAndCarryTheConversation() async throws {
@@ -313,6 +368,7 @@ private struct FixtureError: LocalizedError {
         XCTAssertNil(f.store.voiceCallTarget(for: try f.group()))
         XCTAssertTrue(f.runtime.factory.processes.isEmpty)
 
+        f.store.makeCallPeer = { VoiceCallPeerFake() }
         f.store.setDraft("Earlier question", for: f.directA.id)
         f.store.sendDraft(to: f.directA.id)
         let fake = VoiceCallMediaFake()
@@ -335,6 +391,7 @@ private struct FixtureError: LocalizedError {
         let f = try StoreFixture()
         addTeardownBlock { @MainActor in f.cleanUp() }
         f.store.voiceGuesser = VoiceGuesserFake(nil)
+        f.store.makeCallPeer = { VoiceCallPeerFake() }
         f.store.toggleVoiceCall(in: try f.group().id)
         f.store.toggleVoiceCall(in: nil)
         XCTAssertNil(f.store.voiceCalls.call)
@@ -353,6 +410,7 @@ private struct FixtureError: LocalizedError {
         addTeardownBlock { @MainActor in f.cleanUp() }
         let process = try f.runtime.start(f.a)
         f.store.voiceGuesser = VoiceGuesserFake(nil)
+        f.store.makeCallPeer = { VoiceCallPeerFake() }
         func callMessages() -> [ChatMessage] { f.store.messages(for: f.directA).filter { $0.call != nil } }
 
         // A call that never connects leaves nothing behind.

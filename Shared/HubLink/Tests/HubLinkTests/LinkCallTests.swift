@@ -5,14 +5,14 @@ import XCTest
 final class LinkCallTests: XCTestCase {
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
 
-    func testACallStartsWithItsOfferAndItsEventsTravelTheChannel() throws {
-        let start = LinkCallStart(conversationID: UUID(), offer: "v=0 offer")
+    func testACallStartsWithItsConversationAndItsEventsTravelTheChannel() throws {
+        let start = LinkCallStart(conversationID: UUID())
         guard case .success(.startCall(let decoded)) = LinkProtocol.decode(try LinkProtocol.encode(.startCall(start))) else {
             return XCTFail("The request did not survive the link")
         }
         XCTAssertEqual(decoded, start)
 
-        let events: [LinkCallEvent] = [.answer("v=0 answer"), .started, .line(LinkCallLine(speaker: .you, text: "Hi", at: date)),
+        let events: [LinkCallEvent] = [.started, .line(LinkCallLine(speaker: .you, text: "Hi", at: date)),
                                        .line(LinkCallLine(speaker: .bot, text: "Hello", at: nil)), .ended(nil), .ended("The bot stopped.")]
         for event in events { XCTAssertEqual(LinkCallEvent(event.encoded), event) }
         XCTAssertNil(LinkCallEvent(Data("not json".utf8)))

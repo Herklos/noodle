@@ -6,6 +6,7 @@ import ImageIO
 import HubLink
 import NoodleCore
 import NoodleRuntime
+import NoodleVoicePeer
 
 /// Bots paired devices keep on the Hub. Each belongs to one user, runs on a harness that
 /// user's plan lends, and talks with that user, alone or in groups of their bots, and with
@@ -918,11 +919,13 @@ import NoodleRuntime
     private final class Call {
         let agentID: UUID
         let conversationID: UUID
+        let peer: any VoiceCallPeering
         var cardID: UUID?
         var lines: [VoiceCallLine] = []
-        init(agentID: UUID, conversationID: UUID) {
+        init(agentID: UUID, conversationID: UUID, peer: any VoiceCallPeering) {
             self.agentID = agentID
             self.conversationID = conversationID
+            self.peer = peer
         }
     }
 
@@ -930,12 +933,16 @@ import NoodleRuntime
     private var calls: [UUID: Call] = [:]
     /// Picks a voice for a bot without one from its name; tests pass their own.
     public var voiceGuesser: any VoicePresentationGuessing = AppleVoicePresentationGuesser()
+    /// Connects a call to the bot's voice service; tests pass their own.
+    public var makeCallPeer: @MainActor () -> any VoiceCallPeering = { VoiceCallPeer() }
 
     /// Starts a call with the bot of one of the user's conversations: their own bot, or one shared
     /// with them, who calls it as they talk with it, on its owner's plan. The bot need not be
-    /// running. `send` gets what the device needs, ending with `ended`; the returned closure hangs up.
-    public func startCall(_ start: LinkCallStart, for user: HubUser,
-                          send: @escaping @MainActor (LinkCallEvent) -> Void) async throws -> @MainActor () -> Void {
+    /// running. The Hub holds the call's connection to the bot's voice: the device's audio frames go
+    /// to the returned call's `hear`, and the bot's come back through `sendAudio`. `send` gets the
+    /// events, ending with `ended`.
+    public func startCall(_ start: LinkCallStart, for user: HubUser, send: @escaping @MainActor (LinkCallEvent) -> Void,
+                          sendAudio: @escaping @Sendable (Data) -> Void) async throws -> HubCall {
         let (conversation, bots) = try ownedConversation(start.conversationID, by: user)
         guard conversation.kind == .direct, let agent = bots.first, agent.archivedAt == nil,
               agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.voices.isEmpty == false else {
@@ -960,17 +967,27 @@ import NoodleRuntime
         let voice = await BotVoice.forCall(agent, repository: repository, guesser: voiceGuesser)
         if let previous = calls[conversation.id] { finish(previous, failure: nil, hangingUp: true) }
         runtime.start(agent: agent, repository: repository)
-        let call = Call(agentID: agent.id, conversationID: conversation.id)
+        let peer = makeCallPeer()
+        let audio = try HubCallAudio(peer: peer, send: sendAudio)
+        let call = Call(agentID: agent.id, conversationID: conversation.id, peer: peer)
         calls[conversation.id] = call
+        peer.onFailure = { [weak self, weak call] in
+            guard let self, let call, self.calls[call.conversationID] === call else { return }
+            let lost = "The call connection was lost."
+            self.finish(call, failure: lost, hangingUp: true)
+            send(.ended(lost))
+        }
         do {
-            try runtime.startVoiceCall(agentID: agent.id, VoiceCallRequest(
-                offer: start.offer, voice: voice, conversationID: conversation.id,
-                personName: user.name, recentLines: Array(recentLines)
-            )) { [weak self, weak call] event in
+            try await peer.place({ [runtime] offer, events in
+                try runtime.startVoiceCall(agentID: agent.id, VoiceCallRequest(
+                    offer: offer, voice: voice, conversationID: conversation.id,
+                    personName: user.name, recentLines: Array(recentLines)
+                ), events: events)
+            }) { [weak self, weak call] event in
                 guard let self, let call, self.calls[call.conversationID] === call else { return }
                 switch event {
-                case .answer(let sdp):
-                    send(.answer(sdp))
+                case .answer:
+                    break
                 case .started:
                     // Only a call that connected gets its card in the conversation.
                     if call.cardID == nil {
@@ -988,10 +1005,11 @@ import NoodleRuntime
                 }
             }
         } catch {
-            calls[conversation.id] = nil
+            if calls[conversation.id] === call { calls[conversation.id] = nil }
+            peer.close()
             throw error
         }
-        return { [weak self, weak call] in
+        return HubCall(hear: audio.receive) { [weak self, weak call] in
             guard let self, let call, self.calls[call.conversationID] === call else { return }
             self.finish(call, failure: nil, hangingUp: true)
         }
@@ -999,6 +1017,8 @@ import NoodleRuntime
 
     private func finish(_ call: Call, failure: String?, hangingUp: Bool) {
         calls[call.conversationID] = nil
+        call.peer.onFailure = nil
+        call.peer.close()
         if hangingUp { runtime.endVoiceCall(agentID: call.agentID) }
         guard let cardID = call.cardID,
               let card = try? repository.finishVoiceCall(messageID: cardID, conversationID: call.conversationID,
@@ -1583,5 +1603,34 @@ enum AttachmentPreview {
         else { return nil }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
         return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+}
+
+/// A call the Hub holds for a device.
+public struct HubCall: Sendable {
+    /// Takes the frames the device sends up the call's channel.
+    public let hear: @Sendable (Data) -> Void
+    public let hangUp: @MainActor () -> Void
+}
+
+/// Carries a call's audio between the device, as packets on the call's channel, and the bot's
+/// voice. Frames come in one at a time from the channel and the voice from the peer's own thread,
+/// so each direction has its own codec.
+final class HubCallAudio: @unchecked Sendable {
+    private let peer: any VoiceCallPeering
+    private let decoder: LinkCallDecoder
+
+    init(peer: any VoiceCallPeering, send: @escaping @Sendable (Data) -> Void) throws {
+        self.peer = peer
+        decoder = try LinkCallDecoder()
+        let encoder = try LinkCallEncoder()
+        peer.onVoice = { samples in
+            for packet in (try? encoder.encode(samples)) ?? [] { send(LinkCallAudio.frame(packet)) }
+        }
+    }
+
+    func receive(_ frame: Data) {
+        guard let packet = LinkCallAudio.packet(in: frame), let samples = try? decoder.decode(packet) else { return }
+        peer.hear(samples)
     }
 }

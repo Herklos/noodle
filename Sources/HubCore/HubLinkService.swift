@@ -252,13 +252,17 @@ import os
                 // Starting the bot and the call can outlast a request, so the channel opens first
                 // and anything that then goes wrong comes down it as the call ending.
                 return .stream { stream in
+                    // The device may send audio before the call is ready; until then it goes nowhere.
+                    let heard = CallFrames()
+                    stream.onFrame { heard.receive($0) }
                     Task { @MainActor in
                         do {
-                            let hangUp = try await bots.startCall(start, for: user) { event in
+                            let call = try await bots.startCall(start, for: user, send: { event in
                                 stream.send(event.encoded)
                                 if case .ended = event { stream.close() }
-                            }
-                            stream.onClose { Task { @MainActor in hangUp() } }
+                            }, sendAudio: { stream.send($0) })
+                            heard.connect(call.hear)
+                            stream.onClose { Task { @MainActor in call.hangUp() } }
                         } catch {
                             stream.send(LinkCallEvent.ended(error.localizedDescription).encoded)
                             stream.close()
@@ -1063,4 +1067,13 @@ public protocol HubPushPublisher: Sendable {
     func publish(topic: String, conversation: UUID, unread: Int) async throws
     /// The replies were read: nothing more to show.
     func withdraw(topic: String, conversation: UUID) async throws
+}
+
+/// Where a call's incoming frames go, once the call is ready for them.
+private final class CallFrames: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hear: (@Sendable (Data) -> Void)?
+
+    func connect(_ hear: @escaping @Sendable (Data) -> Void) { lock.withLock { self.hear = hear } }
+    func receive(_ frame: Data) { lock.withLock { hear }?(frame) }
 }

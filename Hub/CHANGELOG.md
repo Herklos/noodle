@@ -9,6 +9,7 @@
 
 ### Changed
 
+- The Hub connects calls to the bot's voice itself, and Macs and iPhones send and receive a call's audio over their Hub connection. Calling needs the Noodle and iPhone app updates released alongside.
 - Bots on the Hub know their own name and description, not just their backstory.
 
 ## [0.33.0] - 2026-10-14

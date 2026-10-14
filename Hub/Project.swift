@@ -56,6 +56,8 @@ let trimSparkle: TargetScript = .post(script: """
     done
     cp -f "$packages/SourcePackages/checkouts/Sparkle/LICENSE" \
        "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Sparkle-LICENSE.txt"
+    cp -f "$packages/SourcePackages/checkouts/webrtc-xcframework/LICENSE" \
+       "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/webrtc-xcframework-LICENSE.txt"
     """, name: "Trim Sparkle", basedOnDependencyAnalysis: false)
 
 /// A command-line helper the app runs from Contents/Helpers.

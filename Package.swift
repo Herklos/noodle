@@ -55,6 +55,7 @@ let package = Package(
         .library(name: "NoodleMCP", targets: ["NoodleMCP"]),
         .library(name: "NoodleSharing", targets: ["NoodleSharing"]),
         .library(name: "NoodleAudioCapture", targets: ["NoodleAudioCapture"]),
+        .library(name: "NoodleVoicePeer", targets: ["NoodleVoicePeer"]),
         .library(name: "NoodleBrowserTools", targets: ["NoodleBrowserTools"]),
         .library(name: "NoodleAppletTools", targets: ["NoodleAppletTools"]),
         .library(name: "NoodleCalendarTools", targets: ["NoodleCalendarTools"]),
@@ -81,7 +82,9 @@ let package = Package(
         // Stable Diffusion XL in MLX, for the Images tool. Not released as a version.
         .package(url: "https://github.com/ml-explore/mlx-swift-examples", revision: "378f2449c257788c5067b9f8b086731d76b39b33"),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.4"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk", exact: "0.12.1")
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk", exact: "0.12.1"),
+        // WebRTC for calls, built with a custom audio device, which Google's own Apple builds lack on macOS.
+        .package(url: "https://github.com/livekit/webrtc-xcframework", exact: "150.7871.03")
     ],
     targets: [
         .target(name: "NoodleAgentBridge"),
@@ -110,8 +113,10 @@ let package = Package(
                 swiftSettings: developmentHooks),
         /// The Harness, Heartbeat and Sandbox settings, shared by the apps that run bots.
         .target(name: "NoodleHubClient", dependencies: ["NoodleCore", .product(name: "HubLink", package: "HubLink")]),
+        /// Calls' WebRTC connection to a harness's voice service, fed and played by whoever holds the call.
+        .target(name: "NoodleVoicePeer", dependencies: ["NoodleCore", .product(name: "LiveKitWebRTC", package: "webrtc-xcframework")]),
         /// What serves paired devices: Noodle Hub for the people it lends to, and Noodle for its own owner.
-        .target(name: "HubCore", dependencies: ["NoodleCore", "NoodleRuntime", "NoodleMCP", "NoodleAppletTools", "NoodleComputerTools", "NoodleBrowserTools", "NoodleImagesTools",
+        .target(name: "HubCore", dependencies: ["NoodleCore", "NoodleRuntime", "NoodleVoicePeer", "NoodleMCP", "NoodleAppletTools", "NoodleComputerTools", "NoodleBrowserTools", "NoodleImagesTools",
                                                 .product(name: "ComputerBridge", package: "Bridge"),
                                                 .product(name: "BrowserBridge", package: "BrowserProtocol"),
                                                 .product(name: "AppletBridge", package: "Protocol"),
@@ -130,7 +135,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Noodle",
-            dependencies: [.product(name: "BrowserBridge", package: "BrowserProtocol"), "NoodleCore", "NoodleAppletTools", "NoodleBrowserTools", "NoodleCalendarTools", "NoodleComputerTools", "NoodleImagesTools", "NoodleRemindersTools", "NoodleMCP", "NoodleSharing", "NoodleRuntime", "NoodleRuntimeSettings", "NoodleAgentBridge", "NoodleAudioCapture", "HubCore", .product(name: "NoodleLaunchChecks", package: "LaunchChecks"), .product(name: "NoodleSettingsUI", package: "SettingsUI"), .product(name: "NoodleWallpaper", package: "Wallpaper"), .product(name: "NoodleBrand", package: "Brand"), .product(name: "Sparkle", package: "Sparkle"), .product(name: "ComputerBridge", package: "Bridge"), .product(name: "HubLink", package: "HubLink"), "NoodleHubClient", .product(name: "NoodletRuntime", package: "Protocol")],
+            dependencies: [.product(name: "BrowserBridge", package: "BrowserProtocol"), "NoodleCore", "NoodleAppletTools", "NoodleBrowserTools", "NoodleCalendarTools", "NoodleComputerTools", "NoodleImagesTools", "NoodleRemindersTools", "NoodleMCP", "NoodleSharing", "NoodleRuntime", "NoodleRuntimeSettings", "NoodleAgentBridge", "NoodleAudioCapture", "NoodleVoicePeer", "HubCore", .product(name: "NoodleLaunchChecks", package: "LaunchChecks"), .product(name: "NoodleSettingsUI", package: "SettingsUI"), .product(name: "NoodleWallpaper", package: "Wallpaper"), .product(name: "NoodleBrand", package: "Brand"), .product(name: "Sparkle", package: "Sparkle"), .product(name: "ComputerBridge", package: "Bridge"), .product(name: "HubLink", package: "HubLink"), "NoodleHubClient", .product(name: "NoodletRuntime", package: "Protocol")],
             swiftSettings: [
                 .unsafeFlags([
                     "-emit-const-values",
@@ -154,7 +159,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NoodleAppTests",
-            dependencies: ["Noodle", "NoodleCore", "NoodleRuntime", "NoodleRuntimeSettings", "NoodleMCP", "NoodleAudioCapture", .product(name: "NoodleLaunchChecks", package: "LaunchChecks"), .product(name: "HubLink", package: "HubLink"), "NoodleHubClient", "HubCore", .product(name: "NoodleBrand", package: "Brand"), .product(name: "NoodletRuntime", package: "Protocol")],
+            dependencies: ["Noodle", "NoodleCore", "NoodleRuntime", "NoodleVoicePeer", "NoodleRuntimeSettings", "NoodleMCP", "NoodleAudioCapture", .product(name: "NoodleLaunchChecks", package: "LaunchChecks"), .product(name: "HubLink", package: "HubLink"), "NoodleHubClient", "HubCore", .product(name: "NoodleBrand", package: "Brand"), .product(name: "NoodletRuntime", package: "Protocol")],
             swiftSettings: developmentHooks
         ),
         .testTarget(
@@ -169,7 +174,7 @@ let package = Package(
         .testTarget(name: "NoodleAgentBridgeTests", dependencies: ["NoodleAgentBridge"]),
         .testTarget(
             name: "HubCoreTests",
-            dependencies: ["HubCore", "NoodleCore", "NoodleHubClient", "NoodleMCP", "NoodleRuntime", .product(name: "HubLink", package: "HubLink"),
+            dependencies: ["HubCore", "NoodleCore", "NoodleHubClient", "NoodleMCP", "NoodleRuntime", "NoodleVoicePeer", .product(name: "HubLink", package: "HubLink"),
                            .product(name: "ComputerBridge", package: "Bridge"), .product(name: "BrowserBridge", package: "BrowserProtocol"),
                            .product(name: "AppletBridge", package: "Protocol")]
         ),

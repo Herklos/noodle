@@ -854,7 +854,8 @@ import XCTest
         XCTAssertTrue(theirs.canCall)
         XCTAssertNotEqual(theirs.conversationID, made.conversationID)
 
-        let channel = try await grace.device.channel(.startCall(LinkCallStart(conversationID: theirs.conversationID, offer: "offer-sdp")))
+        f.hub.bots.makeCallPeer = { FakeCallPeer() }
+        let channel = try await grace.device.channel(.startCall(LinkCallStart(conversationID: theirs.conversationID)))
         await waitUntil { processes().last?.callRequests.count == 1 }
         let process = try XCTUnwrap(processes().last)
         let request = try XCTUnwrap(process.callRequests.first)

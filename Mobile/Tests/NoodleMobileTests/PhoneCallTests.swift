@@ -3,40 +3,58 @@ import HubLink
 @testable import NoodleMobile
 import Testing
 
-@MainActor final class CallChannelFake: CallChannel {
+final class CallChannelFake: CallChannel, @unchecked Sendable {
     let frames: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
-    var cancelled = 0
+    private let lock = NSLock()
+    private var _sent: [Data] = []
+    private var _cancelled = 0
+    var sent: [Data] { lock.withLock { _sent } }
+    var cancelled: Int { lock.withLock { _cancelled } }
     init() { (frames, continuation) = AsyncThrowingStream.makeStream() }
     func push(_ event: LinkCallEvent) { continuation.yield(event.encoded) }
-    nonisolated func cancel() { MainActor.assumeIsolated { cancelled += 1; continuation.finish(throwing: CancellationError()) } }
+    func push(audio frame: Data) { continuation.yield(frame) }
+    func send(_ payload: Data) { lock.withLock { _sent.append(payload) } }
+    func cancel() { lock.withLock { _cancelled += 1 }; continuation.finish(throwing: CancellationError()) }
 }
 
 @MainActor final class CallAudioFake: CallAudio {
     var onFailure: ((String) -> Void)?
-    var onConnected: (() -> Void)?
-    var connectsOnAnswer = true
-    var onAnswer: (() -> Void)?
-    var offerError: Error?
-    var answers: [String] = []
+    let playout = LinkCallPlayout(cushion: 1)
+    var startError: Error?
+    var hear: (@Sendable ([Int16]) -> Void)?
+    var sessionActive: [Bool] = []
     var muted: [Bool] = []
     var speaker: [Bool] = []
     var chimes = 0
     var closed = 0
-    var onClose: (() -> Void)?
-    func prepareOffer() async throws -> String {
-        if let offerError { throw offerError }
-        return "offer-sdp"
-    }
-    func accept(answer: String) async throws {
-        answers.append(answer)
-        if connectsOnAnswer { onConnected?() }
-        onAnswer?()
+    func start(sessionActive: Bool, hear: @escaping @Sendable ([Int16]) -> Void) async throws {
+        if let startError { throw startError }
+        self.sessionActive.append(sessionActive)
+        self.hear = hear
     }
     func setMuted(_ muted: Bool) { self.muted.append(muted) }
     func setSpeaker(_ on: Bool) { speaker.append(on) }
     func announceConnected() { chimes += 1 }
-    func close() { closed += 1; onClose?() }
+    func close() { closed += 1 }
+}
+
+@MainActor final class SystemCallsFake: SystemCalls {
+    var onEnd: ((UUID) -> Void)?
+    var onMute: ((UUID, Bool) -> Void)?
+    var beginError: Error?
+    var begun: [(UUID, String)] = []
+    var connected: [UUID] = []
+    var muted: [Bool] = []
+    var ended: [UUID] = []
+    func begin(_ id: UUID, name: String) async throws -> Bool {
+        if let beginError { throw beginError }
+        begun.append((id, name))
+        return true
+    }
+    func connected(_ id: UUID) { connected.append(id) }
+    func setMuted(_ id: UUID, _ muted: Bool) { self.muted.append(muted) }
+    func end(_ id: UUID) { ended.append(id) }
 }
 
 private struct Failure: LocalizedError {
@@ -47,33 +65,51 @@ private struct Failure: LocalizedError {
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func wait(_ condition: () -> Bool) async {
-        for _ in 0..<200 where !condition() { await Task.yield() }
+        for _ in 0..<500 where !condition() { await Task.yield() }
     }
 
+    private var tone: [Int16] { (0..<960).map { Int16(sin(Double($0) * 2 * .pi * 440 / 48_000) * 8000) } }
+
+    /// The phone's audio goes up the call's channel and the bot's comes down it; the Hub holds the
+    /// connection to the bot's voice. The call is on the phone's call screen throughout.
     @Test func aCallConnectsThroughTheHubAndEndsWhenEitherSideHangsUp() async throws {
-        let channel = CallChannelFake(), audio = CallAudioFake()
+        let channel = CallChannelFake(), audio = CallAudioFake(), system = SystemCallsFake()
         var opened: [LinkCallStart] = []
-        let calls = PhoneCalls(open: { opened.append($0); return channel }, makeAudio: { audio }, now: { [date] in date })
+        let calls = PhoneCalls(open: { opened.append($0); return channel }, makeAudio: { audio }, system: system, now: { [date] in date })
         let thread = UUID(), conversation = UUID()
-        calls.start(threadID: thread, conversationID: conversation)
+        calls.start(threadID: thread, conversationID: conversation, name: "Kai")
         #expect(calls.call?.threadID == thread)
         #expect(calls.call?.startedAt == nil)
         await wait { opened.count == 1 }
-        #expect(opened == [LinkCallStart(conversationID: conversation, offer: "offer-sdp")])
+        #expect(opened == [LinkCallStart(conversationID: conversation)])
+        #expect(system.begun.map(\.1) == ["Kai"])
+        #expect(audio.sessionActive == [true], "The call screen activates the audio session, not the app")
 
-        channel.push(.answer("answer-sdp"))
-        await wait { audio.answers == ["answer-sdp"] }
-        #expect(audio.answers == ["answer-sdp"])
         channel.push(.started)
         channel.push(.line(LinkCallLine(speaker: .bot, text: "Hello", at: date)))
         await wait { calls.call?.lines.count == 1 }
         #expect(calls.call?.startedAt == date)
         #expect(audio.chimes == 1)
+        #expect(system.connected == [calls.call?.id].compactMap { $0 })
         #expect(calls.call?.lines.map(\.text) == ["Hello"])
+
+        let encoder = try LinkCallEncoder()
+        for packet in try encoder.encode(tone + tone + tone) { channel.push(audio: LinkCallAudio.frame(packet)) }
+        var played = [Int16](repeating: 0, count: 960)
+        for _ in 0..<500 {
+            audio.playout.read(into: &played)
+            if played.contains(where: { abs(Int($0)) > 1000 }) { break }
+            await Task.yield()
+        }
+        #expect(played.contains { abs(Int($0)) > 1000 }, "The bot's voice reaches the speaker")
+        audio.hear?(tone + tone)
+        #expect(!channel.sent.isEmpty)
+        #expect(channel.sent.allSatisfy { LinkCallAudio.packet(in: $0) != nil }, "The phone's voice goes up as audio frames")
 
         calls.toggleMute()
         #expect(calls.call?.isMuted == true)
         #expect(audio.muted == [true])
+        #expect(system.muted == [true])
 
         // Calls start on the earpiece, which needs no echo cancellation and so sounds clean.
         #expect(calls.call?.isSpeaker == false)
@@ -82,16 +118,19 @@ private struct Failure: LocalizedError {
         #expect(calls.call?.isSpeaker == false)
         #expect(audio.speaker == [true, false])
 
+        let id = try #require(calls.call?.id)
         calls.hangUp()
         #expect(calls.call == nil)
         #expect(channel.cancelled == 1)
         #expect(audio.closed == 1)
+        #expect(system.ended == [id])
         #expect(calls.problem == nil)
 
         let ending = CallChannelFake(), endingAudio = CallAudioFake()
-        let other = PhoneCalls(open: { _ in ending }, makeAudio: { endingAudio }, now: { [date] in date })
-        other.start(threadID: thread, conversationID: conversation)
-        await wait { endingAudio.answers.isEmpty && ending.cancelled == 0 && other.call != nil }
+        let other = PhoneCalls(open: { _ in ending }, makeAudio: { endingAudio }, system: nil, now: { [date] in date })
+        other.start(threadID: thread, conversationID: conversation, name: "Kai")
+        await wait { endingAudio.hear != nil }
+        #expect(endingAudio.sessionActive == [false], "Without the call screen the app activates its own session")
         ending.push(.ended("This bot cannot take calls."))
         await wait { other.call == nil }
         #expect(other.call == nil)
@@ -100,61 +139,49 @@ private struct Failure: LocalizedError {
     }
 
     @Test func aCallThatCannotUseTheMicrophoneNeverReachesTheHub() async throws {
-        let audio = CallAudioFake()
-        audio.offerError = Failure(errorDescription: "Microphone access is off.")
+        let audio = CallAudioFake(), system = SystemCallsFake()
+        audio.startError = Failure(errorDescription: "Microphone access is off.")
         var opened = 0
-        let calls = PhoneCalls(open: { _ in opened += 1; return CallChannelFake() }, makeAudio: { audio }, now: { [date] in date })
-        calls.start(threadID: UUID(), conversationID: UUID())
+        let calls = PhoneCalls(open: { _ in opened += 1; return CallChannelFake() }, makeAudio: { audio }, system: system,
+                               now: { [date] in date })
+        calls.start(threadID: UUID(), conversationID: UUID(), name: "Kai")
         await wait { calls.call == nil }
         #expect(calls.call == nil)
         #expect(opened == 0)
         #expect(calls.problem == "Microphone access is off.")
         #expect(audio.closed == 1)
+        #expect(system.ended.count == 1, "The call leaves the call screen too")
     }
 
-    /// A server session can start before the phone receives an answer or connects its media.
-    /// Closing the test stream is the deterministic barrier, rather than waiting for a timer.
-    @Test func aServerStartWithoutAMediaAnswerMustNotAnnounceAConnectedCall() async {
-        let channel = CallChannelFake(), audio = CallAudioFake()
-        let calls = PhoneCalls(open: { _ in
-            channel.push(.started)
-            channel.push(.ended(nil))
-            return channel
-        }, makeAudio: { audio }, now: { [date] in date })
-        var announcedAt: Date?
-        await withCheckedContinuation { (finished: CheckedContinuation<Void, Never>) in
-            audio.onClose = {
-                announcedAt = calls.call?.startedAt
-                finished.resume()
-            }
-            calls.start(threadID: UUID(), conversationID: UUID())
-        }
-        #expect(audio.answers.isEmpty)
+    /// Ending or muting from the lock screen, a headset or the call screen acts on the call.
+    @Test func theCallScreenEndsAndMutesTheCall() async throws {
+        let channel = CallChannelFake(), audio = CallAudioFake(), system = SystemCallsFake()
+        let calls = PhoneCalls(open: { _ in channel }, makeAudio: { audio }, system: system, now: { [date] in date })
+        calls.start(threadID: UUID(), conversationID: UUID(), name: "Kai")
+        await wait { audio.hear != nil }
+        let id = try #require(calls.call?.id)
+        system.onMute?(id, true)
+        #expect(calls.call?.isMuted == true)
+        #expect(audio.muted == [true])
+        system.onMute?(UUID(), false)
+        #expect(calls.call?.isMuted == true, "Another call's button does nothing here")
+        system.onEnd?(id)
+        #expect(calls.call == nil)
         #expect(audio.closed == 1)
-        #expect(announcedAt == nil, "A server start alone does not establish the phone's audio connection")
-        #expect(audio.chimes == 0, "The connected chime must wait for the media connection")
+        #expect(calls.problem == nil)
     }
 
-    @Test func acceptingAnAnswerStillWaitsForActualMediaReadiness() async {
-        let channel = CallChannelFake(), audio = CallAudioFake()
-        audio.connectsOnAnswer = false
-        let calls = PhoneCalls(open: { _ in
-            channel.push(.started)
-            channel.push(.answer("answer-sdp"))
-            return channel
-        }, makeAudio: { audio }, now: { [date] in date })
-        await withCheckedContinuation { (answered: CheckedContinuation<Void, Never>) in
-            audio.onAnswer = { answered.resume() }
-            calls.start(threadID: UUID(), conversationID: UUID())
-        }
-        #expect(calls.call?.startedAt == nil)
-        #expect(audio.chimes == 0)
-        audio.onConnected?()
-        #expect(calls.call?.startedAt == date)
-        #expect(audio.chimes == 1)
-        audio.onConnected?()
-        #expect(audio.chimes == 1)
-        calls.hangUp()
+    @Test func aCallTheCallScreenRefusesNeverStarts() async throws {
+        let audio = CallAudioFake(), system = SystemCallsFake()
+        system.beginError = Failure(errorDescription: "Another call is in progress.")
+        var opened = 0
+        let calls = PhoneCalls(open: { _ in opened += 1; return CallChannelFake() }, makeAudio: { audio }, system: system,
+                               now: { [date] in date })
+        calls.start(threadID: UUID(), conversationID: UUID(), name: "Kai")
+        await wait { calls.call == nil }
+        #expect(opened == 0)
+        #expect(audio.hear == nil)
+        #expect(calls.problem == "Another call is in progress.")
     }
 
     @Test func everyVoiceAHubOffersHasASampleHere() {

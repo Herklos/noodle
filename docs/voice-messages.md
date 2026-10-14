@@ -32,7 +32,12 @@ transcript when there is one.
 
 You can call a Codex bot that runs on this Mac, or one you keep on a Noodle Hub,
 and talk things through with it. Noodle for iPhone calls your bots on the Hub
-the same way.
+the same way, on the iPhone's call screen, so a call goes on while the phone is
+locked and can be muted or ended from the Lock Screen.
+
+Calls use the microphone chosen for dictation in **Settings → Chat**. For a bot
+on a Noodle Hub, your voice goes to the Hub over your connection to it, and the
+Hub connects to the bot's voice.
 
 1. Open the bot's conversation and click the phone button in the toolbar. Allow
    microphone access when asked.

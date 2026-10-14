@@ -1760,7 +1760,7 @@ struct ChatView: View {
             }
             if let bot = thread.bot, bot.canCall, chats.calls.call?.threadID != thread.id {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { chats.calls.start(threadID: thread.id, conversationID: thread.conversationID) } label: {
+                    Button { chats.calls.start(threadID: thread.id, conversationID: thread.conversationID, name: thread.name) } label: {
                         Image(systemName: "phone")
                     }
                     .accessibilityLabel("Call \(thread.name)")

@@ -10,6 +10,7 @@ import NoodleImagesTools
 import NoodleRemindersTools
 import UniformTypeIdentifiers
 import NoodleRuntime
+import NoodleVoicePeer
 import NoodleRuntimeSettings
 import NoodleWallpaper
 
@@ -1415,14 +1416,17 @@ final class NoodleStore {
     }
 
     @ObservationIgnored lazy var voiceCalls = VoiceCallController(
-        runtime: VoiceCallRouter(local: runtime, isOnHub: { [weak self] in self?.hubMirror(forAgent: $0) != nil },
-                                 openHubCall: { [weak self] agentID, request in
+        router: VoiceCallRouter(local: runtime, isOnHub: { [weak self] in self?.hubMirror(forAgent: $0) != nil },
+                                openHubCall: { [weak self] agentID, setup in
             guard let mirror = self?.hubMirror(forAgent: agentID) else { throw VoiceCallUnavailable() }
-            return try await mirror.openCall(in: request.conversationID, offer: request.offer)
-        }),
-        makeMedia: { WebRTCVoiceCallMedia() }, report: { [weak self] in self?.errorMessage = $0 },
+            return try await mirror.openCall(in: setup.conversationID)
+        }, makePeer: { [weak self] in self?.makeCallPeer() ?? VoiceCallPeer() }),
+        makeMedia: { EngineVoiceCallMedia() }, report: { [weak self] in self?.errorMessage = $0 },
         record: { [weak self] in self?.recordVoiceCall($0) },
         finish: { [weak self] in self?.finishVoiceCall($0, messageID: $1, endedAt: $2) })
+
+    /// Connects calls to bots here to their voice service; tests pass their own.
+    @ObservationIgnored var makeCallPeer: @MainActor () -> any VoiceCallPeering = { VoiceCallPeer() }
 
     private func recordVoiceCall(_ call: VoiceCallController.Call) -> UUID? {
         // A Hub keeps its bots' calls and sends the card here like any message.
