@@ -809,6 +809,27 @@ final class NoodleStore {
         return hubMirrors.first { $0.pairing.hub?.key == choice.hub }
     }
 
+    /// The harnesses the bot editor offers: this Mac's, then what each joined Hub lends. A new bot can start
+    /// anywhere; one already made keeps to where it is, since its workspace and history stay there.
+    func harnessChoices(for agent: AgentRecord?) -> (installations: [HarnessInstallation], hubs: [HubHarnessSection]) {
+        let mirror = agent.flatMap { hubMirror(forAgent: $0.id) }
+        let lent = hubs.hubs.compactMap { pairing -> HubHarnessSection? in
+            guard let hub = pairing.hub, agent == nil || mirror?.pairing.hub?.key == hub.key,
+                  let harnesses = pairing.status?.harnesses, !harnesses.isEmpty else { return nil }
+            return HubHarnessSection(name: hub.name, choices: harnesses.map {
+                (HubHarnessChoice(hub: hub.key, provider: $0.provider, profile: $0.profile), $0)
+            })
+        }
+        return (mirror == nil ? runtime.availableInstallations : [], lent)
+    }
+
+    /// Whether a bot already made can run on a harness: only one of where it is, this Mac or its Hub.
+    private func harness(_ identifier: String, isWhere agent: AgentRecord) -> Bool {
+        let hub = HubHarnessChoice(identifier: identifier)?.hub
+        guard let mirror = hubMirror(forAgent: agent.id) else { return hub == nil }
+        return hub != nil && hub == mirror.pairing.hub?.key
+    }
+
     func hubMirror(forConversation id: UUID) -> HubMirror? {
         hubMirrors.first { $0.owns(conversation: id) }
     }
@@ -1050,8 +1071,12 @@ final class NoodleStore {
         sharedOnHubs: [URL: Set<UUID>]? = nil,
         voice: String?? = nil
     ) -> Bool {
+        guard harness(harnessIdentifier, isWhere: agent) else {
+            errorMessage = "Choose a harness from where this bot runs."
+            return false
+        }
         if let mirror = hubMirror(forAgent: agent.id) {
-            let choice = HubHarnessChoice(identifier: harnessIdentifier) ?? mirror.harness(ofAgent: agent.id)
+            let choice = HubHarnessChoice(identifier: harnessIdentifier)
             var draft = LinkBotDraft(name: name, provider: choice?.provider ?? harnessIdentifier, profile: choice?.profile,
                                      model: modelIdentifier.flatMap { $0.isEmpty ? nil : $0 },
                                      reasoningEffort: reasoningEffort.flatMap { $0.isEmpty ? nil : $0 },

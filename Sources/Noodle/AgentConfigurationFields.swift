@@ -12,7 +12,9 @@ struct AgentConfigurationFields: View {
     @Binding var selectedProfileID: UUID?
     /// Empty leaves the voice to the harness.
     @Binding var selectedVoice: String
-    /// The bot being edited; a new bot has no workspace yet.
+    /// The bot being edited; nil for a new bot.
+    var agent: AgentRecord? = nil
+    /// The edited bot's workspace; a new bot has none yet.
     var workspace: URL? = nil
     @State private var choosingHarness = false
     @State private var choosingVoice = false
@@ -23,15 +25,6 @@ struct AgentConfigurationFields: View {
     /// A harness a joined Hub lends, when one is chosen: the bot then runs on that Hub.
     private var hubChoice: HubHarnessChoice? { HubHarnessChoice(identifier: selectedHarnessIdentifier) }
 
-    /// What each joined Hub lends, for the harness chooser.
-    private var hubHarnesses: [HubHarnessSection] {
-        store.hubs.hubs.compactMap { pairing in
-            guard let hub = pairing.hub, let harnesses = pairing.status?.harnesses, !harnesses.isEmpty else { return nil }
-            return HubHarnessSection(name: hub.name, choices: harnesses.map {
-                (HubHarnessChoice(hub: hub.key, provider: $0.provider, profile: $0.profile), $0)
-            })
-        }
-    }
 
     /// What the chosen Hub lends on the chosen harness, as its last status said.
     private var lentHarness: LinkHarness? {
@@ -106,9 +99,10 @@ struct AgentConfigurationFields: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $choosingHarness, arrowEdge: .leading) {
+                    let choices = store.harnessChoices(for: agent)
                     HarnessChooser(
-                        installations: store.runtime.availableInstallations,
-                        hubs: hubHarnesses,
+                        installations: choices.installations,
+                        hubs: choices.hubs,
                         selection: $selectedHarnessIdentifier
                     )
                 }

@@ -399,6 +399,7 @@ struct EditBotSheet: View {
                         selectedEffort: $selectedEffort,
                         selectedProfileID: $selectedProfileID,
                         selectedVoice: Binding(get: { selectedVoice }, set: { selectedVoice = $0; hasChosenVoice = true }),
+                        agent: agent,
                         workspace: store.repository.directory(for: agent)
                     )
                     Text("Saving restarts the bot. Its workspace and history stay unchanged.")

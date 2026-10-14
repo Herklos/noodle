@@ -14,6 +14,7 @@ All notable changes to Noodle are documented here, following
 - Long lists in Settings → Bots and Settings → Groups show their scroll bar again.
 - The welcome no longer says Not joined under Noodle Hub when this Mac has joined one.
 - Links in your own messages are white and underlined instead of blue on the coloured bubble.
+- Editing a bot offers only harnesses from where it runs, this Mac or its Noodle Hub. Before, choosing one from elsewhere could leave the bot unable to start.
 
 ### Added
 

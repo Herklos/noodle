@@ -281,6 +281,55 @@ final class HubHarnessChoiceTests: XCTestCase {
 
 /// A bot kept on a Hub uses only the Hub's tools, never this Mac's.
 @MainActor final class HubBotAssignmentTests: XCTestCase {
+    /// A new bot can start on this Mac or any joined Hub; after that it keeps to the harnesses of where it is.
+    func testABotOnlyTakesHarnessesFromWhereItIs() throws {
+        let f = try StoreFixture()
+        defer { f.cleanUp() }
+        f.runtime.runtime.refreshCapabilities()
+        // Fixture bot A is on a joined Hub that lends Codex, bot B stays on this Mac, and a second Hub lends Claude Code.
+        func join(_ name: String, lending provider: String, mirroring entries: [[String: Any]]) throws -> LinkPublicKey {
+            let folder = f.repository.rootURL.appendingPathComponent("Hubs/\(UUID())", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let key = LinkIdentity().publicKey
+            let hub: [String: Any] = ["name": name, "key": key.x963.base64EncodedString(), "endpoints": [], "userName": "Ada"]
+            try JSONSerialization.data(withJSONObject: hub).write(to: folder.appendingPathComponent("hub.json"))
+            let status = LinkStatus(hubName: name, userName: "Ada", planName: "Family",
+                                    harnesses: [LinkHarness(provider: provider, providerName: provider, profileName: nil)], endpoints: [])
+            try JSONEncoder().encode(status).write(to: folder.appendingPathComponent("status.json"))
+            try JSONSerialization.data(withJSONObject: entries).write(to: folder.appendingPathComponent("mirror.json"))
+            return key
+        }
+        let home = try join("Mac mini", lending: "codex", mirroring: [[
+            "remote": UUID().uuidString, "remoteConversation": UUID().uuidString,
+            "agent": f.a.id.uuidString, "conversation": f.directA.id.uuidString, "synced": 0]])
+        let other = try join("Studio", lending: "claude-code", mirroring: [])
+        let store = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
+        let local = store.runtime.availableInstallations
+        XCTAssertFalse(local.isEmpty)
+
+        let new = store.harnessChoices(for: nil)
+        XCTAssertEqual(new.installations, local)
+        XCTAssertEqual(new.hubs.map(\.name), ["Mac mini", "Studio"])
+
+        let here = store.harnessChoices(for: f.b)
+        XCTAssertEqual(here.installations, local)
+        XCTAssertEqual(here.hubs.map(\.name), [])
+
+        let onHub = store.harnessChoices(for: f.a)
+        XCTAssertEqual(onHub.installations, [])
+        XCTAssertEqual(onHub.hubs.map(\.name), ["Mac mini"])
+
+        func save(_ agent: AgentRecord, on harness: String) -> Bool {
+            store.updateAgent(agent, name: agent.displayName, harnessIdentifier: harness, modelIdentifier: nil, reasoningEffort: nil,
+                avatarSymbolName: nil, avatarColorIndex: 0, avatarImageData: nil, publicDescription: "", backstory: "")
+        }
+        // The bot on this Mac cannot move to a Hub, and the bot on a Hub cannot move here or to another Hub.
+        XCTAssertFalse(save(f.b, on: HubHarnessChoice(hub: home, provider: "codex", profile: nil).identifier))
+        XCTAssertEqual(try f.repository.loadAgents().first { $0.id == f.b.id }?.harnessIdentifier, f.b.harnessIdentifier)
+        XCTAssertFalse(save(f.a, on: HarnessProvider.codex.rawValue))
+        XCTAssertFalse(save(f.a, on: HubHarnessChoice(hub: other, provider: "claude-code", profile: nil).identifier))
+    }
+
     /// A bot someone shared on a Hub is only talked with: Settings > Bots leaves it out and groups never offer it.
     func testABotSharedOnAHubIsOnlyTalkedWith() throws {
         let f = try StoreFixture()
@@ -376,11 +425,11 @@ final class HubHarnessChoiceTests: XCTestCase {
                                     "agent": f.a.id.uuidString, "conversation": f.directA.id.uuidString, "synced": 0]
         try JSONSerialization.data(withJSONObject: [entry]).write(to: folder.appendingPathComponent("mirror.json"))
         let store = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
-        XCTAssertNotNil(store.hubMirror(forAgent: f.a.id))
+        let harness = try XCTUnwrap(store.hubMirror(forAgent: f.a.id)?.harness(ofAgent: f.a.id))
 
         let account = try MCPConnectionRecord(name: "Fixture account", endpoint: URL(string: "https://example.com/mcp")!)
         try store.mcp.save(account)
-        XCTAssertTrue(store.updateAgent(f.a, name: f.a.displayName, harnessIdentifier: f.a.harnessIdentifier ?? "",
+        XCTAssertTrue(store.updateAgent(f.a, name: f.a.displayName, harnessIdentifier: harness.identifier,
                                         modelIdentifier: nil, reasoningEffort: nil, avatarSymbolName: nil, avatarColorIndex: 0,
                                         avatarImageData: nil, publicDescription: "", backstory: "",
                                         mcpConnectionIDs: [account.id]))
