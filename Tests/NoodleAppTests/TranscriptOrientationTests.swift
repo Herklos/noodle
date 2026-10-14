@@ -207,7 +207,6 @@ private struct OrientationChat: View {
             ConversationWallpaper(background: background, imageURL: conversation.flatMap {
                 store.repository.backgroundImageURL(background, conversationID: $0.id)
             })
-            .overlay(alignment: .top) { ConversationWindowHeaderShade() }
             .ignoresSafeArea()
         }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)

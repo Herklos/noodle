@@ -46,7 +46,6 @@ struct ConversationWindowView: View {
                 ConversationWallpaper(background: background, imageURL: conversation.flatMap {
                     store.repository.backgroundImageURL(background, conversationID: $0.id)
                 })
-                .overlay(alignment: .top) { ConversationWindowHeaderShade() }
                 .ignoresSafeArea()
             }
         }

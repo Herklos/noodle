@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Messages now fade into the wallpaper as they scroll beneath the toolbar, in place of the shaded band at the top of the window. Nothing fades while no message is beneath it.
+
 ## [0.63.0] - 2026-10-14
 
 ### Added

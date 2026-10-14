@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Noodlets now fade into the wallpaper as they scroll beneath the toolbar, in place of the shaded band at the top of the window. Nothing fades while no noodlet is beneath it.
+
 ## [0.31.1] - 2026-10-14
 
 ### Fixed

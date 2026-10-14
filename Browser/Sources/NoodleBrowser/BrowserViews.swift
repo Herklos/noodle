@@ -120,7 +120,7 @@ struct BrowserLibraryView: View {
         .background {
             ConversationWallpaper(background: presentation.profile?.background ?? .init(),
                 imageURL: presentation.profile.flatMap { library.backgroundURL(for: $0) })
-                .overlay(alignment: .top) { ConversationWindowHeaderShade() }.ignoresSafeArea()
+                .ignoresSafeArea()
         }
         .background(ConversationWindowCompositing())
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)

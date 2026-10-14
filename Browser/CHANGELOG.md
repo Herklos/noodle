@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The shaded band at the top of the window is gone.
+
 ## [0.18.2] - 2026-10-14
 
 ### Fixed

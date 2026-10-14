@@ -399,16 +399,13 @@ private struct LibraryView: View {
           }
         }
       }
-      .mask { ConversationContentTopFade() }
+      .conversationTopFade()
       .navigationTitle(person?.name ?? category?.capitalized ?? section?.rawValue ?? "All")
       .toolbar { libraryToolbar }
     }
     .navigationSplitViewStyle(.balanced)
     .background {
       ConversationWallpaper(background: background.background, imageURL: background.imageURL)
-        .overlay(alignment: .top) {
-          ConversationWindowHeaderShade()
-        }
         .ignoresSafeArea()
     }
     .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)

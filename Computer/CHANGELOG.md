@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The shaded band at the top of the window is gone.
+
 ## [0.29.0] - 2026-10-14
 
 ### Added
