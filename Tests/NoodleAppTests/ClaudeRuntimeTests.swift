@@ -136,7 +136,7 @@ import XCTest
         try await ready(f, wire, p)
         wire.emit(["type": "assistant", "session_id": try XCTUnwrap(wire.launches.last?.2).uuidString,
                    "parent_tool_use_id": NSNull(), "message": ["content": [["type": "text", "text": "Task finished"]]]])
-        await f.drain()
+        try await f.wait { p.snapshot.phase == .working }
         XCTAssertEqual(p.snapshot.phase, .working)
         XCTAssertFalse(p.canReceiveHeartbeat)
         XCTAssertEqual(activity, ["assistant"])
