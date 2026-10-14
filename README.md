@@ -4,7 +4,7 @@
 
 # Noodle
 
-**Your personal AI agents.**
+**Personal AI agents.**
 
 Personal AI agents that get things done on your Mac. Add a Hub to share subscriptions and local models with your household or team.
 
