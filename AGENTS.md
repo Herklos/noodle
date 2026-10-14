@@ -23,6 +23,6 @@ its own comments; follow the `no-code-docs` skill.
 
 # Builds on this Mac
 
-Run local builds and tests at background priority so the laptop stays usable:
+Run local builds and tests at low priority so the laptop stays usable:
 prefix `swift build`, `swift test` and `xcodebuild` with `scripts/build-priority.sh`
 (the repository's scripts already do). CI runs at full speed.
