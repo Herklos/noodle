@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-10-14
+
 ### Added
 
 - Bots can stop a computer assigned to them when they are done with it. This needs the Noodle Computer update released alongside.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-14
+
 ### Fixed
 
 - Pictures and videos in conversations can be saved to Photos from the share menu, not only to Files.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-14
+
 ### Added
 
 - Bots and apps outside Noodle can stop a computer, as they could already start one. A computer you are watching live is left running.

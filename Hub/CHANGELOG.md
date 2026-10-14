@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-14
+
 ### Added
 
 - Bots on the Hub can stop a computer assigned to them when they are done with it. This needs the Noodle Computer update released alongside.
