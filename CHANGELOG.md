@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening a noodlet a bot is still testing asks whether to close the bot's test session, instead of refusing with an error. This needs the Noodle Applet update released alongside.
+
 ## [0.62.0] - 2026-10-14
 
 ### Fixed

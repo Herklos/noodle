@@ -74,12 +74,14 @@ import Observation
         return response.mediaType == "image/png" && response.data != nil
     }
     @discardableResult
-    public func openNoodlet(_ url: URL, annotation: AppletAnnotation? = nil) async throws -> AppletResponse {
+    public func openNoodlet(_ url: URL, annotation: AppletAnnotation? = nil,
+                            closingTestSession: Bool = false) async throws -> AppletResponse {
         let id = try NoodletLink.requireID(in: url)
         var request = AppletRequest(.open)
         request.noodletID = id
         request.mode = "foreground"
         request.annotation = annotation
+        if closingTestSession { request.closeTestSession = true }
         try Task.checkCancellation()
         return try await call(request).checked()
     }

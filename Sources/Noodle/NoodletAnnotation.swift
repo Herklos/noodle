@@ -23,6 +23,8 @@ import NoodleRuntime
     /// post it, so only sessions opened here are annotated.
     let notification: String
     var present: ((Capture) -> Void)?
+    /// Asks the person whether to close a bot's test session, given what Applet says about it.
+    private let confirm: (String) -> Bool
     private let applets: AppletController
     /// The conversation each session was last opened from.
     private var conversations: [UUID: UUID] = [:]
@@ -30,10 +32,20 @@ import NoodleRuntime
     private var capturing = false
 
     init(applets: AppletController, notification: String = "\(Bundle.main.bundleIdentifier ?? "Noodle").annotate-noodlet",
-         present: ((Capture) -> Void)? = nil) {
+         present: ((Capture) -> Void)? = nil, confirm: @escaping (String) -> Bool = NoodletAnnotations.askToCloseTestSession) {
         self.applets = applets
         self.notification = notification
         self.present = present
+        self.confirm = confirm
+    }
+
+    static func askToCloseTestSession(_ text: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Open this noodlet?"
+        alert.informativeText = text
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     deinit { observers.forEach(DistributedNotificationCenter.default().removeObserver) }
@@ -58,7 +70,13 @@ import NoodleRuntime
         let annotation = region == nil && selection == nil ? nil : AppletAnnotation(
             application: Bundle.main.bundleIdentifier ?? "", notification: notification,
             region: shortcut(region), selection: shortcut(selection))
-        let response = try await applets.openNoodlet(url, annotation: annotation)
+        let response: AppletResponse
+        do { response = try await applets.openNoodlet(url, annotation: annotation) }
+        catch let error as AppletError where error.code == "test-session-open" {
+            // A bot may still be using its test session, so it is closed only once the person agrees.
+            guard confirm(error.message) else { return }
+            response = try await applets.openNoodlet(url, annotation: annotation, closingTestSession: true)
+        }
         if annotation != nil, let session = response.sessionID { conversations[session] = conversationID }
     }
 

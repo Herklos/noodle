@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening a noodlet a bot is testing asks before closing the bot's test session, which it may still be using, instead of closing it without a word.
+
 ## [0.31.0] - 2026-10-13
 
 ### Changed

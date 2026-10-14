@@ -89,6 +89,8 @@ public struct AppletRequest: Codable, Sendable {
     public var store: NoodletStoreCall?
     /// Given by Noodle when a person opens a noodlet from a conversation.
     public var annotation: AppletAnnotation?
+    /// Given when the person agreed to close a bot's test session of the noodlet to open it.
+    public var closeTestSession: Bool?
     public init(_ operation: AppletOperation, sessionID: UUID? = nil) {
         self.operation = operation
         self.sessionID = sessionID
@@ -131,6 +133,9 @@ public struct AppletRequest: Codable, Sendable {
         }
         if let annotation, operation != .open || mode != "foreground" || !annotation.isValid {
             throw AppletError("Only opening a noodlet in the foreground takes a valid annotation shortcut.")
+        }
+        if closeTestSession != nil, operation != .open || mode != "foreground" {
+            throw AppletError("Only opening a noodlet in the foreground closes a test session.")
         }
         if let mode, !["background", "foreground", "headless"].contains(mode) {
             throw AppletError("Use background, foreground, or headless mode.")

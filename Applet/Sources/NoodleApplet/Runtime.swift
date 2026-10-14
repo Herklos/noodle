@@ -322,6 +322,22 @@ import NoodletRuntime
           response.state = "valid"
           return response
         }
+        // Only the user opens a noodlet in the foreground. A test session cannot become the one they
+        // see and hear, and its bot may still be using it, so it makes way only once they agree.
+        if request.operation == .open, request.mode == "foreground",
+          let test = sessions.values.first(where: {
+            $0.package.key == package.key && $0.isActive && $0.needsRelaunchToBeSeenAndHeard
+          })
+        {
+          guard request.closeTestSession == true else {
+            let holder = library.botName(of: package.url).map { "\($0) has a test session" } ?? "A test session is"
+            throw AppletError("\(holder) open for this noodlet. Opening it closes that session.", code: "test-session-open")
+          }
+          test.log.append("lifecycle", "Closed by the user to open this noodlet in the foreground.")
+          test.stop()
+          _ = status(test)
+          objectWillChange.send()
+        }
         if let existing = sessions.values.first(where: { $0.package.key == package.key && $0.isActive }) {
           guard owner == "local" || existing.owner == owner else {
             throw AppletError("This package is already running for another caller.")
@@ -662,26 +678,38 @@ import NoodletRuntime
     objectWillChange.send()
   }
   func open(_ package: NoodletPackage) {
-    Task {
-      if let error = await openInForeground(package).error { self.error = error }
-    }
+    Task { await openAsking(package) }
   }
-  /// The user clicking a noodlet asks to see and hear it. A session the agent left
-  /// out of sight cannot be given the audio output or the user's data after the
-  /// fact, so it makes way for one that starts in the foreground.
-  func openInForeground(_ package: NoodletPackage) async -> AppletResponse {
-    if let live = sessions.values.first(where: { $0.package.key == package.key && $0.isActive }),
-      live.needsRelaunchToBeSeenAndHeard
-    {
-      live.log.append("lifecycle", "Closed to open this noodlet in the foreground.")
-      live.stop()
-      _ = status(live)
-      objectWillChange.send()
+  /// Asks the user whether to close a bot's test session, given what Applet says about it.
+  var confirmClosingTestSession: (String) -> Bool = AppletRuntime.askToCloseTestSession
+  /// Opens a noodlet the user clicked, asking first whether to close a test session in its way.
+  @discardableResult func openAsking(_ package: NoodletPackage) async -> AppletResponse {
+    var response = await openInForeground(package)
+    if response.errorCode == "test-session-open", let question = response.error {
+      guard confirmClosingTestSession(question) else { return response }
+      response = await openInForeground(package, closingTestSession: true)
     }
+    if let error = response.error { self.error = error }
+    return response
+  }
+  static func askToCloseTestSession(_ text: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "Open this noodlet?"
+    alert.informativeText = text
+    alert.addButton(withTitle: "Open")
+    alert.addButton(withTitle: "Cancel")
+    NSApp.activate(ignoringOtherApps: true)
+    return alert.runModal() == .alertFirstButtonReturn
+  }
+  /// The user clicking a noodlet asks to see and hear it. A session the agent left out of sight
+  /// cannot be given the audio output or the user's data after the fact; a test session makes
+  /// way for one that starts in the foreground when `closingTestSession`.
+  func openInForeground(_ package: NoodletPackage, closingTestSession: Bool = false) async -> AppletResponse {
     var request = AppletRequest(.open)
     request.path = package.url.path
     request.mode = "foreground"
     request.owner = library.owner(of: package.url) ?? "local"
+    if closingTestSession { request.closeTestSession = true }
     return await handle(request, identity: AppletBuildIdentity.current.noodleID)
   }
   private func show(_ session: AppletSession) async throws {

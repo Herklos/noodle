@@ -45,6 +45,30 @@ import XCTest
         try await Task.sleep(for: .milliseconds(200))
     }
 
+    /// A bot may still be using its test session of a noodlet, so opening it from a conversation
+    /// closes that session only once the person agrees.
+    func testOpeningANoodletABotIsTestingAsksFirst() async throws {
+        let question = "Blake has a test session open for this noodlet. Opening it closes that session."
+        let recorder = OpenRecorder()
+        let applets = AppletController(connection: { request in
+            await recorder.record(request)
+            return request.closeTestSession == true ? AppletResponse() : AppletResponse(error: question, errorCode: "test-session-open")
+        })
+        var asked: [String] = [], agree = false
+        let annotations = NoodletAnnotations(applets: applets, notification: notification, confirm: { asked.append($0); return agree })
+        let url = NoodletLink.url(for: UUID())
+
+        try await annotations.open(url, from: conversation, region: nil, selection: nil)
+        XCTAssertEqual(asked, [question])
+        let declined = await recorder.requests.map(\.closeTestSession)
+        XCTAssertEqual(declined, [nil])
+
+        agree = true
+        try await annotations.open(url, from: conversation, region: nil, selection: nil)
+        let agreed = await recorder.requests.map(\.closeTestSession)
+        XCTAssertEqual(agreed, [nil, nil, true])
+    }
+
     func testTheRegionShortcutInAnOpenedNoodletMarksItsPictureIntoItsConversation() async throws {
         let applet = try applet()
         var presented: [NoodletAnnotations.Capture] = []
@@ -178,4 +202,9 @@ private actor FakeApplet {
         }
         return response
     }
+}
+
+private actor OpenRecorder {
+    var requests: [AppletRequest] = []
+    func record(_ request: AppletRequest) { requests.append(request) }
 }

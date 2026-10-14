@@ -164,6 +164,14 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   }
   /// The bot whose workspace holds `url`, by the name of its folder; nil for anything else.
   func owner(of url: URL) -> String? { bot(holding: url)?.owner }
+  /// The name of the bot whose workspace holds `url`, as its agent.json gives it.
+  func botName(of url: URL) -> String? {
+    struct Configuration: Decodable { let displayName: String? }
+    guard let bot = bot(holding: url),
+      let data = try? Data(contentsOf: bot.folder.url.appendingPathComponent(bot.owner).appendingPathComponent("agent.json"))
+    else { return nil }
+    return (try? JSONDecoder().decode(Configuration.self, from: data))?.displayName
+  }
   /// Whether `url` is in the workspace of one of Noodle Hub's bots.
   func isHub(_ url: URL) -> Bool { bot(holding: url)?.folder.isHub == true }
   private func bot(holding url: URL) -> (folder: BotFolder, owner: String)? {
