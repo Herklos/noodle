@@ -972,6 +972,9 @@ import NoodleVoicePeer
             }
         }
         let voice = await BotVoice.forCall(agent, repository: repository, guesser: voiceGuesser)
+        let identity = (try? repository.loadAgentBackstory(agent)).map {
+            VoiceCallIdentity(name: agent.displayName, description: agent.publicDescription, backstory: $0)
+        }
         if let previous = calls[conversation.id] { finish(previous, failure: nil, hangingUp: true) }
         runtime.start(agent: agent, repository: repository)
         let peer = makeCallPeer()
@@ -988,7 +991,7 @@ import NoodleVoicePeer
             try await peer.place({ [runtime] offer, events in
                 try runtime.startVoiceCall(agentID: agent.id, VoiceCallRequest(
                     offer: offer, voice: voice, conversationID: conversation.id,
-                    personName: user.name, recentLines: Array(recentLines)
+                    personName: user.name, identity: identity, recentLines: Array(recentLines)
                 ), events: events)
             }) { [weak self, weak call] event in
                 guard let self, let call, self.calls[call.conversationID] === call else { return }

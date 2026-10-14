@@ -628,9 +628,9 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             "realtimeStartInstructions": VoiceCallDocumentation.startInstructions(
                 conversationID: request.conversationID, personName: request.personName),
             "realtimeEndInstructions": VoiceCallDocumentation.endInstructions,
-            "initialItems": request.recentLines.map {
-                ["role": $0.speaker == .person ? "user" : "assistant", "text": $0.text]
-            }
+            // Added to Codex's own voice prompt, which would otherwise have it introduce itself as Codex.
+            "initialItems": (request.identity.map { [["role": "developer", "text": VoiceCallDocumentation.identity($0)]] } ?? [])
+                + request.recentLines.map { ["role": $0.speaker == .person ? "user" : "assistant", "text": $0.text] }
         ]
         if let voice = request.voice { params["voice"] = voice }
         voiceCallEvents = events

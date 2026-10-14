@@ -94,6 +94,22 @@ import XCTest
                                 .line(.init(.bot, "Two files.")), .ended(nil)])
     }
 
+    func testTheVoiceIsToldWhoTheBotIsBeforeTheRecentLines() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
+        try await ready(f, wire, p)
+        let identity = VoiceCallIdentity(name: "Sonia", description: "Keeps the newsroom on schedule.", backstory: "Speaks plainly.")
+        try p.startVoiceCall(.init(offer: "offer-sdp", voice: nil, conversationID: conversationID, personName: "Alex",
+                                   identity: identity, recentLines: [.init(.person, "Hi")])) { _ in }
+        try await f.wait { wire.count("thread/realtime/start") > 0 }
+
+        let params = try XCTUnwrap(wire.last("thread/realtime/start")["params"] as? [String: Any])
+        XCTAssertEqual(params["initialItems"] as? [[String: String]], [
+            ["role": "developer", "text": VoiceCallDocumentation.identity(identity)], ["role": "user", "text": "Hi"]
+        ])
+        let text = VoiceCallDocumentation.identity(identity)
+        for part in ["Sonia", "Keeps the newsroom on schedule.", "Speaks plainly."] { XCTAssertTrue(text.contains(part), part) }
+    }
+
     func testSpokenRequestTurnIsTrackedTakesTypedMessagesAndItsAnswerIsReadAloud() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
         try await ready(f, wire, p)

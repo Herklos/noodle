@@ -30,10 +30,13 @@ struct VoiceCallSetup: Equatable {
     var voice: String?
     var conversationID: UUID
     var personName: String
+    /// Nil for a bot on a Hub, which tells the voice itself.
+    var identity: VoiceCallIdentity?
     var recentLines: [VoiceCallLine] = []
 
     func request(offer: String) -> VoiceCallRequest {
-        VoiceCallRequest(offer: offer, voice: voice, conversationID: conversationID, personName: personName, recentLines: recentLines)
+        VoiceCallRequest(offer: offer, voice: voice, conversationID: conversationID, personName: personName,
+                         identity: identity, recentLines: recentLines)
     }
 }
 
@@ -207,7 +210,7 @@ struct VoiceCallSetup: Equatable {
         self.now = now
     }
 
-    func start(agentID: UUID, conversationID: UUID, voice: String?, personName: String,
+    func start(agentID: UUID, conversationID: UUID, voice: String?, personName: String, identity: VoiceCallIdentity? = nil,
                recentLines: [VoiceCallLine], media: (any VoiceCallMedia)? = nil) {
         hangUp()
         let call = Call(agentID: agentID, conversationID: conversationID)
@@ -226,7 +229,7 @@ struct VoiceCallSetup: Equatable {
             do {
                 let send = try await router.startVoiceCall(
                     agentID: agentID, VoiceCallSetup(voice: voice, conversationID: conversationID, personName: personName,
-                                                     recentLines: recentLines),
+                                                     identity: identity, recentLines: recentLines),
                     playout: media.playout) { [weak self] in self?.handle($0, of: call.id) }
                 guard self.call?.id == call.id else { return }
                 speaking.connect(send)

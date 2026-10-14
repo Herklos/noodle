@@ -32,6 +32,20 @@ public struct VoiceCallRecord: Codable, Hashable, Sendable {
     }
 }
 
+/// Who the bot is. Codex answers small talk on a call with a voice model of its own,
+/// which does not read the bot's AGENTS.md.
+public struct VoiceCallIdentity: Hashable, Sendable {
+    public var name: String
+    public var description: String?
+    public var backstory: String
+
+    public init(name: String, description: String?, backstory: String) {
+        self.name = name
+        self.description = description
+        self.backstory = backstory
+    }
+}
+
 /// Media is negotiated with WebRTC: the app captures and plays audio, the runtime
 /// only relays the session description.
 public struct VoiceCallRequest: Sendable {
@@ -40,14 +54,18 @@ public struct VoiceCallRequest: Sendable {
     public var voice: String?
     public var conversationID: UUID
     public var personName: String
+    /// Nil leaves the voice to introduce itself as the harness does.
+    public var identity: VoiceCallIdentity?
     /// Recent conversation lines, oldest first, so the call starts with context.
     public var recentLines: [VoiceCallLine]
 
-    public init(offer: String, voice: String?, conversationID: UUID, personName: String, recentLines: [VoiceCallLine] = []) {
+    public init(offer: String, voice: String?, conversationID: UUID, personName: String,
+                identity: VoiceCallIdentity? = nil, recentLines: [VoiceCallLine] = []) {
         self.offer = offer
         self.voice = voice
         self.conversationID = conversationID
         self.personName = personName
+        self.identity = identity
         self.recentLines = recentLines
     }
 }
@@ -72,6 +90,17 @@ public enum VoiceCallDocumentation {
         """
         \(personName) started a voice call with you from Noodle conversation \(conversationID.uuidString.lowercased()). Requests spoken on the call arrive here directly, not through Messenger. Your final message for a spoken request is read aloud on the call, so keep it brief and conversational, without Markdown, lists, links or code. During the call \(personName) may also type messages or share files in that conversation; they arrive through Messenger as usual and belong to the same discussion. Send files, links and anything that is better read than heard to the conversation through Messenger, and mention on the call that you sent them.
         """
+    }
+
+    /// Given to the voice before anything is said, so it speaks as the bot.
+    public static func identity(_ identity: VoiceCallIdentity) -> String {
+        var sections = ["You are \(identity.name). Introduce yourself as \(identity.name) and speak as them throughout the call."]
+        if let description = identity.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+            sections.append("Description:\n\(description)")
+        }
+        let backstory = identity.backstory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !backstory.isEmpty { sections.append("Backstory:\n\(backstory)") }
+        return sections.joined(separator: "\n\n")
     }
 
     public static let endInstructions = "The voice call has ended. Answer later requests through Messenger as usual."

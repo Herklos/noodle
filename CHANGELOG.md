@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Changed
 
 - Messages now fade into the wallpaper as they scroll beneath the toolbar, in place of the shaded band at the top of the window. Nothing fades while no message is beneath it.
+- On voice calls, bots introduce themselves by their own name and speak from their description and backstory, instead of calling themselves Codex.
 
 ## [0.63.0] - 2026-10-14
 

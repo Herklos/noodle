@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- On voice calls, bots on the Hub introduce themselves by their own name and speak from their description and backstory, instead of calling themselves Codex.
+
 ## [0.34.0] - 2026-10-14
 
 ### Added

@@ -1526,11 +1526,14 @@ final class NoodleStore {
         }
         let onHub = !runsHere(agent.id)
         if !onHub { runtime.start(agent: agent, repository: repository) }
+        let identity = onHub ? nil : (try? repository.loadAgentBackstory(agent)).map {
+            VoiceCallIdentity(name: agent.displayName, description: agent.publicDescription, backstory: $0)
+        }
         Task {
             // A Hub starts its bot and picks its voice itself.
             let voice = onHub ? nil : await BotVoice.forCall(agent, repository: repository, guesser: voiceGuesser)
             voiceCalls.start(agentID: agent.id, conversationID: conversation.id, voice: voice,
-                             personName: personName, recentLines: recentLines, media: media)
+                             personName: personName, identity: identity, recentLines: recentLines, media: media)
         }
     }
 
