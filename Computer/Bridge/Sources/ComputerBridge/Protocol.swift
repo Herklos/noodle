@@ -38,7 +38,7 @@ public struct RemoteComputer: Codable, Hashable, Identifiable, Sendable {
 }
 
 public enum ComputerOperation: String, Codable, Sendable {
-    case list, start, terminalOpen, terminalRead, terminalWrite, terminalResize, terminalClose, terminalResolve, revoke, preview
+    case list, start, stop, terminalOpen, terminalRead, terminalWrite, terminalResize, terminalClose, terminalResolve, revoke, preview
     case fileUpload, fileDownload
     /// Managing computers: what can be made, making one, changing one and deleting one.
     case templates, create, update, delete
@@ -51,7 +51,7 @@ public enum ComputerOperation: String, Codable, Sendable {
     case borrow
     public var isFileTransfer: Bool { self == .fileUpload || self == .fileDownload }
     /// What bots call, in the order they are listed.
-    public static let agentCases: [Self] = [.list, .start, .terminalOpen, .terminalRead, .terminalWrite, .terminalResize, .terminalClose,
+    public static let agentCases: [Self] = [.list, .start, .stop, .terminalOpen, .terminalRead, .terminalWrite, .terminalResize, .terminalClose,
                                             .preview, .fileUpload, .fileDownload]
     /// What apps outside Noodle may call: what bots may, apart from posting into a conversation,
     /// and making, borrowing, changing and deleting computers.
@@ -85,7 +85,7 @@ public enum ComputerOperation: String, Codable, Sendable {
         }
     }
     /// A new computer may first download its image.
-    public var timeout: Int { self == .create ? 1800 : isFileTransfer ? 600 : (self == .start ? 180 : 120) }
+    public var timeout: Int { self == .create ? 1800 : isFileTransfer ? 600 : (self == .start || self == .stop ? 180 : 120) }
 }
 
 /// What a client sets on a computer it makes or edits. Nil fields stay as they are.

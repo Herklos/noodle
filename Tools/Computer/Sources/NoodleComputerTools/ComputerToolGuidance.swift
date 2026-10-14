@@ -7,6 +7,7 @@ enum ComputerToolGuidance {
         switch tool {
         case "list": "List only the computers assigned to this bot, with each ID, name, kind, state and optional description of what it is for."
         case "start": "Start an assigned computer that is stopped. No app window needs to be open."
+        case "stop": "Stop an assigned computer. Its files stay; every terminal and running program on it ends, including other bots' and the person's."
         case "open": "Open a shell in the computer and return its terminalID. Each bot has its own terminals."
         case "read": "Read terminal output from --offset. Returns UTF-8 text, the next byte offset, truncated and exited. Keep the returned offset; each reader has its own cursor."
         case "write": "Send --text followed by Enter, or --base64 for exact bytes (Aw== sends Control-C). Use one of them."

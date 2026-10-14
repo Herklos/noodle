@@ -21,7 +21,7 @@ public struct ComputerExternalClient: Sendable {
         Noodle Computer runs Linux computers and this Mac's own Local Mac account. This app sees only computers it created or a \
         person lent it. Start with list; use templates and create to make one, or borrow to ask the person to lend one of theirs. \
         Pass computer as a name or ID; it may be left out when there is only one. start a stopped computer, open a terminal, then \
-        write commands and read their output from the returned offset. upload and download move files between this Mac and the \
+        write commands and read their output from the returned offset; stop it when it is no longer needed. upload and download move files between this Mac and the \
         computer. The person is asked before this app is first allowed in, before it creates a computer, and before it borrows one.
         """
 
@@ -34,6 +34,7 @@ public struct ComputerExternalClient: Sendable {
         case .update: "Rename or describe a computer this app created, with --name and optional --description."
         case .delete: "Delete a computer this app created, with everything on it."
         case .start: "Start the computer and wait until it runs."
+        case .stop: "Stop the computer. Its files stay; its terminals and running programs end."
         case .terminalOpen: "Open a shell in the running computer. Returns its terminal ID."
         case .terminalRead: "Read the terminal's output from --offset (default 0). Returns text and the offset to read from next."
         case .terminalWrite: "Send --text followed by Enter, or exact --base64 bytes, to the terminal."

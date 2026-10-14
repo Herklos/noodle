@@ -132,6 +132,13 @@ import LocalMacCore
             if let failure { throw ComputerBridgeError(failure) }
             return .init()
         }
+        if request.operation == .stop {
+            // A person using the computer live keeps it running until they close the view.
+            if isWatched(session.id) { throw ComputerBridgeError("A person is using this computer right now. Try again when they're done.") }
+            if session.phase != .stopped { await store.stop(session) }
+            if case .failed(let message) = session.phase { throw ComputerBridgeError(message) }
+            return ComputerResponse(computers: [Self.remote(session)])
+        }
         if session.computer.kind == .localMac { return try await handleLocal(request, session: session, store: store, owner: owner, stagingRoot: stagingRoot) }
         if session.computer.kind == .windows { return try await handleWindows(request, session: session, store: store, owner: owner, stagingRoot: stagingRoot) }
         if request.operation == .revoke {

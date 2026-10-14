@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Bots can stop a computer assigned to them when they are done with it. This needs the Noodle Computer update released alongside.
+
 ### Fixed
 
 - Opening a noodlet a bot is still testing asks whether to close the bot's test session, instead of refusing with an error. This needs the Noodle Applet update released alongside.

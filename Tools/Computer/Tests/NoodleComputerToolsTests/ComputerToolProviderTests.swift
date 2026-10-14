@@ -71,7 +71,7 @@ final class ComputerToolProviderTests: XCTestCase {
         XCTAssertEqual([provider.manifest.id, provider.manifest.activation.rawValue], ["computer", "assigned:computer"])
         let listed = try await provider.tools(context: .init(agentID: agent, workspace: workspace))
         let tools = try ToolDescriptor.list(mcp: listed)
-        XCTAssertEqual(tools.map(\.name), ["list", "start", "open", "read", "write", "resize", "close", "present", "upload", "download"],
+        XCTAssertEqual(tools.map(\.name), ["list", "start", "stop", "open", "read", "write", "resize", "close", "present", "upload", "download"],
                        "revoke, display and terminalResolve stay user-only")
         for tool in tools {
             XCTAssertFalse(tool.description.isEmpty, tool.name)

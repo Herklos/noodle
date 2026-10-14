@@ -73,11 +73,25 @@ private let codex = ExternalLauncher(key: "team:2DC432GLL2:com.openai.codex", na
         let (service, store) = try service(answers)
         let personal = try add(store, "Personal"), hub = try add(store, "Hub's", hub: true)
         _ = try await service.perform(.init(.list), launcher: claude)
-        for operation: ComputerOperation in [.start, .terminalOpen] {
+        for operation: ComputerOperation in [.start, .stop, .terminalOpen] {
             do { _ = try await service.perform(.init(operation, computerID: personal.id), launcher: claude); XCTFail("\(operation) on a computer not lent") } catch {}
         }
         service.gate.setAccess(true, to: hub.id, for: service.gate.grants.callers[0].id)
         do { _ = try await service.perform(.init(.start, computerID: hub.id), launcher: claude); XCTFail("Used the Hub's computer") } catch {}
+    }
+
+    func testACallerCanStopAComputerItMayUse() async throws {
+        let answers = Answers()
+        let (service, store) = try service(answers)
+        let mine = try add(store, "Mine")
+        let caller = try await service.gate.admit(claude)
+        service.gate.recordCreated(mine.id, by: caller.id)
+        mine.phase = .running
+        let stopped = try await service.perform(.init(.stop, computerID: mine.id), launcher: claude)
+        XCTAssertEqual(mine.phase, .stopped)
+        XCTAssertEqual(stopped.computers?.map(\.id), [mine.id])
+        // Stopping what is already stopped is not an error.
+        _ = try await service.perform(.init(.stop, computerID: mine.id), launcher: claude)
     }
 
     func testMakingAComputerAlwaysAsks() async throws {
