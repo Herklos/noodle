@@ -94,6 +94,25 @@ private let codex = ExternalLauncher(key: "team:2DC432GLL2:com.openai.codex", na
         _ = try await service.perform(.init(.stop, computerID: mine.id), launcher: claude)
     }
 
+    func testAnAppIsToldOfAComputerItStartedAndLeftUnused() async throws {
+        let answers = Answers()
+        let (service, store) = try service(answers)
+        let mine = try add(store, "Mine"), other = try add(store, "Other")
+        let caller = try await service.gate.admit(claude)
+        service.gate.recordCreated(mine.id, by: caller.id)
+        service.gate.recordCreated(other.id, by: caller.id)
+        mine.phase = .running; other.phase = .running
+        let provider = service.provider
+        provider.now = { Date(timeIntervalSince1970: 0) }
+        provider.started(mine, peer: ComputerExternalService.peer(caller.id), agentID: nil)
+        provider.now = { Date(timeIntervalSince1970: 3_600) }
+        // Any call carries it, also one about another computer.
+        let response = try await service.perform(.init(.stop, computerID: other.id), launcher: claude)
+        XCTAssertEqual(response.idle?.map(\.computerID), [mine.id])
+        let again = try await service.perform(.init(.list), launcher: claude)
+        XCTAssertNil(again.idle, "Told once")
+    }
+
     func testMakingAComputerAlwaysAsks() async throws {
         let answers = Answers()
         let (service, store) = try service(answers)

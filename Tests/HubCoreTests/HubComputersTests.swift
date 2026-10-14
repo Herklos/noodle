@@ -41,6 +41,8 @@ import XCTest
                     computers.removeAll { $0.id == request.computerID }
                 case .revoke:
                     revoked.append((try XCTUnwrap(request.computerID), try XCTUnwrap(request.agentID)))
+                case .idle:
+                    response.idle = pendingIdle; pendingIdle = []
                 case .setOwner:
                     guard knowsOwners else { throw ComputerBridgeError("This needs a newer app. Update it.") }
                     // Deleted before the Hub's word arrived, as can happen.
@@ -55,6 +57,13 @@ import XCTest
 
         /// Whom Noodle Computer was last told a computer is kept for.
         func owner(of id: UUID) -> ComputerOwner? { lock.withLock { computers.first { $0.id == id }?.owner } }
+
+        /// What Noodle Computer reports next as left running unused.
+        var idle: [ComputerIdleNotice] {
+            get { lock.withLock { pendingIdle } }
+            set { lock.withLock { pendingIdle = newValue } }
+        }
+        private var pendingIdle: [ComputerIdleNotice] = []
 
         /// False for one from before owners, which cannot read the request.
         var knowsOwners = true
@@ -100,6 +109,20 @@ import XCTest
 
         let renamed = try await f.hub.computers.update(made.id, with: ComputerDraft(name: "Bench"), for: f.ada)
         XCTAssertEqual(renamed.name, "Bench")
+    }
+
+    func testABotIsToldOfAComputerItLeftRunningUnused() async throws {
+        let f = try fixture()
+        let alfred = try f.hub.bots.create(LinkBotDraft(name: "Alfred", provider: "claude-code"), for: f.ada)
+        f.computer.idle = [ComputerIdleNotice(computerID: UUID(), agentID: alfred.id, note: "Workbench is unused"),
+                           ComputerIdleNotice(computerID: UUID(), agentID: UUID(), note: "Not a bot here")]
+        await f.hub.bots.checkIdleComputers()
+        var notes: [String] = []
+        for _ in 0..<50 where notes.isEmpty {
+            notes += try f.hub.repository.listWakes(agentID: alfred.id).due.map(\.note)
+            if notes.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        XCTAssertEqual(notes, ["Workbench is unused"])
     }
 
     /// Noodle Computer lists the Hub's computers under the people they are kept for.

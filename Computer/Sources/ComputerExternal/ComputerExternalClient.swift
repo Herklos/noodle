@@ -22,7 +22,8 @@ public struct ComputerExternalClient: Sendable {
         person lent it. Start with list; use templates and create to make one, or borrow to ask the person to lend one of theirs. \
         Pass computer as a name or ID; it may be left out when there is only one. start a stopped computer, open a terminal, then \
         write commands and read their output from the returned offset; stop it when it is no longer needed. upload and download move files between this Mac and the \
-        computer. The person is asked before this app is first allowed in, before it creates a computer, and before it borrows one.
+        computer. The person is asked before this app is first allowed in, before it creates a computer, and before it borrows one. \
+        A result's idle lists computers you started and then left unused; stop each one you no longer need.
         """
 
     static func describe(_ operation: ComputerOperation) -> String {

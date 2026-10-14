@@ -468,6 +468,18 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
+    /// Wakes a bot with a note from Noodle, listed with its own wakes; a busy bot gets it once free.
+    public func wake(_ agentID: UUID, note: String, repository: WorkspaceRepository) {
+        let date = now()
+        changeWakes(of: agentID) { coordinator in
+            let (delivered, next) = await Task.detached {
+                ((try? repository.deliverWake(agentID: agentID, note: note, at: date)) != nil, repository.nextWakeDate(agentID: agentID))
+            }.value
+            if delivered { coordinator.owedWakes.insert(agentID) }
+            return next
+        }
+    }
+
     /// Wakes a bot whose scheduled wake is due once it can take a turn; a busy bot keeps it.
     /// Checking only reads dates held in memory, so it can run every second.
     public func checkWakes(repository: WorkspaceRepository) {

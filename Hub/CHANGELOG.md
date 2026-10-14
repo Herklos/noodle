@@ -5,6 +5,7 @@
 ### Added
 
 - Bots on the Hub can stop a computer assigned to them when they are done with it. This needs the Noodle Computer update released alongside.
+- A bot on the Hub that starts a computer and then leaves it unused is reminded to stop it: after it has run for 30 minutes with nothing using it for 15. This needs the Noodle Computer update released alongside.
 
 ## [0.33.0] - 2026-10-14
 

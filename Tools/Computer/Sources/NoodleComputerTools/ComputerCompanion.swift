@@ -26,6 +26,8 @@ actor ComputerCompanion {
         let socket = try ComputerConnection.socketURL(), team = try ComputerConnection.signingTeam()
         do { return try await ComputerConnection.call(request, socket: socket, team: team) }
         catch let error as ComputerBridgeError where error.unavailable {
+            // A closed Noodle Computer runs no computers, so asking what is idle never opens it.
+            guard request.operation != .idle else { throw error }
             if let launching { try await launching.value }
             else {
                 let task = Task { @MainActor in

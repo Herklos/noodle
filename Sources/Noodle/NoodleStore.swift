@@ -245,6 +245,9 @@ final class NoodleStore {
             toolAssignments.replace("computer", with: assigned)
             tools.synchronizeSkills()
         }
+        computers.onIdle = { [runtime = self.runtime, repository = self.repository] notices in
+            for notice in notices { if let agent = notice.agentID { runtime.wake(agent, note: notice.note, repository: repository) } }
+        }
         revocations.handler = { [computers] kind, id, agent in
             guard kind == "computer", let computer = UUID(uuidString: id) else { return }
             Task { @MainActor in computers.revoke(computer: computer, agent: agent) }

@@ -6,6 +6,40 @@ import Darwin
 import Foundation
 import LocalMacCore
 
+/// Computers an agent started and then left running unused. Each is reported once per idle
+/// stretch to the app whose agent started it, so the agent can be asked to stop it. Computers
+/// a person starts are never reported.
+struct ComputerIdleWatch {
+    static let running: TimeInterval = 30 * 60, unused: TimeInterval = 15 * 60
+    struct Running { var name: String; var watched: Bool }
+    private struct Use { var caller: String; var agentID: UUID?; var started: Date; var used: Date; var reported = false }
+    private var uses: [UUID: Use] = [:]
+
+    mutating func started(_ computer: UUID, caller: String, agentID: UUID?, at date: Date) {
+        uses[computer] = Use(caller: caller, agentID: agentID, started: date, used: date)
+    }
+    /// Use by anyone counts, and starts a new stretch.
+    mutating func used(_ computer: UUID, at date: Date) {
+        uses[computer]?.used = date
+        uses[computer]?.reported = false
+    }
+    mutating func stopped(_ computer: UUID) { uses[computer] = nil }
+    /// `running` is nil for a computer that is not running; seen so, it is forgotten.
+    mutating func due(for caller: String, at now: Date, running: (UUID) -> Running?) -> [ComputerIdleNotice] {
+        var due: [ComputerIdleNotice] = []
+        for (computer, use) in uses.sorted(by: { $0.value.started < $1.value.started }) {
+            guard let state = running(computer) else { uses[computer] = nil; continue }
+            if state.watched { used(computer, at: now); continue }
+            guard use.caller == caller, !use.reported, now.timeIntervalSince(use.started) >= Self.running,
+                  now.timeIntervalSince(use.used) >= Self.unused else { continue }
+            uses[computer]?.reported = true
+            let minutes = { (since: Date) in Int(now.timeIntervalSince(since) / 60) }
+            due.append(ComputerIdleNotice(computerID: computer, agentID: use.agentID, note: "\(state.name) has been running for \(minutes(use.started)) minutes and nothing has used it for \(minutes(use.used)). If you no longer need it, stop it; its files stay."))
+        }
+        return due
+    }
+}
+
 @MainActor final class ComputerProvider {
     private weak var store: ComputerStore?
     private var server: ComputerConnectionServer?
@@ -16,6 +50,8 @@ import LocalMacCore
     /// Live views of displays and terminals. While one is watched, bots are kept off its computer.
     private var surfaces: [String: (computer: UUID, streamer: SurfaceStreamer)] = [:]
     private let transferRoot: URL
+    private var idle = ComputerIdleWatch()
+    var now: () -> Date = Date.init
 
     /// `listens` false answers only what `handle` is given, as in tests, which cannot sign a socket.
     init(store: ComputerStore, socket: URL? = nil, listens: Bool = true) throws {
@@ -36,6 +72,17 @@ import LocalMacCore
     private func respond(_ request: ComputerRequest, peer: String, surface: SurfaceSocket? = nil) async -> ComputerResponse {
         do { return try await handle(request, peer: peer, surface: surface) }
         catch { return .init(error: error.localizedDescription) }
+    }
+    /// Watches a computer an agent started, for the app the agent works through.
+    func started(_ session: ComputerSession, peer: String, agentID: UUID?) {
+        idle.started(session.id, caller: ComputerBuildIdentity.principal(for: peer), agentID: agentID, at: now())
+    }
+    /// What the app at `peer` is told once: computers its agents started and then left unused.
+    func idleNotices(for peer: String) -> [ComputerIdleNotice] {
+        idle.due(for: ComputerBuildIdentity.principal(for: peer), at: now()) { id in
+            guard let session = store?.sessions.first(where: { $0.id == id }), session.phase == .running else { return nil }
+            return .init(name: session.computer.name, watched: isWatched(id))
+        }
     }
     /// `stagingRoot` is where file transfers wait, when not beside the companion socket.
     func handle(_ request: ComputerRequest, peer: String, surface socket: SurfaceSocket? = nil, stagingRoot: URL? = nil) async throws -> ComputerResponse {
@@ -64,6 +111,11 @@ import LocalMacCore
             }
             var response = ComputerResponse(computers: store.sessions.filter { Self.served($0.computer.kind) }.map(Self.remote))
             response.capabilities = ComputerCapabilities()
+            return response
+        }
+        if request.operation == .idle {
+            var response = ComputerResponse()
+            response.idle = idleNotices(for: peer)
             return response
         }
         if request.operation == .templates {
@@ -100,6 +152,11 @@ import LocalMacCore
             throw ComputerBridgeError("This computer no longer exists or is not supported by this provider version.")
         }
         store.note(session, usedBy: peer)
+        // Bots name themselves; apps outside Noodle are agents too. A person's start is not watched.
+        let agentStarts = request.operation == .start && session.phase.canStart
+            && (request.agentID != nil || ComputerExternalService.isPeer(peer))
+        defer { if agentStarts, session.phase == .running { started(session, peer: peer, agentID: request.agentID) } }
+        if ![.start, .stop, .setOwner, .update, .revoke].contains(request.operation) { idle.used(session.id, at: now()) }
         if request.operation == .setOwner {
             try store.setHubOwner(session, request.owner.map { HubOwner(id: $0.id, name: $0.name) }, from: peer)
             return .init()
@@ -137,6 +194,7 @@ import LocalMacCore
             if isWatched(session.id) { throw ComputerBridgeError("A person is using this computer right now. Try again when they're done.") }
             if session.phase != .stopped { await store.stop(session) }
             if case .failed(let message) = session.phase { throw ComputerBridgeError(message) }
+            if session.phase == .stopped { idle.stopped(session.id) }
             return ComputerResponse(computers: [Self.remote(session)])
         }
         if session.computer.kind == .localMac { return try await handleLocal(request, session: session, store: store, owner: owner, stagingRoot: stagingRoot) }

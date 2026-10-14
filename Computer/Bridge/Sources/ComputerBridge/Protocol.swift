@@ -49,6 +49,8 @@ public enum ComputerOperation: String, Codable, Sendable {
     case setOwner
     /// An app outside Noodle asking the person to lend it one of their computers.
     case borrow
+    /// Noodle or Noodle Hub asking which computers its bots started and then left running unused.
+    case idle
     public var isFileTransfer: Bool { self == .fileUpload || self == .fileDownload }
     /// What bots call, in the order they are listed.
     public static let agentCases: [Self] = [.list, .start, .stop, .terminalOpen, .terminalRead, .terminalWrite, .terminalResize, .terminalClose,
@@ -149,7 +151,7 @@ public struct ComputerRequest: Codable, Sendable {
         if operation == .preview {
             guard computerID != nil || terminalID != nil else { throw ComputerBridgeError("Specify --computer or --terminal.") }
             guard view == nil || ["terminal", "web"].contains(view!) else { throw ComputerBridgeError("Invalid preview view.") }
-        } else if ![.list, .terminalResolve, .templates, .create, .borrow].contains(operation), computerID == nil {
+        } else if ![.list, .terminalResolve, .templates, .create, .borrow, .idle].contains(operation), computerID == nil {
             throw ComputerBridgeError("Specify a computer.")
         }
         if [.terminalRead, .terminalWrite, .terminalResize, .terminalClose, .terminalResolve].contains(operation), terminalID == nil {
@@ -198,6 +200,8 @@ public struct ComputerResponse: Codable, Sendable {
     public var path: String?
     public var byteCount: Int64?
     public var templates: [ComputerTemplateSummary]?
+    /// Computers the caller's agents started and then left running unused, each told once.
+    public var idle: [ComputerIdleNotice]?
     public init(computers: [RemoteComputer]? = nil, terminalID: UUID? = nil, data: Data? = nil,
                 offset: Int64? = nil, truncated: Bool? = nil, exited: Bool? = nil, error: String? = nil) {
         self.computers = computers; self.terminalID = terminalID; self.data = data; self.offset = offset
@@ -207,6 +211,17 @@ public struct ComputerResponse: Codable, Sendable {
         guard version == 1 else { throw ComputerBridgeError(version > 1 ? "Update Noodle to connect to this version of Noodle Computer." : "Update Noodle Computer to connect to this version of Noodle.") }
         if let error { throw ComputerBridgeError(error) }
         return self
+    }
+}
+
+/// A computer an agent started and then left running unused, with the note it is given.
+public struct ComputerIdleNotice: Codable, Equatable, Sendable {
+    public var computerID: UUID
+    /// The bot that started it; nil when an app outside Noodle did.
+    public var agentID: UUID?
+    public var note: String
+    public init(computerID: UUID, agentID: UUID?, note: String) {
+        self.computerID = computerID; self.agentID = agentID; self.note = note
     }
 }
 

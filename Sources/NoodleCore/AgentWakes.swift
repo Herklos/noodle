@@ -185,6 +185,14 @@ extension WorkspaceRepository {
         }
     }
 
+    /// A note from Noodle, due at once and shown with the bot's own wakes. It is not one of
+    /// the bot's, so it counts against none of their limits.
+    public func deliverWake(agentID: UUID, note: String, at now: Date = Date()) throws {
+        try updateWakes(agentID: agentID) { state in
+            state.due.append(AgentWake(dueAt: Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.up)), note: note))
+        }
+    }
+
     /// Hands over the wakes that fired; they are not listed again.
     public func listWakes(agentID: UUID) throws -> AgentWakeList {
         try updateWakes(agentID: agentID) { state in

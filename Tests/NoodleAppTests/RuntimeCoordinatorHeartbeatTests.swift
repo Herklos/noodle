@@ -111,6 +111,19 @@ import XCTest
         XCTAssertEqual(try f.repository.listWakes(agentID: agent.id).due.map(\.note), ["Check the build"])
     }
 
+    func testANoteFromNoodleWakesTheBotOnceItIsFree() async throws {
+        let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
+        process.canReceiveHeartbeat = false
+        f.runtime.wake(agent.id, note: "Build box is unused", repository: f.repository)
+        await f.runtime.settleWakes()
+        f.runtime.checkWakes(repository: f.repository)
+        XCTAssertEqual(process.wakes, 0, "A busy bot gets the note when it is free")
+        process.canReceiveHeartbeat = true
+        f.runtime.checkWakes(repository: f.repository)
+        XCTAssertEqual(process.wakes, 1)
+        XCTAssertEqual(try f.repository.listWakes(agentID: agent.id).due.map(\.note), ["Build box is unused"])
+    }
+
     func testOrganizeOnlyReachesAnIdleBot() throws {
         let f = try fixture(), agent = try f.agent(), process = try f.start(agent)
         XCTAssertFalse(f.runtime.canOrganize(agent.id))

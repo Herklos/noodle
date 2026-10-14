@@ -131,9 +131,12 @@ import NoodleRuntime
         try startTools()
         running = true
         loop = Task { [weak self] in
+            var round = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self, !Task.isCancelled else { return }
+                round += 1
+                if round.isMultiple(of: 60) { await self.checkIdleComputers() }
                 if let agents = try? self.repository.loadAgents() {
                     self.runtime.reconcile(agents: agents, repository: self.repository)
                 }
@@ -141,6 +144,14 @@ import NoodleRuntime
                 self.runtime.checkWakes(repository: self.repository)
                 await self.checkForChangesInBackground()
             }
+        }
+    }
+
+    /// Asks each bot to stop a computer it started and then left running unused.
+    public func checkIdleComputers() async {
+        for notice in await computers.idle() {
+            guard let agent = notice.agentID else { continue }
+            runtime.wake(agent, note: notice.note, repository: repository)
         }
     }
 

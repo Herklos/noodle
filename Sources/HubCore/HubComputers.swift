@@ -124,6 +124,11 @@ import NoodleCore
     /// Ends a bot's terminals on a computer it just lost, as when the broker catches a revoked call.
     public func revoke(computer: UUID, agent: UUID) { revoke([computer], from: agent) }
 
+    /// Computers the Hub's bots started and then left running unused, each told once.
+    public func idle() async -> [ComputerIdleNotice] {
+        (try? await call(ComputerRequest(.idle)).checked().idle) ?? []
+    }
+
     /// Drops a deleted bot's grants and ends its terminals.
     public func forget(bot: UUID) {
         let taken = registry.assigned(to: bot)

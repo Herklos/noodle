@@ -28,6 +28,8 @@ import SwiftUI
     /// Normal app construction always uses the authenticated signed-app socket.
     @ObservationIgnored private let connection: (@Sendable (ComputerRequest) async throws -> ComputerResponse)?
     var installed: Bool { applicationLookup() != nil }
+    /// Hands on computers bots started and then left running unused, so each bot is asked to stop its own.
+    @ObservationIgnored var onIdle: (([ComputerIdleNotice]) -> Void)?
 
     init(repository: WorkspaceRepository, socket: URL? = nil,
          applicationLookup: @escaping @MainActor () -> URL? = { ComputerApplication.locate() },
@@ -65,8 +67,11 @@ import SwiftUI
         if monitor == nil {
             monitor = Task { [weak self] in
                 await self?.refresh(launchIfNeeded: true)
+                var round = 0
                 while !Task.isCancelled {
                     await self?.refresh()
+                    round += 1
+                    if round.isMultiple(of: 20) { await self?.checkIdle() }
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
@@ -89,6 +94,11 @@ import SwiftUI
         return try await connect(request, launchIfNeeded: false)
     }
     /// The kinds of computer Computer can make.
+    /// Never launches Noodle Computer: a computer only runs while it is open.
+    func checkIdle() async {
+        guard let idle = try? await call(.init(.idle), launchIfNeeded: false).checked().idle, !idle.isEmpty else { return }
+        onIdle?(idle)
+    }
     func templates() async throws -> [ComputerTemplateSummary] {
         try await call(ComputerRequest(.templates)).checked().templates ?? []
     }

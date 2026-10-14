@@ -13,7 +13,7 @@ import SwiftUI
     static private(set) var shared: ComputerExternalService?
     let gate: ExternalGate
     private let store: ComputerStore
-    private let provider: ComputerProvider
+    let provider: ComputerProvider
     private let stagingRoot: URL?
     private let prompter = ExternalPrompter(appName: ComputerAppIdentity.name, noun: "computer")
     private var server: ExternalConnectionServer?
@@ -32,6 +32,7 @@ import SwiftUI
 
     /// Who an outside app is to the provider: terminals it opens are its own.
     static func peer(_ caller: UUID) -> String { "external:" + caller.uuidString.lowercased() }
+    static func isPeer(_ peer: String) -> Bool { peer.hasPrefix("external:") }
 
     /// Starts serving the app's library, with the person answering the questions.
     static func start(store: ComputerStore) {
@@ -96,15 +97,22 @@ import SwiftUI
         request.agentID = nil
         try request.validate()
         let peer = Self.peer(caller)
+        // Every answer carries what this app's agents started and then left unused, as it cannot be woken.
+        func told(_ answer: ComputerResponse) -> ComputerResponse {
+            var answer = answer
+            let idle = provider.idleNotices(for: peer)
+            if !idle.isEmpty { answer.idle = idle }
+            return answer
+        }
         let lendable = Self.lendable(store)
         switch request.operation {
         case .list:
             var response = try await provider.handle(.init(.list), peer: peer)
             response.computers = response.computers?.filter { computer in gate.allows(caller, computer.id) && lendable.contains { $0.id == computer.id } }
             response.capabilities = nil
-            return response
+            return told(response)
         case .templates:
-            return try await provider.handle(request, peer: peer)
+            return told(try await provider.handle(request, peer: peer))
         case .create:
             guard let template = ContainerRegistry.bundled.templates.first(where: { $0.id == request.computer?.template }) else {
                 throw ComputerBridgeError("\(ComputerAppIdentity.name) does not offer that kind of computer. Run templates.")
@@ -112,12 +120,12 @@ import SwiftUI
             try await gate.confirm(for: caller, message: "“\(launcher.name)” wants to create a computer: \(template.name).", action: "Create")
             let response = try await provider.handle(request, peer: peer)
             for computer in response.computers ?? [] { gate.recordCreated(computer.id, by: caller) }
-            return response
+            return told(response)
         case .borrow:
             let items = lendable.map { ExternalItem(id: $0.id, name: $0.computer.name, symbol: $0.computer.appearance?.iconSymbol ?? $0.computer.displaySymbol) }
             let picked = try await gate.borrow(for: caller, from: items)
             let listed = try await provider.handle(.init(.list), peer: peer)
-            return ComputerResponse(computers: listed.computers?.filter { $0.id == picked })
+            return told(ComputerResponse(computers: listed.computers?.filter { $0.id == picked }))
         default:
             guard let id = request.computerID else { throw ComputerBridgeError("Specify --computer.") }
             try gate.require(caller, id)
@@ -128,7 +136,7 @@ import SwiftUI
             let staging = request.operation.isFileTransfer ? try stagingRoot ?? ComputerExternal.root() : nil
             let response = try await provider.handle(request, peer: peer, stagingRoot: staging)
             if request.operation == .delete { gate.forget(id) }
-            return response
+            return told(response)
         }
     }
 }
