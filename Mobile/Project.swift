@@ -48,6 +48,8 @@ let project = Project(
                 // Invitation links and QR codes are noodle://join-hub links, the same as on the Mac.
                 "CFBundleURLTypes": [["CFBundleURLName": "$(MOBILE_APP_BUNDLE_ID)", "CFBundleURLSchemes": ["noodle"]]],
                 "NSCameraUsageDescription": "Noodle takes photos you send or use as your picture, scans the QR code of a Noodle Hub invitation, and noodlets you open use the camera when they ask.",
+                // Without it the share sheet leaves out Save Image.
+                "NSPhotoLibraryAddUsageDescription": "Noodle saves pictures and videos from conversations to your photos when you choose Save.",
                 "NSLocalNetworkUsageDescription": "Noodle connects to your Noodle Hub on this network.",
                 "NSMicrophoneUsageDescription": "Record voice messages you choose to send, transcribed on this device, talk with bots on calls you start, and let noodlets you open listen when they ask.",
                 // A call keeps going with the screen locked or another app in front; CallKit refuses calls without voip.

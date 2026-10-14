@@ -87,9 +87,10 @@ import UserNotifications
         #expect(logged.contains("12"))
     }
 
-    /// iOS refuses the camera and the Hub's local address to an app that does not say why it needs them.
+    /// iOS refuses the camera and the Hub's local address to an app that does not say why it needs them,
+    /// and leaves Save Image out of the share sheet without the photo library one.
     @Test func permissionsSayWhyTheyAreNeeded() {
-        for key in ["NSCameraUsageDescription", "NSLocalNetworkUsageDescription", "NSMicrophoneUsageDescription"] {
+        for key in ["NSCameraUsageDescription", "NSLocalNetworkUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryAddUsageDescription"] {
             #expect((Bundle.main.object(forInfoDictionaryKey: key) as? String)?.isEmpty == false, "\(key)")
         }
     }

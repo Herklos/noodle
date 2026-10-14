@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Pictures and videos in conversations can be saved to Photos from the share menu, not only to Files.
+
 ### Changed
 
 - Calls show on the iPhone's call screen, keep going when the phone is locked, and can be muted or ended from the Lock Screen and from headphones.
@@ -13,6 +17,7 @@
 - During a call, turn Speaker on and off a few times; check the bot hears you and you hear it each time, with no echo of the bot on the loudspeaker.
 - Call a bot with AirPods connected; check you hear the bot in them and it hears you.
 - Mute and unmute from the call bar and from the call screen; check both show the same state and the bot stops hearing you while muted.
+- Touch and hold a picture in a conversation, choose Share, then Save Image; allow access when asked and check the picture is in Photos.
 
 ## [0.31.0] - 2026-10-13
 
