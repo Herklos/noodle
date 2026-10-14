@@ -18,22 +18,32 @@ public enum BotNameStyle: String, CaseIterable, Identifiable, Sendable {
 }
 
 public enum BotNameGenerator {
-    private static let realNames = [
-        "Ada", "Adrian", "Aisha", "Alex", "Alice", "Amara", "Amelia", "Amir",
-        "Ana", "Andre", "Anika", "Anna", "Ari", "Arthur", "Ava", "Ben",
-        "Blake", "Bruno", "Camille", "Carmen", "Cass", "Celia", "Charlie", "Chloe",
-        "Clara", "Daniel", "Daria", "David", "Diego", "Eli", "Elena", "Elias",
-        "Elise", "Emil", "Emma", "Eva", "Felix", "Finn", "Freya", "Gabriel",
-        "Grace", "Hana", "Harper", "Hazel", "Hugo", "Iris", "Isaac", "Isla",
-        "Ivan", "Jade", "James", "Jamie", "Jasper", "Jonah", "Jordan", "Julia",
-        "Kai", "Kira", "Lara", "Leo", "Leona", "Levi", "Lina", "Luca",
-        "Lucy", "Mae", "Mara", "Marco", "Maya", "Mia", "Mika", "Mila",
-        "Milo", "Mina", "Nadia", "Naomi", "Nico", "Nina", "Noah", "Nora",
-        "Omar", "Opal", "Oscar", "Owen", "Priya", "Quinn", "Ravi", "Remy",
-        "Riley", "Robin", "Rosa", "Rowan", "Ruby", "Sam", "Sara", "Sasha",
-        "Silas", "Sofia", "Sonia", "Theo", "Tobias", "Uma", "Vera", "Victor",
-        "Violet", "Will", "Yara", "Yuki", "Zara", "Zoe"
+    // Who each name suits a face of: names worn by both go to any face.
+    private static let feminineNames = [
+        "Ada", "Aisha", "Alice", "Amara", "Amelia", "Ana", "Anika", "Anna",
+        "Ava", "Camille", "Carmen", "Celia", "Chloe", "Clara", "Daria", "Elena",
+        "Elise", "Emma", "Eva", "Freya", "Grace", "Hana", "Hazel", "Iris",
+        "Isla", "Jade", "Julia", "Kira", "Lara", "Leona", "Lina", "Lucy",
+        "Mae", "Mara", "Maya", "Mia", "Mila", "Mina", "Nadia", "Naomi",
+        "Nina", "Nora", "Opal", "Priya", "Rosa", "Ruby", "Sara", "Sofia",
+        "Sonia", "Uma", "Vera", "Violet", "Yara", "Zara", "Zoe"
     ]
+
+    private static let masculineNames = [
+        "Adrian", "Amir", "Andre", "Arthur", "Ben", "Bruno", "Daniel", "David",
+        "Diego", "Eli", "Elias", "Emil", "Felix", "Finn", "Gabriel", "Hugo",
+        "Isaac", "Ivan", "James", "Jasper", "Jonah", "Leo", "Levi", "Luca",
+        "Marco", "Milo", "Nico", "Noah", "Omar", "Oscar", "Owen", "Ravi",
+        "Silas", "Theo", "Tobias", "Victor", "Will"
+    ]
+
+    private static let eitherNames = [
+        "Alex", "Ari", "Blake", "Cass", "Charlie", "Harper", "Jamie", "Jordan",
+        "Kai", "Mika", "Quinn", "Remy", "Riley", "Robin", "Rowan", "Sam",
+        "Sasha", "Yuki"
+    ]
+
+    private static let realNames = feminineNames + masculineNames + eitherNames
 
     private static let descriptors = [
         "Amber", "Bright", "Brisk", "Calm", "Clever", "Copper", "Cozy", "Curious",
@@ -66,5 +76,20 @@ public enum BotNameGenerator {
         }
 
         return style == .real ? "Alex" : "Noodle"
+    }
+
+    /// Which faces suit a name this generator makes: `.some(nil)` for any face, nil for a name it does not know.
+    public static func presentation(of name: String) -> BotFacePresentation?? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if known(feminineNames, name) { return .some(.feminine) }
+        if known(masculineNames, name) { return .some(.masculine) }
+        if known(eitherNames, name) { return .some(nil) }
+        let words = name.split(separator: " ").map(String.init)
+        if words.count == 2, known(descriptors, words[0]), known(companions, words[1]) { return .some(nil) }
+        return nil
+    }
+
+    private static func known(_ names: [String], _ word: String) -> Bool {
+        names.contains { $0.caseInsensitiveCompare(word) == .orderedSame }
     }
 }

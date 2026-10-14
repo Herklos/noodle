@@ -12,6 +12,7 @@ All notable changes to Noodle are documented here, following
 
 - Bots can stop a computer assigned to them when they are done with it. This needs the Noodle Computer update released alongside.
 - A bot that starts a computer and then leaves it unused is reminded to stop it: after it has run for 30 minutes with nothing using it for 15. This needs the Noodle Computer update released alongside.
+- New bots get a drawn face that suits their name, and a new one with each name you try, until you choose an icon. Bot icons also offer Choose Face… to pick from all of them.
 
 ### Changed
 

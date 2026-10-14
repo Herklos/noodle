@@ -2284,6 +2284,8 @@ struct AgentEditor: View {
     @State private var problem: String?
     /// On the owner's own Mac: the Hubs it joined that the bot can be shared on.
     @State private var hubSharing: [LinkHubSharing] = []
+    @State private var face = AutomaticFace()
+    @State private var named = false
 
     init(chats: HubChats, agent: LinkBot?, hubs: [HubChats] = [], created: @escaping (HubChats, LinkBot) -> Void = { _, _ in }) {
         _chats = State(initialValue: chats)
@@ -2366,7 +2368,19 @@ struct AgentEditor: View {
                     .accessibilityLabel("Edit Picture")
                 }
                 Section {
-                    TextField("Name", text: $draft.name)
+                    HStack {
+                        TextField("Name", text: $draft.name)
+                        if agent == nil {
+                            Button {
+                                draft.name = BotNameGenerator.random(style: .real, excluding: draft.name)
+                                face.follow(&draft, others: chats.agents, fresh: true)
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Generate Another Name")
+                        }
+                    }
                 }
                 Section {
                     if agent == nil, hubs.count > 1 {
@@ -2513,8 +2527,17 @@ struct AgentEditor: View {
             .task(id: CurrentHub.name(of: chats.pairing)) {
                 if chats.pairing.status == nil { await chats.pairing.refresh(quietly: true) }
             }
+            // A new bot starts with a generated name and, until a picture is chosen, a face that suits its name.
+            .onChange(of: draft.name) {
+                if agent == nil { face.follow(&draft, others: chats.agents) }
+            }
             // Again on coming back from a Hub's sharing, so its count follows.
             .onAppear {
+                if agent == nil, !named {
+                    named = true
+                    if draft.name.isEmpty { draft.name = BotNameGenerator.random(style: .real) }
+                    face.follow(&draft, others: chats.agents)
+                }
                 guard let agent else { return }
                 Task { hubSharing = await chats.hubSharing(agent) }
             }

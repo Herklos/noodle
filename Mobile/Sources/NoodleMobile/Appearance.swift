@@ -1,6 +1,7 @@
 import AVFoundation
 import HubLink
 import ImagePlayground
+import NoodleBrand
 import NoodleWallpaperCore
 import PhotosUI
 import SwiftUI
@@ -230,6 +231,11 @@ struct BotPictureEditor: View {
                 if supportsImagePlayground {
                     Button { creating = true } label: { Label("Create Image", systemImage: "apple.image.playground") }
                 }
+                NavigationLink {
+                    FacePicker(selection: draft.avatarImageData) { draft.avatarImageData = $0 }
+                } label: {
+                    Label("Choose Face", systemImage: "face.smiling")
+                }
                 Button {
                     draft.removePicture()
                 } label: {
@@ -304,6 +310,44 @@ struct BotPictureEditor: View {
         } catch {
             problem = error.localizedDescription
         }
+    }
+}
+
+/// The ready-made faces in a grid, the chosen one ringed. Choosing one goes back.
+struct FacePicker: View {
+    let selection: Data?
+    let choose: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 60), spacing: 12)], spacing: 12) {
+                ForEach(BotFaces.all.indices, id: \.self) { index in
+                    let face = BotFaces.all[index].imageData
+                    Button {
+                        choose(face)
+                        dismiss()
+                    } label: {
+                        Group {
+                            if let image = DecodedImages.picture(face) {
+                                Image(uiImage: image).resizable()
+                            } else {
+                                Circle().fill(.quaternary)
+                            }
+                        }
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(Circle())
+                        .overlay { Circle().inset(by: -3).strokeBorder(face == selection ? Color.accentColor : .clear, lineWidth: 2.5) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Face \(index + 1)")
+                    .accessibilityAddTraits(face == selection ? .isSelected : [])
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Faces")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

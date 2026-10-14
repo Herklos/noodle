@@ -15,6 +15,7 @@ public struct IconEditorSheet: View {
     private let avatar: AvatarIdea?
     private let initials: String?
     private let takesPhotos: Bool
+    private let faces: [Data]
     @Environment(\.dismiss) private var dismiss
     @State private var draft: IconAppearance
     @State private var failure: String?
@@ -23,15 +24,16 @@ public struct IconEditorSheet: View {
     @State private var photoSelection: PhotosPickerItem?
     @State private var isLoadingImage = false
     @State private var takingPhoto = false
+    @State private var choosingFace = false
     @State private var isDropTargeted = false
     @State private var dropTask: Task<Void, Never>?
 
     /// With `initials`, a person's: they come first among the symbols, chosen as no symbol. `takesPhotos`
-    /// offers the camera, which only a person's picture does.
+    /// offers the camera, which only a person's picture does. `faces` are ready-made pictures, used as they are.
     public init(title: String, icon: Binding<IconAppearance>, symbol: String, symbols: [String], encoding: IconImageEncoding,
-                avatar: AvatarIdea? = nil, initials: String? = nil, takesPhotos: Bool = false) {
+                avatar: AvatarIdea? = nil, initials: String? = nil, takesPhotos: Bool = false, faces: [Data] = []) {
         _icon = icon; self.title = title; self.symbol = symbol; self.symbols = symbols; self.encoding = encoding; self.avatar = avatar
-        self.initials = initials; self.takesPhotos = takesPhotos
+        self.initials = initials; self.takesPhotos = takesPhotos; self.faces = faces
         _draft = State(initialValue: icon.wrappedValue)
     }
 
@@ -64,6 +66,16 @@ public struct IconEditorSheet: View {
                                 NoodleImagePlaygroundButton(sourceImageData: draft.iconImage, concepts: avatar?.concepts ?? []) { url in loadImage(url) }
                                     .frame(minWidth: 0, maxWidth: .infinity)
                             }
+                        }
+                        if !faces.isEmpty {
+                            Button { choosingFace = true } label: {
+                                Label("Choose Face…", systemImage: "face.smiling").frame(maxWidth: .infinity).frame(height: 20)
+                            }.buttonStyle(.bordered)
+                                .popover(isPresented: $choosingFace, arrowEdge: .bottom) {
+                                    FacePicker(faces: faces, selection: draft.iconImage) { face in
+                                        draft.iconImage = face; photoSelection = nil; choosingFace = false
+                                    }
+                                }
                         }
                         Divider()
                         Button {
@@ -168,5 +180,39 @@ public struct IconEditorSheet: View {
             guard !Task.isCancelled else { return }
             draft.iconImage = data
         } catch { if !Task.isCancelled { failure = error.localizedDescription } }
+    }
+}
+
+/// Ready-made faces in a grid, the chosen one ringed.
+private struct FacePicker: View {
+    let faces: [Data]
+    let selection: Data?
+    let choose: (Data) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 8), count: 8), spacing: 8) {
+                ForEach(faces.indices, id: \.self) { index in
+                    let face = faces[index]
+                    Button { choose(face) } label: {
+                        FaceImage(data: face)
+                            .frame(width: 44, height: 44)
+                            .clipShape(Circle())
+                            .overlay { Circle().inset(by: -3).strokeBorder(face == selection ? Color.accentColor : .clear, lineWidth: 2.5) }
+                    }.buttonStyle(.plain).accessibilityLabel("Face \(index + 1)")
+                }
+            }.padding(14)
+        }.frame(width: 14 * 2 + 8 * 44 + 7 * 8, height: 360)
+    }
+}
+
+private struct FaceImage: View {
+    let data: Data
+    var body: some View {
+        if let image = NSImage(data: data) {
+            Image(nsImage: image).resizable().interpolation(.high)
+        } else {
+            Circle().fill(.quaternary)
+        }
     }
 }

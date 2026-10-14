@@ -4,6 +4,10 @@
 
 ## [0.32.0] - 2026-10-14
 
+### Added
+
+- A new bot starts with a name and a drawn face that suits it, and the button beside the name tries another name with another face, until you choose a picture. Bot Picture also has Choose Face to pick from all of them.
+
 ### Fixed
 
 - Pictures and videos in conversations can be saved to Photos from the share menu, not only to Files.
@@ -23,6 +27,8 @@
 - Touch and hold a picture in a conversation, choose Share, then Save Image; allow access when asked and check the picture is in Photos.
 - Make a new bot; check it says hello in its conversation within a few moments, before you write anything.
 - Pair with a Hub where you have no bots yet and tap Continue on the team; check each of the three introduces itself in the Team group and no message appears from you.
+- Make a new bot; check it starts with a name and a face, and that tapping the arrows beside the name changes both, with a woman's face for a woman's name and a man's for a man's.
+- In a bot's Bot Picture, tap Choose Face and pick one; check the bot shows it after saving and keeps it.
 
 ## [0.31.0] - 2026-10-13
 

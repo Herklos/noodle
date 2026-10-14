@@ -3,6 +3,7 @@ import Foundation
 import HubLink
 import Observation
 import NoodleAppletTools
+import NoodleBrand
 import NoodleCalendarTools
 import NoodleCore
 import NoodleHubClient
@@ -1479,6 +1480,22 @@ final class NoodleStore {
         // A harness a Hub lends speaks with the same voices.
         await BotVoice.fitting(name: name, harnessIdentifier: HubHarnessChoice(identifier: harnessIdentifier)?.provider ?? harnessIdentifier,
                                guesser: voiceGuesser)
+    }
+
+    /// The face a new bot wears until one is chosen for it: `current` while that still suits the name,
+    /// otherwise one no other bot wears. Names the generator made need no guess.
+    func fittingFace(forBotNamed name: String, current: Data?) async -> Data? {
+        let presentation: BotFacePresentation?
+        if let known = BotNameGenerator.presentation(of: name) {
+            presentation = known
+        } else {
+            presentation = switch await voiceGuesser.presentation(forName: name) {
+            case .feminine: .feminine
+            case .masculine: .masculine
+            case nil: nil
+            }
+        }
+        return BotFaces.fitting(presentation, current: current, avoiding: Set(agents.compactMap(\.avatarImageData)))
     }
 
     /// The card of the call in progress in a conversation. A Hub's card arrives once the call

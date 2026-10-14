@@ -58,6 +58,7 @@ struct NewBotSheet: View {
     @State private var avatarSymbolName: String? = "sparkles"
     @State private var avatarColorIndex = Int.random(in: BotAvatarPalette.gradients.indices)
     @State private var avatarImageData: Data?
+    @State private var hasChosenIcon = false
     @State private var editingAvatar = false
     @State private var mcpConnectionIDs: Set<UUID> = []
     @State private var computerIDs: Set<UUID> = []
@@ -111,6 +112,11 @@ struct NewBotSheet: View {
 
                             Button {
                                 name = BotNameGenerator.random(style: selectedBotNameStyle, excluding: name)
+                                // Another name, another face, unless an icon was chosen.
+                                if !hasChosenIcon, let presentation = BotNameGenerator.presentation(of: name) {
+                                    let worn = store.agents.compactMap(\.avatarImageData) + [avatarImageData].compactMap { $0 }
+                                    avatarImageData = BotFaces.random(for: presentation, avoiding: Set(worn))
+                                }
                                 nameFocused = true
                             } label: {
                                 Image(systemName: "arrow.triangle.2.circlepath")
@@ -192,6 +198,15 @@ struct NewBotSheet: View {
         }
         .followsNameForVoice($selectedVoice, chosen: $hasChosenVoice, name: name,
                              harnessIdentifier: selectedHarnessIdentifier, store: store)
+        .task(id: name) {
+            // Until an icon is chosen, the bot wears a face that suits its name. A generated name needs no guess.
+            guard !hasChosenIcon, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            if BotNameGenerator.presentation(of: name) == nil { try? await Task.sleep(for: .milliseconds(400)) }
+            guard !Task.isCancelled else { return }
+            let face = await store.fittingFace(forBotNamed: name, current: avatarImageData)
+            guard !Task.isCancelled, !hasChosenIcon else { return }
+            avatarImageData = face
+        }
         .onChange(of: store.runtime.availableInstallations) { _, _ in
             selectAvailableHarnessIfNeeded()
         }
@@ -199,7 +214,7 @@ struct NewBotSheet: View {
             BotIconEditor(
                 symbolName: $avatarSymbolName,
                 colorIndex: $avatarColorIndex,
-                imageData: $avatarImageData,
+                imageData: Binding(get: { avatarImageData }, set: { avatarImageData = $0; hasChosenIcon = true }),
                 avatar: AvatarIdea(name: name, description: publicDescription, backstory: backstory)
             )
             .noodleSheetSizing()
@@ -776,7 +791,8 @@ private struct BotIconEditor: View {
             symbol: BotAvatar.defaultSymbol,
             symbols: Self.symbols,
             encoding: .jpeg(quality: 0.86),
-            avatar: avatar
+            avatar: avatar,
+            faces: BotFaces.all.map(\.imageData)
         )
     }
 }
