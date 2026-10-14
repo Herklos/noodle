@@ -592,6 +592,10 @@ public struct WorkspaceRepository: Sendable {
 
         Read `preferences.md` at the start of each session and reread it after changes. Apply it as this bot's standing instructions, such as tone, formatting and working style; newer explicit user requests take precedence. When the user asks you to remember a preference, update `preferences.md`. Read `assignments.md` at the start of each session too: it lists recurring work you were asked to keep doing, and each heartbeat does its next round. Use `memory.md` for durable facts, decisions, and ongoing context. Before changing any of these files, read `.agents/skills/preferences-and-memory/SKILL.md` and follow it. Noodle creates `preferences.md` and `assignments.md` with only a heading if missing and preserves all three files during workspace synchronization; keep persistent notes there, not in generated instructions. Do not record safety stops, refusals or runtime failures in either file as reasons to avoid a task; a new session should be free to try again.
 
+        ## Long work
+
+        Everyone who talks with you waits while a turn runs, so keep turns short. When a request will take more than a few minutes, such as reading several websites or a long document, say briefly that you are on it, run the work as a background task or sub-agent if your harness offers one, and end the turn. Never wait on a background task or sub-agent, or check on it repeatedly; carry on with other messages and report when its result arrives. Without background work, do it in steps and check Messenger for unread messages between them.
+
         ## Messages
 
         \(MessengerDocumentation.bootstrapInstructions)

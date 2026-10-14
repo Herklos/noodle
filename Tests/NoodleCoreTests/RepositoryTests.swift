@@ -70,6 +70,14 @@ final class RepositoryTests: XCTestCase {
         XCTAssertFalse(updated.contains("## Description"))
     }
 
+    func testAgentInstructionsKeepTheBotAvailableDuringLongWork() throws {
+        let created = try repository.createAgent(named: "Build Bot")
+        let instructions = try String(
+            contentsOf: repository.directory(for: created.agent).appendingPathComponent("AGENTS.md"), encoding: .utf8)
+        XCTAssertTrue(instructions.contains("## Long work\n"))
+        XCTAssertTrue(instructions.contains("Never wait on a background task or sub-agent"))
+    }
+
     func testAgentWorkspaceUsesStableOpaqueIdentifier() throws {
         let created = try repository.createAgent(named: "Build Bot")
         let directory = repository.directory(for: created.agent)

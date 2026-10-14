@@ -16,6 +16,7 @@ All notable changes to Noodle are documented here, following
 - Voice calls use the microphone chosen for dictation in Settings → Chat, and Noodle's own call connection instead of a hidden web page, which macOS could slow down.
 - Calls to a bot on your Noodle Hub send their audio over your Hub connection, and the Hub connects to the bot's voice. This needs the Hub update released alongside, and calls from your iPhone to bots on this Mac need the iPhone app update.
 - Bots know their own name and description, not just their backstory.
+- Bots say they are on a slow request and keep answering messages while it runs, using their harness's background tasks where it has them, instead of going quiet until it finishes.
 
 ### Fixed
 

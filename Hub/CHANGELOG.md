@@ -11,6 +11,7 @@
 
 - The Hub connects calls to the bot's voice itself, and Macs and iPhones send and receive a call's audio over their Hub connection. Calling needs the Noodle and iPhone app updates released alongside.
 - Bots on the Hub know their own name and description, not just their backstory.
+- Bots on the Hub say they are on a slow request and keep answering messages while it runs, using their harness's background tasks where it has them, instead of going quiet until it finishes.
 
 ## [0.33.0] - 2026-10-14
 
