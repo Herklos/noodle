@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-10-14
+
 ### Fixed
 
 - Clicking a bot's picture in either desktop widget opens its chat, just like clicking its name.

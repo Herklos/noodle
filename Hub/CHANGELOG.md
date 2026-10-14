@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-14
+
 ### Fixed
 
 - A long list in Settings → Groups shows its scroll bar again.

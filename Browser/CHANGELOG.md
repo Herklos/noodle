@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-14
+
 ### Fixed
 
 - The address bar goes back to showing just the domain when you click elsewhere, such as on the tab strip or a toolbar button, not only on the page.
