@@ -13,8 +13,6 @@ public enum StarterTeam {
 
     public static let groupName = "Team"
     public static let groupDescription = "Ask the team anything; the personal assistant brings in whoever fits."
-    /// Sent for the person when they leave the welcome, so the team answers straight away.
-    public static let greeting = "Welcome to the team! Please introduce yourselves, and tell me what you are best at and how you can help me."
 
     public static let members = [
         Member(role: "Personal Assistant", symbol: "sparkles", colorIndex: 0,

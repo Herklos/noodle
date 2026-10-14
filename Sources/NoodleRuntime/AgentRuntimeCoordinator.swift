@@ -480,6 +480,11 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
+    /// Wakes bots to introduce themselves in a conversation, once each is ready.
+    public func introduce(_ agentIDs: [UUID], in conversationID: UUID, repository: WorkspaceRepository) {
+        for id in agentIDs { wake(id, note: AgentWake.introductionNote(in: conversationID), repository: repository) }
+    }
+
     /// Wakes a bot whose scheduled wake is due once it can take a turn; a busy bot keeps it.
     /// Checking only reads dates held in memory, so it can run every second.
     public func checkWakes(repository: WorkspaceRepository) {

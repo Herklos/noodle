@@ -921,7 +921,7 @@ final class NoodleStore {
     /// `tools` stores, on this Mac, what the new bot may use here.
     /// `connectionIDs`, `computerIDs` and `browserIDs` are the person's on that Hub, not this Mac's.
     private func createHubAgent(on choice: HubHarnessChoice, draft: LinkBotDraft, connectionIDs: Set<UUID>,
-                                computerIDs: Set<UUID>, browserIDs: Set<UUID>) -> Bool {
+                                computerIDs: Set<UUID>, browserIDs: Set<UUID>, introduces: Bool) -> Bool {
         guard let mirror = hubMirrors.first(where: { $0.pairing.hub?.key == choice.hub }) else {
             errorMessage = "Join that Noodle Hub again before creating a bot on it."
             return false
@@ -933,6 +933,7 @@ final class NoodleStore {
                 if !connectionIDs.isEmpty { try await mirror.assignConnections(connectionIDs, toAgent: agent.id) }
                 if !computerIDs.isEmpty { try await mirror.assignComputers(computerIDs, toAgent: agent.id) }
                 if !browserIDs.isEmpty { try await mirror.assignBrowsers(browserIDs, toAgent: agent.id) }
+                if introduces { try? await mirror.introduce(agent.id) }
                 selectedConversationID = conversations.first { $0.kind == .direct && $0.participantIDs == [agent.id] }?.id
                 joinShownSpace(selectedConversationID)
                 refreshAppShortcuts()
@@ -975,7 +976,8 @@ final class NoodleStore {
         imageGeneration: Bool = false,
         folders: [AgentFolder] = [],
         harnessProfile: UUID? = nil,
-        voice: String? = nil
+        voice: String? = nil,
+        introduces: Bool = true
     ) -> Bool {
         if let choice = HubHarnessChoice(identifier: harnessIdentifier) {
             var draft = LinkBotDraft(
@@ -986,7 +988,8 @@ final class NoodleStore {
                 avatarImageData: avatarImageData)
             draft.voice = validVoice(voice, harnessIdentifier: choice.provider)
             draft.imageGeneration = imageGeneration
-            return createHubAgent(on: choice, draft: draft, connectionIDs: mcpConnectionIDs, computerIDs: computerIDs, browserIDs: browserIDs)
+            return createHubAgent(on: choice, draft: draft, connectionIDs: mcpConnectionIDs, computerIDs: computerIDs, browserIDs: browserIDs,
+                                  introduces: introduces)
         }
         guard runtime.availableInstallations.contains(where: { $0.provider.rawValue == harnessIdentifier }) else {
             errorMessage = "Set up a supported harness in Settings before creating a bot."
@@ -1045,6 +1048,7 @@ final class NoodleStore {
         startAgentServicesAfterSave()
         runtime.refresh(agents: agents)
         runtime.start(agent: created.agent, repository: repository)
+        if introduces { runtime.introduce([created.agent.id], in: created.conversation.id, repository: repository) }
         selectedConversationID = created.conversation.id
         joinShownSpace(created.conversation.id)
         creationSheet = nil

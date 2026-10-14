@@ -80,6 +80,24 @@ import XCTest
         XCTAssertEqual(listed, .bots([bot]))
     }
 
+    /// A device asks a bot it just made to say hello; the Hub wakes it with a note naming the conversation.
+    func testADeviceAsksItsNewBotToIntroduceItself() async throws {
+        let f = try await fixture()
+        let bot = try await createBot(f)
+        let answer = try await f.device.request(.introduce(conversationID: bot.conversationID))
+        XCTAssertEqual(answer, .done)
+        var notes: [String] = []
+        for _ in 0..<100 where notes.isEmpty {
+            notes = try f.hub.repository.listWakes(agentID: bot.id).due.map(\.note)
+            if notes.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        XCTAssertEqual(notes, [AgentWake.introductionNote(in: bot.conversationID)])
+        do {
+            _ = try await f.device.request(.introduce(conversationID: UUID()))
+            XCTFail("a conversation that is not theirs")
+        } catch {}
+    }
+
     /// A device turns Image Generation on and off for its bot; the Hub grants the tool and says whether it has a model.
     func testADeviceGivesItsBotImageGenerationOnTheHub() async throws {
         let f = try await fixture()

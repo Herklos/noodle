@@ -505,6 +505,13 @@ import NoodleVoicePeer
         runtime.organize(agent.id)
     }
 
+    /// Only the user's own bots that run here; bots shared with them are left alone.
+    public func introduce(in conversationID: UUID, for user: HubUser) throws {
+        let bots = try ownedConversation(conversationID, by: user).bots
+            .filter { access.owner(ofBot: $0.id) == user.id && access.host(ofBot: $0.id) == nil }
+        runtime.introduce(bots.map(\.id), in: conversationID, repository: repository)
+    }
+
     /// Deletes every bot of a user who is being removed, and their conversations with bots shared with them.
     public func removeBots(of user: HubUser) {
         for agent in (try? repository.loadAgents()) ?? [] where access.owner(ofBot: agent.id) == user.id {

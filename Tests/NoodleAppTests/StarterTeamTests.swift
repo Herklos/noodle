@@ -3,6 +3,7 @@ import XCTest
 import NoodleBrand
 @testable import NoodleCore
 @testable import Noodle
+@testable import NoodleRuntime
 
 @MainActor final class StarterTeamTests: XCTestCase {
     func testFirstRunSetsUpATeamAndTheirGroupOnTheAccountJustSignedIn() throws {
@@ -47,16 +48,20 @@ import NoodleBrand
         }
     }
 
-    func testContinuingFromTheTeamGreetsThemInTheirGroup() throws {
+    func testContinuingFromTheTeamWakesThemToIntroduceThemselvesInTheirGroup() async throws {
         let runtime = try RuntimeCoordinatorFixture()
         let store = NoodleStore(repository: runtime.repository, runtime: runtime.runtime, connectsServices: false)
         defer { store.stopMonitoring(); runtime.cleanUp() }
-        _ = try XCTUnwrap(store.createStarterTeamIfFirst(on: .codex, style: .real))
+        let team = try XCTUnwrap(store.createStarterTeamIfFirst(on: .codex, style: .real))
         let group = try XCTUnwrap(store.selectedConversation)
-        store.greetStarterTeam(in: group.id)
-        let message = try XCTUnwrap(store.messages(for: group).last)
-        XCTAssertEqual(message.body, StarterTeam.greeting)
-        XCTAssertEqual(message.author, .user)
+        await runtime.runtime.settleWakes()
+        for bot in team { XCTAssertEqual(try runtime.repository.listWakes(agentID: bot.id).due, [], "Not before Continue.") }
+        store.introduceStarterTeam(in: group.id)
+        await runtime.runtime.settleWakes()
+        for bot in team {
+            XCTAssertEqual(try runtime.repository.listWakes(agentID: bot.id).due.map(\.note), [AgentWake.introductionNote(in: group.id)])
+        }
+        XCTAssertTrue(store.messages(for: group).isEmpty, "Nothing is sent in the person's name.")
         XCTAssertEqual(store.selectedConversationID, group.id)
     }
 }

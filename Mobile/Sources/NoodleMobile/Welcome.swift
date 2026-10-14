@@ -56,10 +56,10 @@ import SwiftUI
         }
     }
 
-    /// Sends the person's first message to the team. One that does not go through waits in the group to try again.
-    func greet() async {
+    /// Asks the team to introduce themselves in their group.
+    func introduce() async {
         guard let group else { return }
-        try? await chats.send(StarterTeam.greeting, to: group)
+        try? await chats.introduce(in: group.id)
     }
 }
 
@@ -71,7 +71,7 @@ struct HubWelcomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var welcome: HubWelcome
     @State private var lifted = false
-    @State private var greeting = false
+    @State private var introducing = false
 
     init(pairing: HubPairing, done: @escaping (LinkGroup?) -> Void) {
         self.done = done
@@ -164,9 +164,9 @@ struct HubWelcomeView: View {
             }
         } else {
             Button {
-                greeting = true
+                introducing = true
                 Task {
-                    await welcome.greet()
+                    await welcome.introduce()
                     done(welcome.group)
                 }
             } label: {
@@ -174,7 +174,7 @@ struct HubWelcomeView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(welcome.stage != .ready || greeting)
+            .disabled(welcome.stage != .ready || introducing)
         }
     }
 

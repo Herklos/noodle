@@ -42,6 +42,15 @@ import XCTest
         XCTAssertEqual(f.store.draft(for: f.directA.id), "Existing draft")
     }
 
+    func testANewBotIsWokenToIntroduceItselfInItsConversation() async throws {
+        let f = try fixture()
+        XCTAssertTrue(create(f), f.store.errorMessage ?? "")
+        let agent = try XCTUnwrap(f.store.agents.last), conversation = try XCTUnwrap(f.store.selectedConversation)
+        await f.runtime.runtime.settleWakes()
+        XCTAssertEqual(try f.repository.listWakes(agentID: agent.id).due.map(\.note), [AgentWake.introductionNote(in: conversation.id)])
+        XCTAssertTrue(f.store.messages(for: conversation).isEmpty, "Nothing is sent in the person's name.")
+    }
+
     func testHarnessProfileSavesWithSettingsAndDeletingItReturnsBotsToSystem() throws {
         let f = try fixture()
         let profile = try f.store.harnessProfiles.create(provider: .codex, named: "Work")

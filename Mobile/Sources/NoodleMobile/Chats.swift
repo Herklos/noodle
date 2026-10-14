@@ -538,6 +538,13 @@ enum HubThread: HubConversation {
         }
     }
 
+    /// Asks the bots in a conversation to introduce themselves there.
+    func introduce(in conversationID: UUID) async throws {
+        guard case .done = try await pairing.request(.introduce(conversationID: conversationID)) else {
+            throw LinkError("The Hub sent an unexpected answer.")
+        }
+    }
+
     /// Asks the bot to tidy its own workspace files; the Hub refuses while it is busy.
     func organize(_ agent: LinkBot) async throws {
         guard case .done = try await pairing.request(.organize(botID: agent.id)) else {
@@ -2557,7 +2564,9 @@ struct AgentEditor: View {
                     agent.draft = draft
                     try await chats.update(agent)
                 } else {
-                    created(chats, try await chats.create(draft))
+                    let bot = try await chats.create(draft)
+                    try? await chats.introduce(in: bot.conversationID)
+                    created(chats, bot)
                 }
                 dismiss()
             } catch {

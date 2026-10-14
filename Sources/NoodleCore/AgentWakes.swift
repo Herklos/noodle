@@ -14,6 +14,13 @@ public struct AgentWake: Codable, Hashable, Sendable {
     }
 }
 
+extension AgentWake {
+    /// Left for a bot when it is made, so it greets the person before they write.
+    public static func introductionNote(in conversationID: UUID) -> String {
+        "You were just made. Introduce yourself in conversation \(conversationID): in a few sentences, say who you are, what you are best at and how you can help."
+    }
+}
+
 /// A five-field cron expression (minute, hour, day of month, month, day of week) in the
 /// Mac's local time, with lists, ranges, steps, month and weekday names and the @ shorthands.
 public struct CronSchedule: Sendable {

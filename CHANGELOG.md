@@ -17,6 +17,7 @@ All notable changes to Noodle are documented here, following
 - Calls to a bot on your Noodle Hub send their audio over your Hub connection, and the Hub connects to the bot's voice. This needs the Hub update released alongside, and calls from your iPhone to bots on this Mac need the iPhone app update.
 - Bots know their own name and description, not just their backstory.
 - Bots say they are on a slow request and keep answering messages while it runs, using their harness's background tasks where it has them, instead of going quiet until it finishes.
+- A new bot introduces itself as soon as it is ready, without waiting for you to write. The starter team introduces themselves in their group instead of answering a greeting sent in your name. Bots made on your Noodle Hub need the Hub update released alongside.
 
 ### Fixed
 

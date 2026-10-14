@@ -633,6 +633,9 @@ import os
         case .organize(let botID):
             try hubBots().organize(botID, for: try user(key))
             return .done
+        case .introduce(let conversationID):
+            try hubBots().introduce(in: conversationID, for: try user(key))
+            return .done
         case .messages(let conversationID, let after):
             return .messages(try hubBots().messages(in: conversationID, after: after, for: try user(key)))
         case .messagePage(let page):

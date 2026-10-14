@@ -213,7 +213,7 @@ struct FirstBotSetupSheet: View {
                 }
             }
             Button("Continue") {
-                if let teamGroupID { store.greetStarterTeam(in: teamGroupID) }
+                if let teamGroupID { store.introduceStarterTeam(in: teamGroupID) }
                 store.finishFirstBotSetup()
             }
             .buttonStyle(.borderedProminent)

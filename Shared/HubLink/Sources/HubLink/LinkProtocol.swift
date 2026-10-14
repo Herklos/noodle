@@ -135,6 +135,9 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Asks an idle bot to tidy its own workspace files, as Organize does in Noodle. Answers `done`;
     /// refused while the bot is busy.
     case organize(botID: UUID)
+    /// Wakes this user's bots in a conversation to introduce themselves there, as bots do once
+    /// made. Answers `done`.
+    case introduce(conversationID: UUID)
     /// Messages of one of this user's conversations, from position `after` on.
     case messages(conversationID: UUID, after: Int)
     /// Part of a conversation, answered with `messages`: the newest first, earlier pages as the

@@ -10,6 +10,7 @@
 
 - Calls show on the iPhone's call screen, keep going when the phone is locked, and can be muted or ended from the Lock Screen and from headphones.
 - A call's audio goes over your Hub connection, and the Hub connects to the bot's voice. This needs the Hub update released alongside.
+- A new bot introduces itself as soon as it is ready, without waiting for you to write. The starter team introduces themselves in their group instead of answering a greeting sent in your name. This needs the Hub update released alongside.
 
 ### What to Test
 
@@ -18,6 +19,8 @@
 - Call a bot with AirPods connected; check you hear the bot in them and it hears you.
 - Mute and unmute from the call bar and from the call screen; check both show the same state and the bot stops hearing you while muted.
 - Touch and hold a picture in a conversation, choose Share, then Save Image; allow access when asked and check the picture is in Photos.
+- Make a new bot; check it says hello in its conversation within a few moments, before you write anything.
+- Pair with a Hub where you have no bots yet and tap Continue on the team; check each of the three introduces itself in the Team group and no message appears from you.
 
 ## [0.31.0] - 2026-10-13
 

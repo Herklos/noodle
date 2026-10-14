@@ -200,6 +200,14 @@ import Observation
         return agent
     }
 
+    /// Asks a bot just made on the Hub to introduce itself in its conversation.
+    public func introduce(_ localAgentID: UUID) async throws {
+        guard let entry = entries.first(where: { $0.agent == localAgentID }) else { throw LinkError("This bot is not on the Hub.") }
+        guard case .done = try await pairing.request(.introduce(conversationID: entry.remoteConversation)) else {
+            throw LinkError("The Hub sent an unexpected answer.")
+        }
+    }
+
     public func updateBot(localAgentID: UUID, with draft: LinkBotDraft) async throws {
         guard let entry = entries.first(where: { $0.agent == localAgentID }) else { throw LinkError("This bot is not on the Hub.") }
         guard case .bot(let bot) = try await pairing.request(.updateBot(id: entry.remote, draft)) else {

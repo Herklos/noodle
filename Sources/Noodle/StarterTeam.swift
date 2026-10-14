@@ -16,7 +16,7 @@ extension NoodleStore {
         for (member, name) in zip(StarterTeam.members, StarterTeam.names(style: style, avoiding: Set(agents.map(\.displayName)))) {
             guard createAgent(named: name, harnessIdentifier: provider.rawValue, modelIdentifier: nil, reasoningEffort: nil,
                               avatarSymbolName: member.symbol, avatarColorIndex: member.colorIndex, avatarImageData: nil,
-                              publicDescription: member.publicDescription, backstory: member.backstory),
+                              publicDescription: member.publicDescription, backstory: member.backstory, introduces: false),
                   let bot = agents.last else { return team }
             team.append(bot)
         }
@@ -25,10 +25,10 @@ extension NoodleStore {
         return team
     }
 
-    /// Opens the team's group with the person's first message to them.
-    func greetStarterTeam(in groupID: UUID) {
+    /// Opens the team's group, where they introduce themselves.
+    func introduceStarterTeam(in groupID: UUID) {
         selectedConversationID = groupID
-        setDraft(StarterTeam.greeting, for: groupID)
-        sendDraft(to: groupID)
+        guard let group = conversations.first(where: { $0.id == groupID }) else { return }
+        runtime.introduce(group.participantIDs, in: groupID, repository: repository)
     }
 }

@@ -10,6 +10,8 @@ private actor WelcomeHub {
     var bots: [LinkBot]
     var groups: [LinkGroup] = []
     var messages: [LinkMessage] = []
+    /// Conversations whose bots were asked to introduce themselves.
+    var introduced: [UUID] = []
     /// Bots made before one creation is answered with a failure, once; nil fails none.
     var failsAfter: Int?
     /// Where it listens, which it tells the phone when pairing, as the real Hub does.
@@ -49,6 +51,9 @@ private actor WelcomeHub {
             let found = messages.filter { $0.conversationID == page.conversationID }
             return .messages(LinkMessages(messages: Array(found.suffix(page.limit)), count: found.count,
                                           start: max(0, found.count - page.limit)))
+        case .success(.introduce(let conversationID)):
+            introduced.append(conversationID)
+            return .done
         case .success(.send(let outgoing)):
             let sent = LinkMessage(id: outgoing.id, conversationID: outgoing.conversationID, author: .you, body: outgoing.body,
                                    createdAt: Date(), delivered: true)
@@ -108,18 +113,18 @@ private actor WelcomeHub {
         #expect(welcome.group?.id == group.id)
     }
 
-    @Test func continuingGreetsTheTeamInTheirGroup() async throws {
+    @Test func continuingAsksTheTeamToIntroduceThemselvesInTheirGroup() async throws {
         let hub = WelcomeHub(harnesses: [Self.codex])
         let (welcome, server) = try await joined(hub)
         defer { server.stop() }
         await welcome.make()
+        #expect(await hub.introduced.isEmpty, "Not before Continue.")
 
-        await welcome.greet()
+        await welcome.introduce()
 
         let group = try #require(welcome.group)
-        let sent = await hub.messages
-        #expect(sent.map(\.body) == [StarterTeam.greeting])
-        #expect(sent.map(\.conversationID) == [group.id])
+        #expect(await hub.introduced == [group.id])
+        #expect(await hub.messages.isEmpty, "Nothing is sent in the person's name.")
         #expect(welcome.chats.groups.map(\.id) == [group.id], "The list opens on it at once.")
     }
 
