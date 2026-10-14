@@ -14,15 +14,15 @@
   },
   "agents": [
     { "key": "sonia", "name": "Sonia", "harness": "claude-code", "model": "opus", "effort": "high",
-      "description": "Go-to-market lead: positioning, pricing and the plan", "avatar": { "image": "cast/sonia.jpg" } },
+      "description": "Go-to-market lead: positioning, pricing and the plan", "avatar": { "image": "face:feminine-07" } },
     { "key": "kira", "name": "Kira", "harness": "claude-code", "model": "sonnet",
-      "description": "Copywriter: headlines, emails and the landing page", "avatar": { "image": "cast/kira.jpg" } },
+      "description": "Copywriter: headlines, emails and the landing page", "avatar": { "image": "face:feminine-04" } },
     { "key": "mara", "name": "Mara", "harness": "codex", "model": "gpt-5.2-codex", "effort": "medium",
-      "description": "Designs and builds the landing page and the launch film", "avatar": { "image": "cast/mara.jpg" } },
+      "description": "Designs and builds the landing page and the launch film", "avatar": { "image": "face:feminine-05" } },
     { "key": "andre", "name": "Andre", "harness": "claude-code", "model": "sonnet",
       "description": "Analyst: sign-ups, funnels and what actually worked",
       "backstory": "You read the numbers and say plainly what they mean. You never call a result before the sample supports it.",
-      "avatar": { "image": "cast/andre.jpg" },
+      "avatar": { "image": "face:masculine-02" },
       "autoReplies": ["Give me ten minutes with the data.", "Updated. The dashboard has the new cut."] }
   ],
   "conversations": [

@@ -376,28 +376,6 @@ import XCTest
         }
     }
 
-    func testAFaceCanBeSharedBetweenScenariosInsteadOfCopied() throws {
-        let root = try directory()
-        let cast = root.appendingPathComponent("cast", isDirectory: true)
-        try FileManager.default.createDirectory(at: cast, withIntermediateDirectories: true)
-        let face = cast.appendingPathComponent("sol.jpg")
-        try Data("not really a face".utf8).write(to: face)
-
-        let folder = root.appendingPathComponent("finances", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let json = """
-        { "version": 1, "title": "Fixture", "harnesses": { "claude-code": { "models": "builtin" } },
-          "agents": [ { "key": "sol", "name": "Sol", "harness": "claude-code", "model": "opus",
-                        "avatar": { "image": "cast/sol.jpg" } } ] }
-        """
-        try Data(json.utf8).write(to: folder.appendingPathComponent("scenario.json"))
-        let scenario = try Scenario.load(from: folder)
-        XCTAssertEqual(try scenario.media("cast/sol.jpg").resolvingSymlinksInPath(), face.resolvingSymlinksInPath(),
-                       "A face in the cast is read from beside the scenarios")
-        XCTAssertThrowsError(try scenario.media("cast/nobody.jpg"), "A face that is not in the cast must not load")
-        XCTAssertThrowsError(try scenario.media("../elsewhere.jpg"), "Nothing outside the scenarios is readable")
-    }
-
     func testAWebAddressThatWasNeverFetchedSaysSo() throws {
         let folder = try directory()
         let json = """

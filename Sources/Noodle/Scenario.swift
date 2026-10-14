@@ -380,12 +380,14 @@ extension Scenario {
     /// that scripts/scenario.sh has fetched into the `.cache` beside the scenarios. The
     /// bundle has no network of its own, so nothing is ever downloaded from in here.
     func media(_ value: String) throws -> URL {
-        guard Self.isRemote(value) else {
-            // Faces and wallpapers that several scenarios share live beside them, so a
-            // change to one is a change everywhere rather than in four copies.
-            guard value.hasPrefix(Self.castFolder + "/") else { return try asset(value) }
-            return try file(value, under: folder.deletingLastPathComponent())
+        // The faces the app gives new bots, named rather than copied in beside the scenarios.
+        if value.hasPrefix(Self.facePrefix) {
+            guard let url = BotFaces.url(named: String(value.dropFirst(Self.facePrefix.count))) else {
+                throw ScenarioError("Missing face: \(value)")
+            }
+            return url
         }
+        guard Self.isRemote(value) else { return try asset(value) }
         // One cache for all of them: the name is the address, so two scenarios naming the
         // same thing share the one copy. Found by name rather than by extension, because a
         // web address need not end in one and the script works out what it is.
@@ -411,8 +413,8 @@ extension Scenario {
         String(SHA256.hash(data: Data(address.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
     }
 
-    /// Where the scenarios keep what more than one of them uses.
-    static let castFolder = "cast"
+    /// What names one of the app's built-in faces, as in "face:feminine-03".
+    static let facePrefix = "face:"
 
     func asset(_ path: String) throws -> URL { try file(path, under: folder) }
 

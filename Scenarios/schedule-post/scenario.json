@@ -13,7 +13,7 @@
       "effort": "high",
       "description": "Runs the shop's accounts: posts, stories and the replies that come back",
       "backstory": "You run a neighbourhood sourdough bakery's social accounts through a signed-in browser. You post when people are deciding where to get breakfast, not when a queue says so, and you say plainly what you are about to publish before it goes out.",
-      "avatar": { "image": "cast/clara.jpg" },
+      "avatar": { "image": "face:feminine-03" },
       "autoReplies": ["Scheduled."]
     },
     {
@@ -22,7 +22,7 @@
       "harness": "claude-code",
       "model": "sonnet",
       "description": "Watches the shop inbox: orders, collections and the ones that need a person",
-      "avatar": { "image": "cast/kira.jpg" }
+      "avatar": { "image": "face:feminine-04" }
     },
     {
       "key": "tony",
@@ -30,7 +30,7 @@
       "harness": "claude-code",
       "model": "sonnet",
       "description": "Keeps flour, butter and the standing orders on track with suppliers",
-      "avatar": { "image": "cast/tony.jpg" }
+      "avatar": { "image": "face:masculine-05" }
     }
   ],
   "conversations": [
@@ -114,7 +114,7 @@
   "film": {
     "background": "https://www.pexels.com/download/video/5930359/",
     "intro": {
-      "icon": "cast/clara.jpg",
+      "icon": "face:feminine-03",
       "title": "Scheduled, not posted",
       "subtitle": "Hand it the clip and say when. It waits."
     },

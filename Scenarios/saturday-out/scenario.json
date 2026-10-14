@@ -13,10 +13,10 @@
     { "key": "alfred", "name": "Alfred", "harness": "claude-code", "model": "sonnet",
       "description": "The family butler: plans, lists and everyone's whereabouts",
       "backstory": "You are the family's butler. You keep one plan, you anticipate, and you are unfailingly courteous.",
-      "avatar": { "image": "cast/alfred.jpg" },
+      "avatar": { "image": "face:masculine-01" },
       "autoReplies": ["Very good. I have added it to the plan.", "Consider it done."] },
     { "key": "chloe", "name": "Chloe", "harness": "claude-code", "model": "opus", "effort": "high",
-      "description": "Personal assistant for the diary, travel and errands", "avatar": { "image": "cast/chloe.jpg" } }
+      "description": "Personal assistant for the diary, travel and errands", "avatar": { "image": "face:feminine-02" } }
   ],
   "conversations": [
     { "key": "alfred", "direct": "alfred", "background": { "preset": "ocean" },
@@ -40,7 +40,7 @@
   "film": {
     "background": "black",
     "intro": {
-      "icon": "cast/alfred.jpg",
+      "icon": "face:masculine-01",
       "title": "Saturday, mapped",
       "subtitle": "Alfred plans the drive, the lunch and the walk with Apple Maps."
     },

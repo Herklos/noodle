@@ -162,8 +162,9 @@ done
 
 signing_identity="${NOODLE_SIGNING_IDENTITY:-}"
 if [[ -z "$signing_identity" ]]; then
+    # find-identity -v still lists a revoked certificate, marked CSSMERR_TP_CERT_REVOKED.
     signing_identity="$(security find-identity -v -p codesigning \
-        | awk -F '"' '/Apple Development:/ { print $2; exit }')"
+        | awk -F '"' '/Apple Development:/ && !/CSSMERR_/ { print $2; exit }')"
 fi
 if [[ -z "$signing_identity" ]]; then
     signing_identity="-"

@@ -31,6 +31,11 @@ public enum BotFaces {
         }
     }()
 
+    /// The bundled picture of a face by its file name without the extension, such as "feminine-03".
+    public static func url(named name: String) -> URL? {
+        Bundle.module.url(forResource: name, withExtension: "jpg", subdirectory: "Faces")
+    }
+
     private static func kind(_ url: URL) -> String {
         String(url.lastPathComponent.prefix { $0 != "-" })
     }

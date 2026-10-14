@@ -1,5 +1,6 @@
 #if NOODLE_DEV_HOOKS
 import Foundation
+import NoodleBrand
 import NoodleCore
 import NoodleLaunchChecks
 import XCTest
@@ -71,8 +72,8 @@ import XCTest
     }
 
     func testEveryScenarioFolderLoadsSeedsAndPlays() async throws {
-        // A folder is a scenario when it holds one. The others beside them, the shared
-        // cast and the cache of what has been fetched, are not.
+        // A folder is a scenario when it holds one. The cache of what has been fetched,
+        // beside them, is not.
         let folders = try FileManager.default.contentsOfDirectory(at: Self.scenariosRoot, includingPropertiesForKeys: [.isDirectoryKey])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
             .filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("scenario.json").path) }
@@ -219,6 +220,18 @@ import XCTest
             XCTAssertTrue($0.localizedDescription.contains("grace"), $0.localizedDescription)
         }
         XCTAssertThrowsError(try Scenario.load(from: try fixture(extra: "\"appearance\": \"light\",")))
+    }
+
+    func testABotCanWearABuiltInFaceByName() throws {
+        let scenario = try Scenario.load(from: try fixture(botExtra: ", \"avatar\": { \"image\": \"face:feminine-03\" }"))
+        let session = try session(scenario)
+        let agent = try XCTUnwrap(session.store.agents.first { $0.id == session.seeded.agents["ada"]?.id })
+        XCTAssertEqual(agent.avatarImageData, BotFaces.url(named: "feminine-03").flatMap { try? Data(contentsOf: $0) })
+        XCTAssertNotNil(agent.avatarImageData)
+
+        XCTAssertThrowsError(try Scenario.load(from: try fixture(botExtra: ", \"avatar\": { \"image\": \"face:nobody\" }"))) {
+            XCTAssertTrue($0.localizedDescription.contains("face:nobody"), $0.localizedDescription)
+        }
     }
 
     func testPinnedConversationsSitAboveTheRestInTheOrderListed() throws {

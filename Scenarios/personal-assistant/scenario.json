@@ -13,14 +13,14 @@
     { "key": "chloe", "name": "Chloe", "harness": "claude-code", "model": "opus", "effort": "high",
       "description": "Personal assistant for the diary, travel and errands",
       "backstory": "You are a personal assistant. You handle what you can, and bring only the decisions that need a person.",
-      "avatar": { "image": "cast/chloe.jpg" },
+      "avatar": { "image": "face:feminine-02" },
       "autoReplies": ["Done, and it is in the diary.", "Leave it with me. I will confirm once it is booked."] },
     { "key": "kai", "name": "Kai", "harness": "claude-code", "model": "sonnet",
-      "description": "Travel: flights, trains, hotels and the fine print", "avatar": { "image": "cast/kai.jpg" } },
+      "description": "Travel: flights, trains, hotels and the fine print", "avatar": { "image": "face:any-01" } },
     { "key": "clara", "name": "Clara", "harness": "claude-code", "model": "opus", "effort": "medium",
-      "description": "Chief of staff: clients, proposals and follow-ups", "avatar": { "image": "cast/clara.jpg" } },
+      "description": "Chief of staff: clients, proposals and follow-ups", "avatar": { "image": "face:feminine-03" } },
     { "key": "alfred", "name": "Alfred", "harness": "claude-code", "model": "sonnet",
-      "description": "The family butler: plans, lists and everyone's whereabouts", "avatar": { "image": "cast/alfred.jpg" } }
+      "description": "The family butler: plans, lists and everyone's whereabouts", "avatar": { "image": "face:masculine-01" } }
   ],
   "conversations": [
     { "key": "chloe", "direct": "chloe", "background": { "preset": "ocean" },
