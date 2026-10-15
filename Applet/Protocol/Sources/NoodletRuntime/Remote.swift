@@ -105,7 +105,7 @@ public struct NoodletLoadingView: View {
         case .preparing, .arriving(.preparing): "Packing files"
         case .arriving(.downloading(let received, let total)): "\(Self.size(received)) of \(Self.size(total))"
         case .arriving(.unpacking): size > 0 ? Self.size(size) : "Unpacking its files"
-        case .starting: "Opening its page"
+        case .starting: "Almost ready"
         }
     }
 

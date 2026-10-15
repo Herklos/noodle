@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- While a noodlet loads, its last step reads "Almost ready" instead of "Opening its page".
+
 ## [0.32.0] - 2026-10-15
 
 ### Changed
