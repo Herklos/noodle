@@ -95,15 +95,24 @@ figure { margin: 0; }
 .split-grid .shot { margin-top: 0; }
 
 /* ---------- Stages ----------
-   Product shots sit on the launch-pad photo, the way the apps' own film frames them.
+   Product shots sit on calm tiles, the same muted tones the README uses (one per app),
+   and the hero on Chloe's own wallpaper, blurred.
    Every stage keeps one shape, so the page has an even rhythm whatever the window sizes. */
-.stage { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 28px; background: #3b4a63 url(assets/stage-launch.avif) center / cover; }
+.stage, .alerts { --tile: linear-gradient(165deg, #4d5d73 0%, #7d8797 48%, #d6b8a0 100%); background: radial-gradient(120% 90% at 20% 0%, rgba(255,255,255,.22), transparent 60%), var(--tile); }
+.stage { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 28px; }
+.tone-wall { background: #3c4a5e url(assets/stage-wallpaper.avif) center / cover; }
+.tone-clay { --tile: linear-gradient(160deg, #a87b6c, #e6cdb9); }
+.tone-heather { --tile: linear-gradient(160deg, #7a7590, #d3cbd8); }
+.tone-graphite { --tile: linear-gradient(160deg, #4a515d, #8a919c); }
+.tone-sage { --tile: linear-gradient(160deg, #6f8a7c, #cbd7c7); }
+.tone-stone { --tile: linear-gradient(160deg, #8d9198, #dedbd3); }
+.tone-mist { --tile: linear-gradient(160deg, #62748a, #cdd5de); }
 .stage img { position: absolute; height: auto; filter: drop-shadow(0 24px 36px rgba(0,0,0,.45)) drop-shadow(0 4px 10px rgba(0,0,0,.25)); }
 .stage .win { border-radius: 12px; }
 /* A single window, centred and never taller than the stage allows. */
 .stage-one img { inset: 0; margin: auto; width: auto; max-width: 82%; max-height: 84%; }
-/* Beside text, a tall settings window gets a tall stage. */
-.stage-one.tall { aspect-ratio: 4 / 5; }
+/* Beside text, the settings window gets a square stage. */
+.stage-one.tall { aspect-ratio: 1 / 1; }
 /* The Mac with the phone in front of it. */
 .stage-hero .win { left: 19%; top: 8%; width: 75%; }
 .stage-hero .phone { left: 5%; bottom: 6%; width: 17%; }
@@ -223,7 +232,7 @@ figure { margin: 0; }
 @media (prefers-color-scheme: dark) { .term { box-shadow: 0 0 0 1px rgba(255,255,255,.1), 0 30px 60px -24px rgba(0,0,0,.8); } }
 
 /* The access prompt, drawn as a macOS alert on the launch-pad photo. */
-.alerts { display: grid; place-items: center; aspect-ratio: 4 / 3; border-radius: 28px; background: #3b4a63 url(assets/stage-launch.avif) center / cover; }
+.alerts { display: grid; place-items: center; aspect-ratio: 4 / 3; border-radius: 28px; }
 .alert { width: min(300px, 80%); padding: 22px 18px 16px; border-radius: 16px; text-align: center; background: rgba(246,246,248,.92); color: #1c1e22; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: 0 24px 48px -12px rgba(0,0,0,.55); }
 .alert img { margin: 0 auto 12px; }
 .alert b { display: block; font-size: 14px; line-height: 1.3; }
