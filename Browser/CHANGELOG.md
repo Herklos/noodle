@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A link that downloads a file no longer leaves "Frame load interrupted" on its tab.
+- Site icons are read only from small PNG, ICO, JPEG, GIF and WebP files; SVG icons are skipped, and a huge or endless icon download is cut off at a megabyte.
+
 ## [0.19.0] - 2026-10-15
 
 ### Changed

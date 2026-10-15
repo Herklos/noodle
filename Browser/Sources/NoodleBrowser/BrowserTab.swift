@@ -1,5 +1,6 @@
 import AppKit
 import BrowserBridge
+import ImageIO
 import WebKit
 
 /// Each tab has an app-owned rendering surface. Events go directly to this view,
@@ -204,7 +205,12 @@ import WebKit
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(error) }
     private func failed(_ error: Error) {
-        if (error as NSError).code == NSURLErrorCancelled { return }
+        // WebKit ends a load that became a download (102) or went to a plug-in (204) as if it failed.
+        let error = error as NSError
+        switch (error.domain, error.code) {
+        case (NSURLErrorDomain, NSURLErrorCancelled), ("WebKitErrorDomain", 102), ("WebKitErrorDomain", 204): return
+        default: break
+        }
         info.error = error.localizedDescription; info.loading = false; runtime?.saveTab(self)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -440,8 +446,9 @@ enum BrowserFavicon {
         return URLSession(configuration: configuration)
     }()
 
-    /// The icon that suits a tab best: a scalable one, then the smallest of at least 32 pixels, then
-    /// any other, an Apple touch icon only when nothing else, and the site's favicon.ico without any.
+    /// The icon that suits a tab best: the smallest of at least 32 pixels, then any other, an Apple
+    /// touch icon only when nothing else, and the site's favicon.ico without any. SVG icons are left
+    /// out, since decoding one would run an SVG parser outside WebKit's sandbox.
     static func choose(_ links: [[String: String]], page: URL) -> URL? {
         guard ["http", "https"].contains(page.scheme?.lowercased() ?? ""), page.host != nil else { return nil }
         func rank(_ link: [String: String]) -> (url: URL, rank: [Int])? {
@@ -449,8 +456,9 @@ enum BrowserFavicon {
             let touch = rel.contains("apple-touch-icon") || rel.contains("apple-touch-icon-precomposed")
             guard rel.contains("icon") || touch, let url = URL(string: link["href"] ?? "", relativeTo: page)?.absoluteURL,
                   ["http", "https", "data"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            guard link["type"]?.lowercased() != "image/svg+xml", url.pathExtension.lowercased() != "svg",
+                  !url.absoluteString.lowercased().hasPrefix("data:image/svg") else { return nil }
             let sizes = (link["sizes"] ?? "").lowercased()
-            if sizes == "any" || link["type"]?.lowercased() == "image/svg+xml" { return (url, [touch ? 1 : 0, 0, 0]) }
             let side = sizes.split(separator: " ").compactMap { $0.split(separator: "x").first.flatMap { Int($0) } }.max()
             guard let side else { return (url, [touch ? 1 : 0, 2, 0]) }
             return (url, side >= 32 ? [touch ? 1 : 0, 1, side] : [touch ? 1 : 0, 3, -side])
@@ -460,11 +468,42 @@ enum BrowserFavicon {
         return site.url
     }
 
-    /// The image at `url`, if it is one of at most a megabyte. No cookies are sent or kept.
-    static func load(_ url: URL) async -> NSImage? {
-        guard let (data, response) = try? await session.data(from: url), data.count <= 1 << 20,
-              ((response as? HTTPURLResponse)?.statusCode ?? 200) < 300,
-              let image = NSImage(data: data), image.isValid else { return nil }
-        return image
+    /// The image at `url`, if it is a raster image of at most a megabyte, scaled down to at most
+    /// 128 pixels as it is decoded. Reading stops past the megabyte. No cookies are sent or kept.
+    static func load(_ url: URL, using session: URLSession = session) async -> NSImage? {
+        guard let data = await LimitedRead(limit: 1 << 20).data(from: url, using: session) else { return nil }
+        let raster: Set<String> = ["public.png", "com.microsoft.ico", "public.jpeg", "com.compuserve.gif", "org.webmproject.webp"]
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), let type = CGImageSourceGetType(source) as String?,
+              raster.contains(type), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 128,
+                  kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
+        return NSImage(cgImage: image, size: .zero)
+    }
+}
+
+/// Reads a response chunk by chunk and cancels it once it passes the limit, so a huge or endless
+/// response never collects in memory.
+private final class LimitedRead: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let limit: Int
+    private let lock = NSLock()
+    private var data = Data(), finish: CheckedContinuation<Data?, Never>?
+    init(limit: Int) { self.limit = limit }
+
+    func data(from url: URL, using session: URLSession) async -> Data? {
+        await withCheckedContinuation { continuation in
+            lock.withLock { finish = continuation }
+            let task = session.dataTask(with: url); task.delegate = self; task.resume()
+        }
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse) async -> URLSession.ResponseDisposition {
+        ((response as? HTTPURLResponse)?.statusCode ?? 200) < 300 && response.expectedContentLength <= limit ? .allow : .cancel
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let over = lock.withLock { self.data.append(data); return self.data.count > limit }
+        if over { dataTask.cancel() }
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let (continuation, data) = lock.withLock { defer { finish = nil }; return (finish, self.data) }
+        continuation?.resume(returning: error == nil && data.count <= limit ? data : nil)
     }
 }

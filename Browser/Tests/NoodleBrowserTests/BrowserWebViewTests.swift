@@ -1,3 +1,4 @@
+import AppKit
 import BrowserCore
 @testable import NoodleBrowser
 import XCTest
@@ -41,8 +42,10 @@ final class BrowserWebViewTests: XCTestCase {
         let sized = [link("icon", "https://example.com/16.png", sizes: "16x16"), link("icon", "https://example.com/32.png", sizes: "32x32"),
                      link("icon", "https://example.com/96.png", sizes: "96x96"), link("apple-touch-icon", "https://example.com/180.png")]
         XCTAssertEqual(BrowserFavicon.choose(sized, page: page)?.absoluteString, "https://example.com/32.png")
-        XCTAssertEqual(BrowserFavicon.choose(sized + [link("icon", "https://example.com/i.svg", sizes: "any", type: "image/svg+xml")],
-                                             page: page)?.absoluteString, "https://example.com/i.svg")
+        XCTAssertEqual(BrowserFavicon.choose(sized + [link("icon", "https://example.com/i.svg", sizes: "any", type: "image/svg+xml"),
+                                                      link("icon", "https://example.com/plain.svg")],
+                                             page: page)?.absoluteString, "https://example.com/32.png",
+                       "an SVG icon would be decoded outside WebKit's sandbox")
         XCTAssertEqual(BrowserFavicon.choose([link("apple-touch-icon", "https://example.com/180.png")], page: page)?.absoluteString,
                        "https://example.com/180.png", "a touch icon is better than none")
         XCTAssertEqual(BrowserFavicon.choose([link("shortcut icon", "/old.ico")], page: page)?.absoluteString, "https://example.com/old.ico")
@@ -51,4 +54,75 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(BrowserFavicon.choose([], page: page)?.absoluteString, "https://example.com/favicon.ico")
         XCTAssertNil(BrowserFavicon.choose([], page: try XCTUnwrap(URL(string: "about:blank"))))
     }
+
+    /// Icons are decoded in the app, outside WebKit's sandbox, so only small raster images are read,
+    /// and an endless response is cut off instead of filling memory.
+    func testIconsAreSmallRasterImagesReadNoFurtherThanTheLimit() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [IconServer.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let png = try XCTUnwrap(URL(string: "https://icons.test/icon.png")), svg = try XCTUnwrap(URL(string: "https://icons.test/icon.svg"))
+        let endless = try XCTUnwrap(URL(string: "https://icons.test/endless"))
+        let icon = await BrowserFavicon.load(png, using: session)
+        XCTAssertEqual(icon?.size.width, 16)
+        let vector = await BrowserFavicon.load(svg, using: session)
+        XCTAssertNil(vector, "an SVG was decoded")
+        let huge = await BrowserFavicon.load(endless, using: session)
+        XCTAssertNil(huge)
+        XCTAssertLessThan(IconServer.endlessBytesSent, 8 << 20, "the endless response was read to the end")
+    }
+
+    /// A link that downloads a file leaves the page where it was, so the tab shows no load error.
+    @MainActor func testALinkThatDownloadsLeavesNoErrorOnTheTab() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let tab = try runtime.makeTab(browserID: browser)
+        tab.navigate(try XCTUnwrap(URL(string: "data:application/octet-stream;base64,\(Data("fixture".utf8).base64EncodedString())")))
+        func finished() -> Bool { (try? library.profile(browser).downloads.first?.state) == "complete" }
+        for _ in 0..<200 where !finished() { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(finished(), "the download did not finish")
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertNil(tab.info.error)
+    }
+}
+
+/// Serves `icons.test`: a 16-pixel PNG, an SVG, and an endless body sent in chunks until the load stops.
+private final class IconServer: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var endlessBytesSent = 0
+    private let stopped = NSLock(), queue = DispatchQueue(label: "icon-server")
+    private var isStopped = false
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "icons.test" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        switch url.path {
+        case "/icon.png":
+            let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in NSColor.red.setFill(); rect.fill(); return true }
+            let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
+            client?.urlProtocol(self, didLoad: rep.representation(using: .png, properties: [:])!)
+            client?.urlProtocolDidFinishLoading(self)
+        case "/icon.svg":
+            let svg = #"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="red"/></svg>"#
+            client?.urlProtocol(self, didLoad: Data(svg.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        default:
+            Self.endlessBytesSent = 0
+            queue.async { [self] in
+                let chunk = Data(count: 64 << 10)
+                while Self.endlessBytesSent < 64 << 20, !stopped.withLock({ isStopped }) {
+                    client?.urlProtocol(self, didLoad: chunk); Self.endlessBytesSent += chunk.count
+                    usleep(200)
+                }
+                client?.urlProtocolDidFinishLoading(self)
+            }
+        }
+    }
+    override func stopLoading() { stopped.withLock { isStopped = true } }
 }
