@@ -12,8 +12,9 @@ import WebKit
     @Published private(set) var tabs: [UUID: BrowserTab] = [:]
     /// The icons of the open tabs' pages, kept for pages that stopped; a tab sends
     /// `objectWillChange` when its icon changes.
-    var favicons: [UUID: NSImage] { stoppedFavicons.merging(tabs.compactMapValues(\.favicon)) { $1 } }
-    private var stoppedFavicons: [UUID: NSImage] = [:]
+    var favicons: [UUID: NSImage] { stopped.compactMapValues(\.favicon).merging(tabs.compactMapValues(\.favicon)) { $1 } }
+    /// What a stopped page leaves behind: its icon, and its history until the page loads again.
+    private var stopped: [UUID: (favicon: NSImage?, history: Any?)] = [:]
     /// How many pages run at once in each browser. Every running page costs memory and processor
     /// time, so the least recently used ones stop, keeping their tab, and load again when used.
     static let runningPageLimit = 8
@@ -146,7 +147,7 @@ import WebKit
         let idle = running.filter { $0.id != kept && $0.id != selected && !$0.mustKeepRunning }.sorted { $0.lastActive < $1.lastActive }
         for tab in idle.prefix(max(0, running.count - Self.runningPageLimit)) {
             tab.info.loading = false; saveTab(tab)
-            if let icon = tab.favicon { stoppedFavicons[tab.id] = icon }
+            stopped[tab.id] = (tab.favicon ?? stopped[tab.id]?.favicon, tab.web.interactionState)
             tabs.removeValue(forKey: tab.id)?.stop()
         }
     }
@@ -155,7 +156,8 @@ import WebKit
         guard let info = profile.tabs.first(where: { $0.id == tabID }) else { throw BrowserError("This tab does not belong to the selected browser.") }
         if let existing = tabs[tabID] { return existing }
         let tab = try makeTab(browserID: browserID, restoring: info)
-        if let url = try? BrowserRequest.navigationURL(info.url) { tab.navigate(url) }
+        if let history = stopped[tabID]?.history { stopped[tabID]?.history = nil; tab.web.interactionState = history }
+        else if let url = try? BrowserRequest.navigationURL(info.url) { tab.navigate(url) }
         return tab
     }
     func openBrowser(_ id: UUID) throws {
@@ -232,7 +234,7 @@ import WebKit
         profile.tabs.removeAll { $0.id == tabID }
         if profile.selectedTabID == tabID { profile.selectedTabID = profile.tabs.first?.id }
         try library.update(profile)
-        tabs.removeValue(forKey: tabID)?.stop(); stoppedFavicons.removeValue(forKey: tabID)
+        tabs.removeValue(forKey: tabID)?.stop(); stopped.removeValue(forKey: tabID)
         showWatchedTab(browserID)
     }
     func setMuted(_ value: Bool, browserID: UUID) async throws {
@@ -250,7 +252,7 @@ import WebKit
         willRemoveBrowser?(id)
         surfaces.removeValue(forKey: id)?.stop()
         for tab in tabs.values.filter({ $0.browserID == id }) { tabs.removeValue(forKey: tab.id)?.stop() }
-        for tab in try library.profile(id).tabs { stoppedFavicons.removeValue(forKey: tab.id) }
+        for tab in try library.profile(id).tabs { stopped.removeValue(forKey: tab.id) }
         for (key, value) in activeDownloads where value.browserID == id {
             _ = await value.download?.cancel(); activeDownloads.removeValue(forKey: key)
         }

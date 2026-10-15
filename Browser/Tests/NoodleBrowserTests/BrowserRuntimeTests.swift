@@ -1,5 +1,6 @@
 import BrowserBridge
 import BrowserCore
+import Network
 @testable import NoodleBrowser
 import XCTest
 
@@ -152,6 +153,35 @@ final class BrowserRuntimeTests: XCTestCase {
         XCTAssertEqual(reloaded.web.url?.absoluteString, "https://example.com/2")
         XCTAssertEqual(runtime.tabs.count, BrowserRuntime.runningPageLimit)
     }
+    /// A page that stopped comes back with its history, so going back still works.
+    @MainActor func testAStoppedPageComesBackWithItsHistory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root)
+        var a = try library.create(name: "A")
+        let infos = (0...BrowserRuntime.runningPageLimit).map { _ in BrowserTabInfo() }
+        a.tabs = infos; a.selectedTabID = infos[0].id; try library.update(a)
+        let runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let server = try await LoopbackPages.start()
+        defer { server.cancel() }
+        func page(_ text: String) throws -> URL { try XCTUnwrap(URL(string: "http://127.0.0.1:\(server.port!.rawValue)/\(text)")) }
+        func settle(_ tab: BrowserTab, at url: URL) async throws {
+            for _ in 0..<100 where tab.web.url != url || tab.web.isLoading { try await Task.sleep(for: .milliseconds(50)) }
+            XCTAssertEqual(tab.web.url, url)
+        }
+        let first = try page("first"), second = try page("second")
+        _ = try runtime.tab(browserID: a.id, tabID: infos[0].id)
+        let tab = try runtime.tab(browserID: a.id, tabID: infos[1].id)
+        tab.navigate(first); try await settle(tab, at: first)
+        tab.navigate(second); try await settle(tab, at: second)
+        for info in infos[2...] { _ = try runtime.tab(browserID: a.id, tabID: info.id) }
+        XCTAssertNil(runtime.tabs[infos[1].id], "the page did not stop")
+        let restored = try runtime.tab(browserID: a.id, tabID: infos[1].id)
+        try await settle(restored, at: second)
+        XCTAssertTrue(restored.web.canGoBack, "the page came back without its history")
+        XCTAssertEqual(restored.web.backForwardList.backItem?.url, first)
+    }
     /// Pages change their title and address many times a second; the library shows each change
     /// at once but writes them to disk together, and none is lost when the browser stops.
     @MainActor func testTabChangesShowAtOnceAndReachDiskTogether() throws {
@@ -178,5 +208,27 @@ final class BrowserRuntimeTests: XCTestCase {
             XCTAssertEqual($0.localizedDescription, "A browser provider is already running.")
         }
         withExtendedLifetime(server) {}
+    }
+}
+
+/// Answers every request on 127.0.0.1 with a small page, so tests load real addresses without the network.
+enum LoopbackPages {
+    static func start() async throws -> NWListener {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: .global())
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { _, _, _, _ in
+                let body = "<p>page</p>"
+                let reply = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+                connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+            listener.stateUpdateHandler = { if case .ready = $0 { ready.resume(); listener.stateUpdateHandler = nil } }
+            listener.start(queue: .global())
+        }
+        return listener
     }
 }

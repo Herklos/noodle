@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- A tab whose page was stopped to save memory comes back with its history, so Back still works.
 - A link that downloads a file no longer leaves "Frame load interrupted" on its tab.
 - Site icons are read only from small PNG, ICO, JPEG, GIF and WebP files; SVG icons are skipped, and a huge or endless icon download is cut off at a megabyte.
 
