@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import NoodleCore
+import HubLink
 
 /// Keep pasted documents and long replies from taking over the conversation.
 enum LongTextPolicy {
@@ -17,15 +18,9 @@ enum LongTextPolicy {
     }
 }
 
-/// How a message's prose is broken into bubbles; dense replies read easier in smaller pieces.
-enum MessageTextLayout: String, CaseIterable, Identifiable {
-    case together, paragraphs, chunks
-
+extension MessageTextLayout {
     static let defaultsKey = "messageTextLayout"
     static let defaultValue = Self.together
-    /// About five short lines in a bubble before a chunk ends.
-    static let chunkLength = 350
-    var id: String { rawValue }
 
     var displayName: String {
         switch self {
@@ -41,42 +36,6 @@ enum MessageTextLayout: String, CaseIterable, Identifiable {
         case .paragraphs: "Start a new bubble at every blank line."
         case .chunks: "Group paragraphs into short bubbles, keeping a line that ends in a colon with what follows."
         }
-    }
-
-    func parts(_ text: String) -> [String] {
-        switch self {
-        case .together: return [text]
-        case .paragraphs: return Self.paragraphs(text)
-        case .chunks:
-            var chunks: [[String]] = []
-            for paragraph in Self.paragraphs(text) {
-                if let last = chunks.last, last.last?.hasSuffix(":") == true
-                    || last.reduce(0, { $0 + $1.count }) + paragraph.count <= Self.chunkLength {
-                    chunks[chunks.count - 1].append(paragraph)
-                } else {
-                    chunks.append([paragraph])
-                }
-            }
-            return chunks.map { $0.joined(separator: "\n\n") }
-        }
-    }
-
-    /// Splits at blank lines, never inside a fenced code block.
-    private static func paragraphs(_ text: String) -> [String] {
-        var parts: [String] = []
-        var current: [Substring] = []
-        var inFence = false
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") { inFence.toggle() }
-            if !inFence && trimmed.isEmpty {
-                if !current.isEmpty { parts.append(current.joined(separator: "\n")); current = [] }
-            } else {
-                current.append(line)
-            }
-        }
-        if !current.isEmpty { parts.append(current.joined(separator: "\n")) }
-        return parts.isEmpty ? [text] : parts
     }
 }
 

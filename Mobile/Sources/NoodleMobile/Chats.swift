@@ -2118,6 +2118,7 @@ private struct Bubble: View {
     @Environment(\.focusMessage) private var focusMessage
     @Environment(\.unsentActions) private var unsentActions
     @AppStorage(AttachmentLayout.key) private var attachmentLayout = AttachmentLayout.standard.rawValue
+    @AppStorage(MessageTextLayout.key) private var textLayout = MessageTextLayout.standard.rawValue
 
     /// The gap between messages in the conversation.
     static let rowSpacing: CGFloat = 6
@@ -2201,8 +2202,9 @@ private struct Bubble: View {
     /// they mark its text, and the files only when there is no text to mark.
     @ViewBuilder private func content(foreground: Color, background: Color) -> some View {
         if showsText {
-            // Tables split the text into separate bubbles, as on the Mac; reactions mark the first.
-            let segments = MessageSegment.split(message.body)
+            // Tables and the long message layout split the text into separate bubbles, as on the Mac;
+            // reactions mark the first.
+            let segments = MessageSegment.split(message.body, layout: MessageTextLayout(rawValue: textLayout) ?? .standard)
             ForEach(Array((segments.isEmpty ? [.text(message.body)] : segments).enumerated()), id: \.offset) { index, segment in
                 segmentBubble(segment, at: index, foreground: foreground, background: background)
                     .scaleEffect(pressing == index ? 0.96 : 1)

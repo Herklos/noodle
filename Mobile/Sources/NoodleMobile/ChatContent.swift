@@ -289,6 +289,20 @@ enum AttachmentLayout: String, CaseIterable, Identifiable {
     }
 }
 
+extension MessageTextLayout {
+    static let key = "messageTextLayout"
+    static let standard = Self.together
+    var name: String { rawValue.capitalized }
+
+    var explanation: String {
+        switch self {
+        case .together: "Each message sits in one bubble."
+        case .paragraphs: "Every blank line starts a new bubble."
+        case .chunks: "Paragraphs group into short bubbles, keeping a line that ends in a colon with what follows."
+        }
+    }
+}
+
 /// A message's files, as on the Mac: Stack overlaps only files that swipe together; the rest wrap above them, whole.
 struct MessageAttachments<Content: View>: View {
     let attachments: [LinkAttachment]

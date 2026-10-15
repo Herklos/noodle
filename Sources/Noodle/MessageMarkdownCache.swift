@@ -47,12 +47,12 @@ final class MessageMarkdownCache: @unchecked Sendable {
         if let cached = segmentValues.object(forKey: key), cached.body == message.body, cached.layout == layout {
             return cached.value
         }
-        let parts = MessageSegment.split(message.body)
-        let segments: [Segment] = layout != .together || parts.contains(where: { if case .table = $0 { true } else { false } })
-            ? parts.flatMap { part -> [Segment] in
-                switch part {
-                case .text(let text): layout.parts(text).map { .text(Self.render($0), source: $0) }
-                case .table(let table): [.table(table)]
+        let parts = MessageSegment.split(message.body, layout: layout)
+        let segments: [Segment] = parts.count > 1 || parts.contains(where: { if case .table = $0 { true } else { false } })
+            ? parts.map {
+                switch $0 {
+                case .text(let text): .text(Self.render(text), source: text)
+                case .table(let table): .table(table)
                 }
             }
             : [.text(render(message), source: message.body)]

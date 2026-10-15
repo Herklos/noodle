@@ -94,4 +94,25 @@ final class MessageTableTests: XCTestCase {
         XCTAssertEqual(MessageSegment.previewText("  Untouched | text\n"), "  Untouched | text\n")
         XCTAssertEqual(MessageSegment.previewText(""), "")
     }
+
+    func testLongMessageLayoutsBreakProseAtBlankLinesButNotInsideCode() {
+        let body = "First.\n\nSteps:\n1. One\n2. Two\n\n```\na\n\nb\n```\n\nLast."
+        XCTAssertEqual(MessageTextLayout.together.parts(body), [body])
+        XCTAssertEqual(MessageTextLayout.paragraphs.parts(body),
+                       ["First.", "Steps:\n1. One\n2. Two", "```\na\n\nb\n```", "Last."])
+        XCTAssertEqual(MessageTextLayout.chunks.parts(body), [body])
+
+        let long = Array(repeating: "word", count: 50).joined(separator: " ")
+        XCTAssertEqual(MessageTextLayout.chunks.parts("Intro:\n\n\(long)\n\n\(long)\n\n\(long)"),
+                       ["Intro:\n\n\(long)", long, long], "A lead-in keeps what follows it")
+    }
+
+    func testLongMessageLayoutsSplitTheProseAroundTables() {
+        XCTAssertEqual(MessageSegment.split(plans, layout: .together), MessageSegment.split(plans))
+        let segments = MessageSegment.split("One.\n\nTwo.\n\n" + plans, layout: .paragraphs)
+        XCTAssertEqual(segments.count, 5)
+        XCTAssertEqual(segments.prefix(3), [.text("One."), .text("Two."), .text("Here's the comparison:")])
+        XCTAssertEqual(MessageSegment.split("Plain.\n\nText.", layout: .paragraphs), [.text("Plain."), .text("Text.")])
+        XCTAssertEqual(MessageSegment.split("", layout: .paragraphs), [])
+    }
 }

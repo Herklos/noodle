@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Settings > Long Messages can split long replies into a bubble per paragraph, or into short chunks that keep a lead-in with its list.
+
+### What to Test
+
+- Switch Long Messages between Together, Paragraphs and Chunks; check a long reply breaks up as described, reactions sit on its first bubble and Copy copies the whole message.
+
 ## [0.33.0] - 2026-10-15
 
 ### Changed

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import NoodleBrand
 import NoodleCore
+import HubLink
 import NoodleSettingsUI
 import NoodleRuntime
 import NoodleRuntimeSettings

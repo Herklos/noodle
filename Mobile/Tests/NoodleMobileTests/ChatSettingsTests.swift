@@ -39,6 +39,12 @@ import Testing
         #expect(AttachmentLayout.standard == .vertical)
     }
 
+    @Test func longMessagesStartTogetherAndExplainEachLayout() {
+        #expect(MessageTextLayout.standard == .together)
+        #expect(MessageTextLayout.allCases.map(\.name) == ["Together", "Paragraphs", "Chunks"])
+        #expect(Set(MessageTextLayout.allCases.map(\.explanation)).count == 3)
+    }
+
     @Test func onlyWebLinksOpenInAPreview() throws {
         let web = try #require(URL(string: "https://example.com/page"))
         #expect(WebLinkPreview.previewed(web, enabled: true) == web)

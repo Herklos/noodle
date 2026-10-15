@@ -50,12 +50,67 @@ public enum MessageSegment: Equatable, Sendable {
 }
 
 extension MessageSegment {
+    /// The message's bubbles: its tables, and its prose broken up as the layout says.
+    public static func split(_ body: String, layout: MessageTextLayout) -> [MessageSegment] {
+        let segments = split(body)
+        guard layout != .together else { return segments }
+        return segments.flatMap { segment -> [MessageSegment] in
+            if case .text(let text) = segment { return layout.parts(text).map { .text($0) } }
+            return [segment]
+        }
+    }
+
     /// What a notification or a one-line preview says: the text around any tables, without them.
     public static func previewText(_ body: String) -> String {
         let segments = split(body)
         guard segments.contains(where: { if case .table = $0 { true } else { false } }) else { return body }
         let text = segments.compactMap { if case .text(let text) = $0 { text } else { nil } }.joined(separator: "\n\n")
         return text.isEmpty ? "Sent a table" : text
+    }
+}
+
+/// How a message's prose is broken into bubbles; dense replies read easier in smaller pieces.
+public enum MessageTextLayout: String, CaseIterable, Identifiable, Sendable {
+    case together, paragraphs, chunks
+
+    /// About five short lines in a bubble before a chunk ends.
+    public static let chunkLength = 350
+    public var id: String { rawValue }
+
+    public func parts(_ text: String) -> [String] {
+        switch self {
+        case .together: return [text]
+        case .paragraphs: return Self.paragraphs(text)
+        case .chunks:
+            var chunks: [[String]] = []
+            for paragraph in Self.paragraphs(text) {
+                if let last = chunks.last, last.last?.hasSuffix(":") == true
+                    || last.reduce(0, { $0 + $1.count }) + paragraph.count <= Self.chunkLength {
+                    chunks[chunks.count - 1].append(paragraph)
+                } else {
+                    chunks.append([paragraph])
+                }
+            }
+            return chunks.map { $0.joined(separator: "\n\n") }
+        }
+    }
+
+    /// Splits at blank lines, never inside a fenced code block.
+    private static func paragraphs(_ text: String) -> [String] {
+        var parts: [String] = []
+        var current: [Substring] = []
+        var inFence = false
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") { inFence.toggle() }
+            if !inFence && trimmed.isEmpty {
+                if !current.isEmpty { parts.append(current.joined(separator: "\n")); current = [] }
+            } else {
+                current.append(line)
+            }
+        }
+        if !current.isEmpty { parts.append(current.joined(separator: "\n")) }
+        return parts.isEmpty ? [text] : parts
     }
 }
 

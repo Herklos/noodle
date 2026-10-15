@@ -1051,6 +1051,7 @@ struct QRScanner: UIViewControllerRepresentable {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AttachmentLayout.key) private var attachmentLayout = AttachmentLayout.standard.rawValue
+    @AppStorage(MessageTextLayout.key) private var textLayout = MessageTextLayout.standard.rawValue
     @AppStorage(WebLinkPreview.key) private var previewsLinks = true
     @AppStorage(ScreenControlHaptics.key) private var haptics = false
     @State private var noodlets = NoodletGrants().all
@@ -1068,6 +1069,16 @@ struct SettingsView: View {
                     Text("Attachments")
                 } footer: {
                     Text((AttachmentLayout(rawValue: attachmentLayout) ?? .standard).explanation)
+                }
+                Section {
+                    Picker("Long Messages", selection: $textLayout) {
+                        ForEach(MessageTextLayout.allCases) { Text($0.name).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Long Messages")
+                } footer: {
+                    Text((MessageTextLayout(rawValue: textLayout) ?? .standard).explanation)
                 }
                 Section {
                     Toggle("Preview Web Links", isOn: $previewsLinks)

@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 import NoodleBrand
 import NoodleCore
+import HubLink
 @testable import Noodle
 @testable import NoodleRuntime
 @testable import NoodleRuntimeSettings
