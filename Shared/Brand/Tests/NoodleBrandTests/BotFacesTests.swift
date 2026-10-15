@@ -4,7 +4,7 @@ import Testing
 
 @Suite struct BotFacesTests {
     @Test func everyFaceLoadsAndBothPresentationsHaveSome() {
-        #expect(BotFaces.all.count == 124)
+        #expect(BotFaces.all.count == 149)
         #expect(BotFaces.all.allSatisfy { !$0.imageData.isEmpty })
         #expect(BotFaces.all.contains { $0.presentation == .feminine })
         #expect(BotFaces.all.contains { $0.presentation == .masculine })
