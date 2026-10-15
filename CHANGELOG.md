@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-16
+
 ### Added
 
 - A morning demo scenario: scheduled research, a generated cover, a shared newsletter draft and a quick game before coffee.

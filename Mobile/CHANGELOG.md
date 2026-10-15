@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-16
+
 ### Added
 
 - Settings > Long Messages can split long replies into a bubble per paragraph, or into short chunks that keep a lead-in with its list.

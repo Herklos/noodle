@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-16
+
 ### Fixed
 
 - A tab whose page was stopped to save memory comes back with its history, so Back still works.
