@@ -5,7 +5,8 @@ import NoodleWallpaper
 struct ConversationBackgroundSheet: View {
     @Environment(NoodleStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    let conversation: BotConversation
+    /// Nil while creating a bot or group, whose sheet applies the draft once it exists.
+    let conversation: BotConversation?
     /// The enclosing editor owns imported media until Save or Cancel.
     var draft: Binding<BackgroundSelection?>? = nil
     @State private var selection = BackgroundSelection()
@@ -30,6 +31,7 @@ struct ConversationBackgroundSheet: View {
                         dismiss()
                         return
                     }
+                    guard let conversation else { return }
                     busy = true
                     Task {
                         do {
@@ -43,10 +45,11 @@ struct ConversationBackgroundSheet: View {
                 .disabled(busy || selection == original)
                 .keyboardShortcut(.defaultAction)
             }
-            Text(store.title(for: conversation)).foregroundStyle(.secondary)
             ZStack {
                 ConversationBackgroundView(background: selection.background,
-                    imageURL: selection.file?.url ?? store.repository.backgroundImageURL(selection.background, conversationID: conversation.id))
+                    imageURL: selection.file?.url ?? conversation.flatMap {
+                        store.repository.backgroundImageURL(selection.background, conversationID: $0.id)
+                    })
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Make this space your own.").padding(10).background(.regularMaterial, in: Capsule())
                     HStack { Spacer(); Text("Looks good!").padding(10).background(.regularMaterial, in: Capsule()) }
@@ -62,7 +65,7 @@ struct ConversationBackgroundSheet: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            let initial = draft?.wrappedValue ?? BackgroundSelection(background: store.background(for: conversation))
+            let initial = draft?.wrappedValue ?? BackgroundSelection(background: conversation.map(store.background(for:)) ?? ConversationBackground())
             original = initial
             selection = initial
         }
@@ -73,7 +76,7 @@ struct ConversationBackgroundSheet: View {
 
 struct ConversationBackgroundSettingsRow: View {
     @Environment(NoodleStore.self) private var store
-    let conversation: BotConversation
+    var conversation: BotConversation?
     @Binding var draft: BackgroundSelection?
     @State private var editing = false
 
@@ -82,7 +85,7 @@ struct ConversationBackgroundSettingsRow: View {
             HStack {
                 Label("Conversation Background", systemImage: "photo")
                 Spacer()
-                Text((draft?.background ?? store.background(for: conversation)).isDefault ? "Default" : "Custom")
+                Text((draft?.background ?? conversation.map(store.background(for:)) ?? ConversationBackground()).isDefault ? "Default" : "Custom")
                     .foregroundStyle(.secondary)
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))

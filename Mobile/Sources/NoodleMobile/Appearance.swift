@@ -6,8 +6,8 @@ import NoodleWallpaperCore
 import PhotosUI
 import SwiftUI
 
-/// A conversation's backdrop, drawn as Noodle draws it on the Mac: a preset's gradient, a photo or
-/// a silent video, dimmed so the bubbles stay readable.
+/// A conversation's backdrop, drawn as Noodle draws it on the Mac: a preset's gradient, or a photo or
+/// a silent video dimmed so the bubbles stay readable.
 struct ConversationBackdrop: View {
     let background: ConversationBackground
     var imageURL: URL?
@@ -25,14 +25,10 @@ struct ConversationBackdrop: View {
                         LoopingVideo(url: imageURL).frame(width: geometry.size.width, height: geometry.size.height)
                     }
                 } else if let preset = background.preset {
-                    let colors = Self.colors(preset)
-                    LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Ellipse().fill(colors[1].opacity(0.5))
-                        .frame(width: geometry.size.width * 1.4, height: geometry.size.height * 1.1)
-                        .rotationEffect(.degrees(-35)).offset(x: geometry.size.width * 0.35)
-                        .blur(radius: 50)
+                    PresetGradient(preset)
                 }
-                if !background.isDefault { Color.black.opacity(0.25) }
+                // Presets are drawn to sit behind bubbles; photos and videos are dimmed for them.
+                if background.imageFilename != nil { Color.black.opacity(0.25) }
             }
             .clipped()
         }
@@ -45,16 +41,6 @@ struct ConversationBackdrop: View {
             let kind = background.mediaKind
             let poster = await Task.detached { await BackgroundMedia.poster(at: imageURL, kind: kind) }.value
             image = poster.map { UIImage(cgImage: $0) }
-        }
-    }
-
-    /// The Mac's preset colours.
-    static func colors(_ preset: ConversationBackgroundPreset) -> [Color] {
-        switch preset {
-        case .sunset: [Color(red: 0.96, green: 0.52, blue: 0.15), Color(red: 0.77, green: 0.43, blue: 0.67), Color(red: 0.46, green: 0.35, blue: 0.75)]
-        case .ocean: [Color(red: 0.04, green: 0.26, blue: 0.50), Color(red: 0.08, green: 0.60, blue: 0.66), Color(red: 0.14, green: 0.30, blue: 0.62)]
-        case .forest: [Color(red: 0.08, green: 0.24, blue: 0.18), Color(red: 0.34, green: 0.53, blue: 0.30), Color(red: 0.14, green: 0.34, blue: 0.39)]
-        case .dusk: [Color(red: 0.18, green: 0.16, blue: 0.39), Color(red: 0.47, green: 0.29, blue: 0.60), Color(red: 0.73, green: 0.37, blue: 0.47)]
         }
     }
 }
@@ -124,10 +110,10 @@ struct BackgroundEditor: View {
                 .listRowBackground(Color.clear)
             }
             Section {
-                HStack(spacing: 10) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7), spacing: 10) {
                     swatch("Default", ConversationBackground(), selected: background.isDefault)
                     ForEach(ConversationBackgroundPreset.allCases, id: \.self) { preset in
-                        swatch(preset.rawValue.capitalized, ConversationBackground(preset: preset), selected: background.preset == preset)
+                        swatch(preset.name, ConversationBackground(preset: preset), selected: background.preset == preset)
                     }
                 }
                 .padding(.vertical, 4)
@@ -183,15 +169,14 @@ struct BackgroundEditor: View {
                 do { try await chats.setBackground(background, for: thread) } catch { problem = error.localizedDescription }
             }
         } label: {
-            VStack(spacing: 6) {
-                ConversationBackdrop(background: background)
-                    .frame(height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.accentColor : Color(.separator),
-                                                                      lineWidth: selected ? 2 : 0.5))
-                Text(title).font(.caption2)
-            }
-            .contentShape(Rectangle())
+            ConversationBackdrop(background: background)
+                .overlay { if background.isDefault { Image(systemName: "nosign").foregroundStyle(.secondary) } }
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color(.separator), lineWidth: 0.5))
+                .padding(3)
+                .overlay(Circle().stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
@@ -480,7 +465,7 @@ struct PersonPictureEditor: View {
                     .padding(.vertical, 4)
                 }
                 Section("Symbol") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 10) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 10) {
                         tile(nil) { Text(LinkAvatar.initials(of: pairing.userName)).font(.system(size: 16, weight: .semibold, design: .rounded)) }
                             .accessibilityLabel("Initials")
                         ForEach(Self.symbols, id: \.self) { symbol in

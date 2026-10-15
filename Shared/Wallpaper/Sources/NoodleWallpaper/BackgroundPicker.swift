@@ -19,7 +19,7 @@ public struct BackgroundSelection: Equatable {
     }
 }
 
-/// The preset swatches and the Choose Background and Create Image row shared by
+/// The grid of preset swatches and the Choose Background and Create Image row shared by
 /// every background editor. Its two rows join the enclosing stack, so the editor
 /// keeps its own header, preview, extra controls and status lines.
 public struct BackgroundPicker: View {
@@ -33,6 +33,10 @@ public struct BackgroundPicker: View {
     @State private var sourceImageData: Data?
     /// The wallpapers on disk when the dialog was opened; nil while it is closed.
     @State private var wallpapers: [SystemWallpaper]?
+    /// Default leads the first row; each row below is one family of ten.
+    private static let rows = stride(from: 0, to: ConversationBackgroundPreset.allCases.count, by: 10).map {
+        Array(ConversationBackgroundPreset.allCases[$0..<min($0 + 10, ConversationBackgroundPreset.allCases.count)])
+    }
 
     public init(selection: Binding<BackgroundSelection>, busy: Binding<Bool>, failure: Binding<String?>) {
         _selection = selection
@@ -41,10 +45,18 @@ public struct BackgroundPicker: View {
     }
 
     public var body: some View {
-        HStack(spacing: 12) {
-            choice("Default", background: ConversationBackground())
-            ForEach(ConversationBackgroundPreset.allCases, id: \.self) { preset in
-                choice(preset.rawValue.capitalized, background: ConversationBackground(preset: preset))
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+            ForEach(Array(Self.rows.enumerated()), id: \.offset) { index, row in
+                GridRow {
+                    if index == 0 {
+                        choice("Default", background: ConversationBackground())
+                    } else {
+                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    }
+                    ForEach(row, id: \.self) { preset in
+                        choice(preset.name, background: ConversationBackground(preset: preset))
+                    }
+                }
             }
         }
         HStack(spacing: 8) {
@@ -130,18 +142,19 @@ public struct BackgroundPicker: View {
         return Button {
             selection = BackgroundSelection(background: background); failure = nil
         } label: {
-            VStack(spacing: 6) {
-                ConversationBackgroundView(background: background)
-                    .frame(maxWidth: .infinity).frame(height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
-                Text(title).font(.caption)
-            }
-            // The wallpaper artwork intentionally ignores input. Give the
-            // enclosing label its own hit area, including the swatch and gaps.
-            .contentShape(Rectangle())
+            ConversationBackgroundView(background: background)
+                .overlay { if background.isDefault { Image(systemName: "nosign").foregroundStyle(.secondary) } }
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
+                .padding(3)
+                .overlay(Circle().stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
+                // The wallpaper artwork intentionally ignores input. Give the
+                // swatch its own hit area.
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .help(title)
         .frame(minWidth: 0, maxWidth: .infinity)
         .disabled(busy)
         .accessibilityLabel(title)

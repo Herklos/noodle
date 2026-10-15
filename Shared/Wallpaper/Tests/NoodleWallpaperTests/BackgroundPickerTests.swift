@@ -60,10 +60,10 @@ private struct Host: View {
         let above = try frame { $0.identifier?.rawValue == "above" }
         let below = try frame { $0.identifier?.rawValue == "below" }
         let buttons = try frame { $0 is ImageMenuAnchorView }
-        // Swatch 48 + gap 6 + caption; the caption height is font-dependent, so bound it.
         let swatches = buttons.minY - 20 - (above.maxY + 20)
         XCTAssertEqual(below.minY, buttons.maxY + 20, accuracy: 0.5, "Buttons row must be a direct child of the stack")
-        XCTAssertTrue((64...80).contains(swatches), "Swatch row should sit between two 20-point gaps, got \(swatches)")
+        // Four rows of circles 472/11 wide, 8 apart.
+        XCTAssertTrue((150...175).contains(swatches), "Swatches should sit between two 20-point gaps, got \(swatches)")
         XCTAssertEqual(buttons.minX, 0, accuracy: 0.5)
         // Create Image shares the row only where Image Playground is supported; otherwise the chooser fills it.
         XCTAssertEqual(buttons.width, supportsImagePlayground ? (472 - 8) / 2 : 472, accuracy: 0.5)

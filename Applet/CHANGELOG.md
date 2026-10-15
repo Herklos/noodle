@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The background picker offers 40 gradients in place of four, from pastels to neutrals, as a grid of round swatches. Gradients are no longer dimmed, so they show their true colours.
 - Noodlets now fade into the wallpaper as they scroll beneath the toolbar, in place of the shaded band at the top of the window. Nothing fades while no noodlet is beneath it.
 
 ## [0.31.1] - 2026-10-14

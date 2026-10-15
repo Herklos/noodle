@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Conversations accept the new background gradients chosen in Noodle and on iPhone.
 - The Usage window's bot menu shows each bot's icon beside its name.
 - The Usage chart's day breakdown stays inside the chart instead of running off the top of the window.
 - On voice calls, bots on the Hub introduce themselves by their own name and speak from their description and backstory, instead of calling themselves Codex.

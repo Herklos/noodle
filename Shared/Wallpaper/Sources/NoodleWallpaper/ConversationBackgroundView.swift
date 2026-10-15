@@ -75,16 +75,13 @@ public struct ConversationBackgroundView: View {
                     Image(nsImage: image).resizable().scaledToFill()
                         .frame(width: geometry.size.width, height: geometry.size.height).clipped()
                 } else if let preset = background.preset {
-                    LinearGradient(colors: colors(preset), startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Ellipse().fill(colors(preset)[1].opacity(0.5))
-                        .frame(width: geometry.size.width * 1.4, height: geometry.size.height * 1.1)
-                        .rotationEffect(.degrees(-35)).offset(x: geometry.size.width * 0.35)
-                        .blur(radius: 50)
+                    PresetGradient(preset)
                 }
                 if let imageURL, let kind = background.mediaKind, kind != .image {
                     AnimatedWallpaper(url: imageURL, kind: kind, reduceMotion: reduceMotion)
                 }
-                if !background.isDefault { Color.black.opacity(0.25) }
+                // Presets are drawn to sit behind bubbles; photos and videos are dimmed for them.
+                if background.imageFilename != nil { Color.black.opacity(0.25) }
             }
             .clipped()
         }
@@ -97,15 +94,6 @@ public struct ConversationBackgroundView: View {
             let poster = await Task.detached { await BackgroundMedia.poster(at: imageURL, kind: kind) }.value
             guard !Task.isCancelled else { return }
             loadedImage = poster.map { NSImage(cgImage: $0, size: .zero) }
-        }
-    }
-
-    private func colors(_ preset: ConversationBackgroundPreset) -> [Color] {
-        switch preset {
-        case .sunset: return [Color(red: 0.96, green: 0.52, blue: 0.15), Color(red: 0.77, green: 0.43, blue: 0.67), Color(red: 0.46, green: 0.35, blue: 0.75)]
-        case .ocean: return [Color(red: 0.04, green: 0.26, blue: 0.50), Color(red: 0.08, green: 0.60, blue: 0.66), Color(red: 0.14, green: 0.30, blue: 0.62)]
-        case .forest: return [Color(red: 0.08, green: 0.24, blue: 0.18), Color(red: 0.34, green: 0.53, blue: 0.30), Color(red: 0.14, green: 0.34, blue: 0.39)]
-        case .dusk: return [Color(red: 0.18, green: 0.16, blue: 0.39), Color(red: 0.47, green: 0.29, blue: 0.60), Color(red: 0.73, green: 0.37, blue: 0.47)]
         }
     }
 }

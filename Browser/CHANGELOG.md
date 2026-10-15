@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The background picker offers 40 gradients in place of four, from pastels to neutrals, as a grid of round swatches. Gradients are no longer dimmed, so they show their true colours.
 - The shaded band at the top of the window is gone.
 - Icon editors show a Picture or Symbol switch, with only that choice's options beneath it, in place of Use Symbol Instead. Switching to Symbol and back keeps the picture until you press Done, and Create Image… reads Edit Image… when there is a picture to start from.
 

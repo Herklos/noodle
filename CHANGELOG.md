@@ -10,6 +10,9 @@ All notable changes to Noodle are documented here, following
 
 - The starter team the welcome makes wear drawn faces that suit their names, in place of icons.
 - Icon editors show a Picture or Symbol switch, with only that choice's options beneath it, in place of Use Symbol Instead. Switching to Symbol and back keeps the picture until you press Done, and Create Image… reads Edit Image… when there is a picture to start from. Editing a bot's picture no longer adds its name and description to your prompt.
+- The background picker offers 40 gradients in place of four, from pastels to neutrals, as a grid of round swatches. Gradients are no longer dimmed, so they show their true colours. Backgrounds chosen on your iPhone for bots on your Noodle Hub need the Hub and iPhone app updates released alongside.
+- New Bot and New Group let you choose the conversation background before creating.
+- The Conversation Background sheet no longer repeats the conversation name.
 - The personal-assistant agenda, freelance pipeline and Almanac landing page in the demo scenarios have clearer layouts and more polished artwork.
 - The Usage window's bot menu shows each bot's icon beside its name.
 - The Usage chart's day breakdown stays inside the chart instead of running off the top of the window.

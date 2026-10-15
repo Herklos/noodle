@@ -922,7 +922,8 @@ final class NoodleStore {
     /// `tools` stores, on this Mac, what the new bot may use here.
     /// `connectionIDs`, `computerIDs` and `browserIDs` are the person's on that Hub, not this Mac's.
     private func createHubAgent(on choice: HubHarnessChoice, draft: LinkBotDraft, connectionIDs: Set<UUID>,
-                                computerIDs: Set<UUID>, browserIDs: Set<UUID>, introduces: Bool) -> Bool {
+                                computerIDs: Set<UUID>, browserIDs: Set<UUID>, background: BackgroundSelection?,
+                                introduces: Bool) -> Bool {
         guard let mirror = hubMirrors.first(where: { $0.pairing.hub?.key == choice.hub }) else {
             errorMessage = "Join that Noodle Hub again before creating a bot on it."
             return false
@@ -937,6 +938,7 @@ final class NoodleStore {
                 if introduces { try? await mirror.introduce(agent.id) }
                 selectedConversationID = conversations.first { $0.kind == .direct && $0.participantIDs == [agent.id] }?.id
                 joinShownSpace(selectedConversationID)
+                applyChosenBackground(background, to: conversations.first { $0.id == selectedConversationID })
                 refreshAppShortcuts()
             } catch {
                 errorMessage = error.localizedDescription
@@ -978,6 +980,7 @@ final class NoodleStore {
         folders: [AgentFolder] = [],
         harnessProfile: UUID? = nil,
         voice: String? = nil,
+        background: BackgroundSelection? = nil,
         introduces: Bool = true
     ) -> Bool {
         if let choice = HubHarnessChoice(identifier: harnessIdentifier) {
@@ -990,7 +993,7 @@ final class NoodleStore {
             draft.voice = validVoice(voice, harnessIdentifier: choice.provider)
             draft.imageGeneration = imageGeneration
             return createHubAgent(on: choice, draft: draft, connectionIDs: mcpConnectionIDs, computerIDs: computerIDs, browserIDs: browserIDs,
-                                  introduces: introduces)
+                                  background: background, introduces: introduces)
         }
         guard runtime.availableInstallations.contains(where: { $0.provider.rawValue == harnessIdentifier }) else {
             errorMessage = "Set up a supported harness in Settings before creating a bot."
@@ -1052,6 +1055,7 @@ final class NoodleStore {
         if introduces { runtime.introduce([created.agent.id], in: created.conversation.id, repository: repository) }
         selectedConversationID = created.conversation.id
         joinShownSpace(created.conversation.id)
+        applyChosenBackground(background, to: created.conversation)
         creationSheet = nil
         refreshAppShortcuts()
         return true
@@ -1256,7 +1260,7 @@ final class NoodleStore {
     }
 
     func createGroup(named name: String, publicDescription: String, participantIDs: Set<UUID>, folders: [AgentFolder] = [],
-                     on hub: HubMirror? = nil) -> Bool {
+                     background: BackgroundSelection? = nil, on hub: HubMirror? = nil) -> Bool {
         if let hub {
             creationSheet = nil
             Task {
@@ -1265,6 +1269,7 @@ final class NoodleStore {
                                                                  agentIDs: Array(participantIDs))
                     selectedConversationID = conversation.id
                     joinShownSpace(conversation.id)
+                    applyChosenBackground(background, to: conversation)
                     refreshAppShortcuts()
                 } catch {
                     errorMessage = error.localizedDescription
@@ -1286,6 +1291,7 @@ final class NoodleStore {
             attachmentsByConversation[conversation.id] = []
             selectedConversationID = conversation.id
             joinShownSpace(conversation.id)
+            applyChosenBackground(background, to: conversation)
             creationSheet = nil
             refreshAppShortcuts()
             return true
@@ -2155,6 +2161,15 @@ final class NoodleStore {
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    /// A background chosen while creating a bot or group, applied once its conversation exists.
+    private func applyChosenBackground(_ choice: BackgroundSelection?, to conversation: BotConversation?) {
+        guard let choice, choice.file != nil || !choice.background.isDefault, let conversation else { return }
+        Task {
+            do { try await setBackground(choice.background, imageData: nil, file: choice.file, for: conversation) }
+            catch { errorMessage = error.localizedDescription }
         }
     }
 

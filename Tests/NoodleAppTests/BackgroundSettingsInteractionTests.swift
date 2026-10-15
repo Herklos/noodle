@@ -104,10 +104,36 @@ import NoodleCore
         let f = try fixture()
         let picker = host(ConversationBackgroundSheet(conversation: f.directA).environment(f.store))
         press(try await control("Forest", in: picker))
+        XCTAssertFalse(hasControl(f.store.title(for: f.directA), in: picker), "The picker shows no conversation title")
         XCTAssertTrue(f.store.background(for: f.directA).isDefault)
         press(try await control("Apply", in: picker))
         try await wait { f.store.background(for: f.directA).preset == .forest }
         XCTAssertEqual(try f.repository.loadBackground(conversationID: f.directA.id).preset, .forest)
+    }
+
+    func testNewBotAndGroupApplyTheirChosenBackground() async throws {
+        for isGroup in [false, true] {
+            let f = try fixture()
+            f.store.creationSheet = isGroup ? .group : .bot
+            let editor = isGroup
+                ? host(NewGroupSheet(participantIDs: [f.a.id]).environment(f.store))
+                : host(NewBotSheet().environment(f.store).defaultAppStorage(f.runtime.defaults))
+            let window = try XCTUnwrap(editor.window)
+            window.orderFront(nil)
+            edit(try await textField(isGroup ? "Group name" : "Bot name", in: editor), text: "Fresh")
+            let picker = try await backgroundPicker(in: editor)
+            press(try await control("Ocean", in: picker))
+            press(try await control("Apply", in: picker))
+            try await wait { window.sheets.isEmpty }
+            let create = try await control("Create", in: editor)
+            try await wait { self.enabled(create) }
+            press(create)
+            try await wait { f.store.creationSheet == nil }
+            let created = try XCTUnwrap(f.store.selectedConversation)
+            try await wait { f.store.background(for: created).preset == .ocean }
+            XCTAssertEqual(try f.repository.loadBackground(conversationID: created.id).preset, .ocean)
+            window.close()
+        }
     }
 
     private func hostEditor(_ fixture: StoreFixture, conversation: BotConversation) -> NSView {

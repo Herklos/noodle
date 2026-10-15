@@ -46,6 +46,7 @@ struct NewBotSheet: View {
     @Environment(NoodleStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @AppStorage(BotNameStyle.defaultsKey) private var botNameStyle = BotNameStyle.real.rawValue
+    @State private var backgroundDraft: BackgroundSelection?
     @State private var name = ""
     @State private var selectedHarnessIdentifier = ""
     @State private var hasChosenHarness = false
@@ -146,6 +147,7 @@ struct NewBotSheet: View {
                 case .general:
                     BotPublicDescriptionEditor(publicDescription: $publicDescription)
                     BotBackstoryEditor(backstory: $backstory)
+                    ConversationBackgroundSettingsRow(draft: $backgroundDraft)
                     if HubHarnessChoice(identifier: selectedHarnessIdentifier) == nil {
                         FoldersSettingsRow(folders: $folders, owner: .bot)
                     }
@@ -259,7 +261,8 @@ struct NewBotSheet: View {
             mcpConnectionIDs: mcpConnectionIDs,
             computerIDs: computerIDs, browserIDs: browserIDs, calendarIDs: calendarIDs, reminderListIDs: reminderListIDs, imageGeneration: imageGeneration, folders: folders,
             harnessProfile: selectedProfileID,
-            voice: selectedVoice.nilIfEmpty
+            voice: selectedVoice.nilIfEmpty,
+            background: backgroundDraft
         )
     }
 
@@ -955,6 +958,7 @@ struct NewGroupSheet: View {
     @State private var folders: [AgentFolder] = []
     /// The joined Hub to keep the group on, or nil for this Mac.
     @State private var hubID: ObjectIdentifier?
+    @State private var backgroundDraft: BackgroundSelection?
     @FocusState private var nameFocused: Bool
 
     init(participantIDs: Set<UUID> = []) {
@@ -976,6 +980,7 @@ struct NewGroupSheet: View {
                         publicDescription: publicDescription,
                         participantIDs: selectedIDs,
                         folders: hub == nil ? folders : [],
+                        background: backgroundDraft,
                         on: hub
                     )
                 }
@@ -1038,6 +1043,10 @@ struct NewGroupSheet: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
             }
+
+            ConversationBackgroundSettingsRow(draft: $backgroundDraft)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
         }
         .frame(width: 480)
         .onAppear {
