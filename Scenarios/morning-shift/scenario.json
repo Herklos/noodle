@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "title": "7 a.m. Everything's already done.",
+  "clock": "07:00",
+  "settings": {
+    "Noodle.firstBotSetup.dismissed": true,
+    "Noodle.composer.showBotDescriptions": true
+  },
+  "harnesses": {
+    "claude-code": { "models": "builtin" },
+    "codex": { "models": [
+      { "id": "gpt-5.2-codex", "name": "GPT-5.2 Codex", "description": "Tuned for long coding tasks.",
+        "efforts": ["low", "medium", "high"], "defaultEffort": "medium", "default": true }
+    ] }
+  },
+  "agents": [
+    { "key": "ada", "name": "Ada", "harness": "claude-code", "model": "opus", "effort": "high",
+      "description": "Finds tomorrow's stories before you wake up",
+      "backstory": "You research the Small Hours newsletter every weekday at six. Compare each launch with what was already available, separate claims from evidence, and share the useful findings with Clara and Milo in Morning crew.",
+      "avatar": { "image": "face:feminine-07" },
+      "autoReplies": ["The full brief is in Morning crew. Next round is tomorrow at 06:00."] },
+    { "key": "milo", "name": "Milo", "harness": "codex", "model": "gpt-5.2-codex", "effort": "medium",
+      "description": "Turns the morning brief into pictures",
+      "avatar": { "image": "face:masculine-12" },
+      "autoReplies": ["The original is attached in Morning crew too, so Clara has the same version."] },
+    { "key": "clara", "name": "Clara", "harness": "claude-code", "model": "sonnet",
+      "description": "Writes Small Hours, with your final say before it goes out",
+      "avatar": { "image": "face:feminine-03" },
+      "autoReplies": ["The draft and Milo's cover are ready. I will wait for your approval before sending."] },
+    { "key": "finn", "name": "Finn", "harness": "codex", "model": "gpt-5.2-codex", "effort": "medium",
+      "description": "One small game before the day gets serious",
+      "avatar": { "image": "face:masculine-05" },
+      "autoReplies": ["Another route in four: COLD → CORD → WORD → WARD → WARM."] }
+  ],
+  "conversations": [
+    { "key": "morning", "pinned": true, "background": { "preset": "midnight" },
+      "group": { "name": "Morning crew", "description": "Small Hours: research, words and pictures before breakfast", "members": ["ada", "milo", "clara"] },
+      "messages": [
+        { "at": "-1d 21:30", "from": "user",
+          "text": "Same routine tomorrow. Ada, six o'clock research. Share the brief here so Clara and Milo can get the issue ready before I wake up. I'll approve it over coffee." },
+        { "at": "06:08", "from": "ada",
+          "text": "**06:00 weekday run complete.** Three launches worth a look. The story for today: tools that get the work ready before you open them.\n\nClara, lead with that. Milo, something that feels like a delivery before the city wakes up?" },
+        { "at": "06:12", "from": "clara",
+          "text": "Taking Ada's lead. Subject: **Your morning got here before you did.** Milo, a quiet street rather than a desk full of screens?" },
+        { "at": "06:34", "from": "milo",
+          "text": "Generated the cover: one tiny courier, a city still asleep. Clara, here's the original for the issue.",
+          "attachments": [ { "file": "assets/before-the-city-wakes.png" } ],
+          "reactions": [ { "from": "clara", "emoji": "😍" } ] },
+        { "at": "06:46", "from": "clara",
+          "text": "Draft finished, cover in, Ada's caveat kept. Waiting for your morning read before anything goes out." }
+      ] },
+    { "key": "ada", "direct": "ada", "unread": true, "background": { "preset": "midnight" },
+      "messages": [
+        { "at": "-1d 16:20", "from": "user", "text": "Keep an eye on launches for Small Hours. Weekdays at six, even if I'm not here." },
+        { "at": "-1d 16:21", "from": "ada", "text": "Set for 06:00, Monday to Friday. I'll share the brief with Clara and Milo when it's ready." },
+        { "at": "06:08", "from": "ada",
+          "text": "**Weekday 06:00 run · 3 new launches**\n\n- **Daybreak:** prepares a morning brief from your calendar and inbox.\n- **Pagebird:** turns saved research into a newsletter draft.\n- **Pocket Studio:** makes cover illustrations from a written brief.\n\nThe useful angle: work arriving before you ask. Daybreak's speed claim is still just their claim; I've flagged that for Clara.\n\nShared the brief in **Morning crew**. Next run: tomorrow, 06:00." }
+      ] },
+    { "key": "milo", "direct": "milo", "unread": true, "background": { "preset": "midnight" },
+      "messages": [
+        { "at": "06:35", "from": "milo",
+          "text": "Your cover is ready. Made from Ada's brief, with Clara's quiet-street idea.\n\nI've shared the original in Morning crew too.",
+          "attachments": [ { "file": "assets/before-the-city-wakes.png" } ] }
+      ] },
+    { "key": "clara", "direct": "clara", "unread": true, "background": { "preset": "midnight" },
+      "messages": [
+        { "at": "06:47", "from": "clara",
+          "text": "**Your morning got here before you did.**\n\nYou open your laptop. The research is there. So is the first draft, and the picture that goes with it. Somewhere between yesterday's last message and today's first coffee, the work moved on.\n\nThat's the thread through today's three launches. The useful question is how much you can trust what arrives.\n\nOpening is ready, Milo's cover is in, and the full draft is waiting for your approval." }
+      ] },
+    { "key": "finn", "direct": "finn", "unread": true, "background": { "preset": "midnight" },
+      "messages": [
+        { "at": "06:55", "from": "finn", "text": "They did the work. I brought the game. One round before coffee?" }
+      ] }
+  ],
+  "present": { "select": "morning", "sidebar": "visible", "window": { "size": [1240, 860] } },
+  "timeline": [
+    { "wait": 1.5, "capture": "01-before-you-asked" },
+    { "wait": 0.5, "present": { "select": "ada" } },
+    { "wait": 3.5, "capture": "02-six-oclock-run" },
+    { "wait": 0.5, "present": { "select": "milo" } },
+    { "wait": 3.0, "capture": "03-generated-cover" },
+    { "wait": 0.5, "present": { "select": "morning", "scroll": { "morning": "bottom" } } },
+    { "wait": 2.5, "capture": "04-shared-with-the-crew" },
+    { "wait": 0.5, "present": { "select": "clara" } },
+    { "wait": 3.0, "capture": "05-ready-for-your-approval" },
+    { "wait": 0.5, "present": { "select": "finn" } },
+    { "wait": 0.6, "focus": "composer" },
+    { "wait": 0.3, "in": "finn", "type": { "text": "Go on. One round.", "interval": 0.045 } },
+    { "wait": 0.5, "agent": "finn", "reply": {
+      "text": "**COLD → WARM**\n\nChange one letter at a time. Every step must be a word. Can you do it in four moves?"
+    } },
+    { "wait": 1.5, "focus": "composer" },
+    { "wait": 0.3, "in": "finn", "type": { "text": "COLD → CORD → CARD → WARD → WARM", "interval": 0.04 } },
+    { "wait": 0.5, "agent": "finn", "reply": {
+      "key": "solved", "text": "**Four moves. Perfect.**\n\nResearch done. Cover drawn. Newsletter ready. Now go get that coffee."
+    } },
+    { "wait": 0.4, "in": "finn", "react": { "message": "solved", "emoji": "☕" } },
+    { "wait": 1.5, "capture": "06-before-coffee" }
+  ],
+  "film": {
+    "background": "black",
+    "intro": {
+      "kicker": "07:00",
+      "title": "Everything's already done.",
+      "subtitle": "You haven't even had your coffee.",
+      "hold": 1.0
+    },
+    "outro": { "tagline": "A workspace for your AI agents.", "hold": 1.2 }
+  }
+}

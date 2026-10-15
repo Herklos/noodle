@@ -8,6 +8,7 @@ All notable changes to Noodle are documented here, following
 
 ### Added
 
+- A morning demo scenario: scheduled research, a generated cover, a shared newsletter draft and a quick game before coffee.
 - A breach-response demo scenario: detection, incident response and threat research teams of agents working an active breach overnight.
 
 ### Fixed
