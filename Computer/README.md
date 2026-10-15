@@ -184,6 +184,33 @@ desktop stays at 1920 × 1080 and scales to fit its window.
 - Agents can use the terminal and files and show the desktop in a conversation,
   but cannot click or type on it.
 
+## SSH computers
+
+**New SSH Computer**, in the same menus, adds a computer you already reach over
+SSH, such as a server or a machine on your tailnet. Enter its address as
+`user@server` or `user@server:port` and choose how it signs in:
+
+- **None** (no key or password) suits servers that trust your network, such as Tailscale
+  SSH. If the server asks you to confirm in a browser, its link appears while it
+  connects.
+- **New Key** makes a key for this computer. Add the line it shows to
+  `~/.ssh/authorized_keys` on the server before choosing **Create**.
+- **Existing Key** takes an Ed25519 or ECDSA private key without a passphrase.
+  RSA keys are not supported.
+- **Password** signs in with the server account's password.
+
+Keys and passwords stay in your Keychain. Creating the computer signs in once and
+remembers the server's key; if the key later changes, Computer will not connect
+until you choose **Forget Server Key** in **Edit Computer**. To change the address,
+key or password, choose **Change…** beside Sign In in **Edit Computer**; the new
+sign-in is kept only once the server accepts it.
+
+**Start** connects and **Stop** disconnects; neither turns the server on or off.
+**Terminal** opens a login shell and **Files** browses the server over SFTP,
+starting in your home folder. Agents use the terminal and files as on other
+computers. Deleting the computer removes its key or password from this Mac and
+leaves the server unchanged.
+
 ## Access and storage
 
 Each Linux computer runs in its own virtual machine. Host folders and clipboard are not

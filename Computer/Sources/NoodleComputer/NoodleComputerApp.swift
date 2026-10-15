@@ -74,6 +74,8 @@ struct NoodleComputerApp: App {
         Divider()
         Button("New Windows") { NotificationCenter.default.post(name: .newWindows, object: nil) }
       }
+      Divider()
+      Button("New SSH Computer") { NotificationCenter.default.post(name: .newSSH, object: nil) }
     }
   }
 }
@@ -93,6 +95,7 @@ extension Notification.Name {
   static let newComputer = Self("NoodleComputer.New")
   static let newLocalMac = Self("NoodleComputer.NewLocalMac")
   static let newWindows = Self("NoodleComputer.NewWindows")
+  static let newSSH = Self("NoodleComputer.NewSSH")
 }
 
 /// Launch checks, matched by digest so a built app never names them. Only the first ships in a release;
@@ -430,6 +433,7 @@ struct ComputerLibraryView: View {
   @State private var showingNew = false
   @State private var showingLocalMac = false
   @State private var showingWindows = false
+  @State private var showingSSH = false
   @State private var searchText = ""
   @State private var columnVisibility = NavigationSplitViewVisibility.all
   @AppStorage("ComputerSidebarVisible") private var sidebarVisible = true
@@ -463,6 +467,8 @@ struct ComputerLibraryView: View {
         Divider()
         Button("New Windows", systemImage: ComputerKind.windows.symbol) { showingWindows = true }
       }
+      Divider()
+      Button("New SSH Computer", systemImage: ComputerKind.ssh.symbol) { showingSSH = true }
     } label: {
       Label("Create", systemImage: "plus")
     }.help("Create Computer")
@@ -534,11 +540,13 @@ struct ComputerLibraryView: View {
     .onChange(of: columnVisibility) { _, value in sidebarVisible = value != .detailOnly }
     .sheet(isPresented: $showingNew) { NewComputerView(store: store) }
     .sheet(isPresented: $showingLocalMac) { NewLocalMacView(store: store) }
+    .sheet(isPresented: $showingSSH) { NewSSHComputerView(store: store) }
     .sheet(isPresented: $showingWindows) {
       if #available(macOS 27, *) { NewWindowsView(store: store) }
     }
     .onReceive(NotificationCenter.default.publisher(for: .newComputer)) { _ in showingNew = true }
     .onReceive(NotificationCenter.default.publisher(for: .newLocalMac)) { _ in showingLocalMac = true }
+    .onReceive(NotificationCenter.default.publisher(for: .newSSH)) { _ in showingSSH = true }
     .onReceive(NotificationCenter.default.publisher(for: .newWindows)) { _ in
       if #available(macOS 27, *) { showingWindows = true }
     }
@@ -634,10 +642,10 @@ struct ComputerRow: View {
         set: { store.rename(session, name: session.computer.name, appearance: $0) }),
         directory: store.library.directory(for: session.id))
     }
-    .alert(session.computer.kind == .localMac ? "Delete \(session.computer.name) and its account?" : "Move \(session.computer.name) to Trash?", isPresented: $deleting) {
+    .alert(ComputerDeletion.title(session.computer), isPresented: $deleting) {
       Button("Cancel", role: .cancel) {}
-      Button(session.computer.kind == .localMac ? "Delete Account" : "Move to Trash", role: .destructive) { store.remove(session) }
-    } message: { Text(session.computer.kind == .localMac ? "This permanently deletes the managed account and its home directory. Stop preserves them; Delete removes them." : "The computer and its disks will be moved to the Trash.") }
+      Button(ComputerDeletion.action(session.computer), role: .destructive) { store.remove(session) }
+    } message: { Text(ComputerDeletion.message(session.computer)) }
     .computerStopConfirmation(isPresented: $stopping, name: session.computer.name) {
       guard session.phase == .running else { return }
       Task { await store.stop(session) }
@@ -694,6 +702,15 @@ struct ComputerDetailView: View {
         // Restart polling, native surfaces and the file view's StateObject when
         // Start replaces a failed Local Mac connection for the same computer.
         .id(ObjectIdentifier(local))
+      } else if let ssh = session.sshRuntime {
+        Group {
+          if session.showingFiles {
+            ComputerFilesView(model: session.filesModel(for: ssh), appearance: session.computer.appearance ?? .init()).id(session.id)
+          } else if let terminal = session.terminal {
+            ComputerTerminalView(terminal: terminal, appearance: session.computer.appearance ?? .init())
+          }
+        }
+        .id(ObjectIdentifier(ssh))
       } else if let runtime = session.windowsRuntime {
         if #available(macOS 27, *), let windows = runtime as? WindowsComputer {
           ZStack {
@@ -744,6 +761,12 @@ struct ComputerDetailView: View {
             Text(result)
           } else if case .failed(let message) = session.phase {
             Text(message)
+          } else if session.computer.kind == .ssh {
+            if let notice = session.sshNotice, session.phase == .starting {
+              Text(ComputerNotice.linked(notice)).textSelection(.enabled)
+            } else {
+              Text(session.phase.busy ? "Connecting…" : "Start this computer to connect.")
+            }
           } else if session.computer.kind == .container && !session.computer.hasDesktop {
             Text(session.phase.busy ? "Opening the terminal…" : "Start this computer to open its terminal.")
           } else {
@@ -789,7 +812,7 @@ struct ComputerDetailView: View {
           .help(session.phase.busy ? session.phase.label : session.phase == .running ? "Stop" : "Start")
           .accessibilityLabel(session.phase.busy ? session.phase.label : session.phase == .running ? "Stop" : "Start")
       }
-      if [.container, .localMac, .windows].contains(session.computer.kind) {
+      if [.container, .localMac, .windows, .ssh].contains(session.computer.kind) {
         ToolbarItem(id: "computer-display", placement: .primaryAction) {
           Picker("Computer View", selection: Binding(
             get: { session.displayMode },
@@ -832,7 +855,7 @@ struct ComputerDetailView: View {
     guard session.showingFiles, session.phase != .updating else { return false }
     if case .setupRequired = session.phase { return false }
     if session.localMac != nil { return true }
-    if session.windowsRuntime != nil { return session.phase == .running }
+    if session.windowsRuntime != nil || session.sshRuntime != nil { return session.phase == .running }
     return session.virtual == nil && session.phase == .running && session.container != nil
   }
 }
@@ -871,6 +894,7 @@ struct EditComputerView: View {
   @State private var cpus = 0
   @State private var memory = 0
   @State private var network = true
+  @State private var changingSignIn = false
   private var stopLabel: String { session.computer.usesVirtualMachine || session.computer.kind == .windows ? "Force Stop" : "Stop" }
 
   var body: some View {
@@ -884,7 +908,7 @@ struct EditComputerView: View {
           store.rename(session, name: name, description: description, appearance: appearance,
                        resizesDesktop: session.computer.resizesWithWindow ? resizesDesktop : nil)
           let computer = session.computer
-          if computer.kind != .localMac,
+          if ![.localMac, .ssh].contains(computer.kind),
              (cpus, memory, network) != (computer.cpuCount, computer.memoryGiB, computer.networkEnabled) {
             do { try store.changeResources(session, cpus: cpus, memoryGiB: memory, networkEnabled: network) }
             catch { store.error = error.localizedDescription }
@@ -914,7 +938,23 @@ struct EditComputerView: View {
         VStack(alignment: .leading, spacing: 12) {
           LabeledContent("Type", value: session.computer.displayType)
           Divider()
-          if session.computer.kind == .localMac {
+          if let ssh = session.computer.ssh {
+            LabeledContent("Address", value: ssh.address).textSelection(.enabled)
+            Divider()
+            LabeledContent("Sign In") {
+              HStack {
+                Text(ssh.credential == .key ? "Key" : ssh.credential == .password ? "Password" : "No key or password")
+                Button("Change…") { changingSignIn = true }
+              }
+            }
+            if ssh.hostKey != nil {
+              Divider()
+              LabeledContent("Server Key") {
+                Button("Forget Server Key") { store.forgetServerKey(session) }
+                  .help("Trust the key the server presents the next time it connects")
+              }
+            }
+          } else if session.computer.kind == .localMac {
             LabeledContent("Resources", value: "Shared with this Mac")
             Divider()
             LabeledContent("Files", value: "Retained in its own account")
@@ -979,7 +1019,8 @@ struct EditComputerView: View {
           if session.computer.kind == .container {
             ComputerImageUpdateButton(session: session) { updating = true }
           }
-          if session.virtual != nil || session.container != nil || session.localMac != nil || session.windowsRuntime != nil {
+          if session.virtual != nil || session.container != nil || session.localMac != nil || session.windowsRuntime != nil
+            || session.sshRuntime != nil {
             Button(stopLabel) { forceStopping = true }.disabled(session.phase.busy)
           }
         }
@@ -987,6 +1028,7 @@ struct EditComputerView: View {
     }
     .frame(width: 580).noodleSheetSizing()
     .computerImageUpdateConfirmation(store: store, session: session, isPresented: $updating)
+    .sheet(isPresented: $changingSignIn) { ChangeSSHSignInView(store: store, session: session) }
     .onAppear {
       name = session.computer.name; description = session.computer.description ?? ""
       appearance = session.computer.appearance ?? .init()
@@ -994,18 +1036,18 @@ struct EditComputerView: View {
       cpus = session.computer.cpuCount; memory = session.computer.memoryGiB
       network = session.computer.networkEnabled
     }
-    .alert(session.computer.kind == .localMac ? "Delete \(session.computer.name) and its account?" : "Move \(session.computer.name) to Trash?", isPresented: $deleting) {
+    .alert(ComputerDeletion.title(session.computer), isPresented: $deleting) {
       Button("Cancel", role: .cancel) {}
-      Button(session.computer.kind == .localMac ? "Delete Account" : "Move to Trash", role: .destructive) {
+      Button(ComputerDeletion.action(session.computer), role: .destructive) {
         store.remove(session)
         dismiss()
       }
     } message: {
-      Text(session.computer.kind == .localMac ? "This permanently deletes the managed account and its home directory. Stop preserves them; Delete removes them." : "The computer and its disks will be moved to the Trash.")
+      Text(ComputerDeletion.message(session.computer))
     }
     .computerStopConfirmation(isPresented: $forceStopping, name: session.computer.name, actionTitle: stopLabel) {
       guard !session.phase.busy, session.virtual != nil || session.container != nil || session.localMac != nil
-        || session.windowsRuntime != nil else { return }
+        || session.windowsRuntime != nil || session.sshRuntime != nil else { return }
       Task { await store.stop(session, force: true) }
     }
   }
@@ -1473,7 +1515,7 @@ struct ComputerCreationProgressView: View {
           .accessibilityLabel(store.creationStatus ?? "Creation progress")
         if store.creationDetail != nil || store.creationProgress != nil {
           HStack {
-            if let detail = store.creationDetail { Text(detail).monospacedDigit() }
+            if let detail = store.creationDetail { Text(ComputerNotice.linked(detail)).monospacedDigit() }
             Spacer()
             if let progress = store.creationProgress {
               Text(progress, format: .percent.precision(.fractionLength(0))).monospacedDigit()

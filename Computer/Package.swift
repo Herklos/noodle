@@ -24,7 +24,9 @@ let package = Package(
         .package(path: "LocalMac"),
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.4"),
         .package(url: "https://github.com/apple/containerization.git", exact: "0.43.0"),
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0")
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.86.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssh.git", exact: "0.15.0")
     ],
     targets: [
         .target(name: "NeptunePOSIX"),
@@ -47,6 +49,9 @@ let package = Package(
             .product(name: "ComputerBridge", package: "Bridge"),
             .product(name: "LocalMacCore", package: "LocalMac"),
             .product(name: "SwiftTerm", package: "SwiftTerm"),
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOPosix", package: "swift-nio"),
+            .product(name: "NIOSSH", package: "swift-nio-ssh"),
             .product(name: "Containerization", package: "containerization"),
             .product(name: "ContainerizationEXT4", package: "containerization"),
             .product(name: "ContainerizationExtras", package: "containerization"),
@@ -55,7 +60,9 @@ let package = Package(
         .testTarget(name: "NeptuneTransportTests", dependencies: ["NeptuneTransport"]),
         .testTarget(name: "ComputerCoreTests", dependencies: ["ComputerCore"]),
         .testTarget(name: "ComputerExternalTests", dependencies: ["ComputerExternal"]),
-        .testTarget(name: "ComputerStorageTests", dependencies: ["NoodleComputer", "ComputerExternal"])
+        .testTarget(name: "ComputerStorageTests", dependencies: ["NoodleComputer", "ComputerExternal",
+            .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"),
+            .product(name: "NIOSSH", package: "swift-nio-ssh")])
     ],
     swiftLanguageModes: [.v5]
 )

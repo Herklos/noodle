@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- SSH computers: **New SSH Computer** adds a server or other machine you reach over SSH, including through Tailscale SSH, with a terminal and files like other computers. It signs in with no key or password, a new or existing key, or a password, kept in your Keychain and changeable later in Edit Computer. Bots can use it as they use other computers.
+
 ## [0.30.0] - 2026-10-15
 
 ### Changed

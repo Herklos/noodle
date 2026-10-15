@@ -8,7 +8,7 @@ public struct HubOwner: Codable, Hashable, Sendable {
 }
 
 public enum ComputerKind: String, Codable, CaseIterable, Sendable {
-    case macOS, linux, container, localMac, windows
+    case macOS, linux, container, localMac, windows, ssh
 
     public var title: String {
         switch self {
@@ -17,6 +17,7 @@ public enum ComputerKind: String, Codable, CaseIterable, Sendable {
         case .container: "Linux Container"
         case .localMac: "Local Mac"
         case .windows: "Windows"
+        case .ssh: "SSH"
         }
     }
 
@@ -27,6 +28,7 @@ public enum ComputerKind: String, Codable, CaseIterable, Sendable {
         case .container: "shippingbox"
         case .localMac: "person.crop.rectangle"
         case .windows: "pc"
+        case .ssh: "network"
         }
     }
 
@@ -37,6 +39,7 @@ public enum ComputerKind: String, Codable, CaseIterable, Sendable {
         case .container: ContainerRegistry.bundled.defaultTemplate.description
         case .localMac: "A separate standard account on this Mac, with its own desktop and files. Shares this Mac’s operating system and resources. One-time administrator setup is required."
         case .windows: "A Windows 11 virtual machine with its own desktop. Downloads Windows 11 for Arm from Microsoft (about 5 GB) and installs it once; later Windows computers reuse it."
+        case .ssh: "A computer you already reach over SSH, such as a server or a machine on your tailnet. Terminal and files only."
         }
     }
 }
@@ -84,6 +87,8 @@ public struct Computer: Codable, Identifiable, Equatable, Sendable {
     /// A Linux desktop follows its window's size unless this is turned off; then it keeps its own resolution.
     public var resizesDesktopWithWindow: Bool?
     public var resizesDesktop: Bool { resizesDesktopWithWindow ?? true }
+    /// Where an SSH computer is and how it was last known to answer.
+    public var ssh: SSHDestination?
 
     public init(id: UUID = UUID(), name: String, kind: ComputerKind, cpuCount: Int = 4,
                 memoryGiB: Int = 4, diskGiB: Int = 64, networkEnabled: Bool = true,
@@ -119,12 +124,71 @@ public struct Computer: Codable, Identifiable, Equatable, Sendable {
         if kind == .windows, memoryGiB < 4 || diskGiB < 64 || cpuCount < 2 {
             throw ComputerError("Windows needs at least 2 CPUs, 4 GB memory, and a 64 GB disk.")
         }
+        if kind == .ssh {
+            guard let ssh else { throw ComputerError("Enter the address of the computer, such as user@server.") }
+            try ssh.validate()
+        }
         if kind == .container, imageReference.trimmingCharacters(in: .whitespaces).isEmpty {
             throw ComputerError("A container image is required.")
         }
         if let template, memoryGiB < template.minimumMemoryGiB || diskGiB < template.minimumDiskGiB {
             throw ComputerError("\(template.name) needs at least \(template.minimumMemoryGiB) GB memory and a \(template.minimumDiskGiB) GB disk.")
         }
+    }
+}
+
+/// A computer reached over SSH. Its key or password is kept in the Keychain, never here.
+public struct SSHDestination: Codable, Equatable, Sendable {
+    public enum Credential: String, Codable, Sendable { case key, password }
+    public var host: String
+    public var port: Int
+    public var user: String
+    /// The server's public key, in OpenSSH form, trusted the first time it answered.
+    public var hostKey: String?
+    /// What the Keychain holds for it; nothing means the server lets it in as it is, as Tailscale SSH does.
+    public var credential: Credential?
+
+    public init(host: String, port: Int = 22, user: String, hostKey: String? = nil, credential: Credential? = nil) {
+        self.host = host; self.port = port; self.user = user; self.hostKey = hostKey; self.credential = credential
+    }
+
+    /// `user@host`, `user@host:port` or `user@[ipv6]:port`.
+    public init(address: String) throws {
+        let text = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let at = text.lastIndex(of: "@") else { throw ComputerError("Enter the address as user@server.") }
+        let user = String(text[..<at])
+        var rest = text[text.index(after: at)...]
+        var port = 22
+        let host: String
+        if rest.hasPrefix("[") {
+            guard let close = rest.firstIndex(of: "]") else { throw ComputerError("Enter the address as user@server.") }
+            host = String(rest[rest.index(after: rest.startIndex)..<close])
+            rest = rest[rest.index(after: close)...]
+            if !rest.isEmpty {
+                guard rest.hasPrefix(":"), let value = Int(rest.dropFirst()) else { throw ComputerError("Enter the address as user@server:port.") }
+                port = value
+            }
+        } else if rest.filter({ $0 == ":" }).count == 1, let colon = rest.lastIndex(of: ":") {
+            guard let value = Int(rest[rest.index(after: colon)...]) else { throw ComputerError("Enter the address as user@server:port.") }
+            host = String(rest[..<colon]); port = value
+        } else { host = String(rest) }
+        self.init(host: host, port: port, user: user)
+        try validate()
+    }
+
+    public var address: String {
+        let shownHost = host.contains(":") ? "[\(host)]" : host
+        return "\(user)@\(shownHost)" + (port == 22 ? "" : ":\(port)")
+    }
+
+    public func validate() throws {
+        func plain(_ value: String) -> Bool {
+            !value.isEmpty && value.utf8.count <= 255 && !value.hasPrefix("-")
+                && !value.unicodeScalars.contains { CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0) }
+        }
+        guard plain(user) else { throw ComputerError("Enter the user name to sign in as.") }
+        guard plain(host), !host.contains("@"), !host.contains("/") else { throw ComputerError("Enter the server's name or address.") }
+        guard (1...65535).contains(port) else { throw ComputerError("Use a port between 1 and 65535.") }
     }
 }
 

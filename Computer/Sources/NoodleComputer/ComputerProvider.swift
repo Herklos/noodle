@@ -46,6 +46,7 @@ struct ComputerIdleWatch {
     private var terminals: [UUID: ProviderTerminal] = [:]
     private var localTerminals: [UUID: (computer: UUID, owner: String, runtime: LocalMacComputer)] = [:]
     private var windowsTerminals: [UUID: WindowsProviderTerminal] = [:]
+    private var sshTerminals: [UUID: SSHProviderTerminal] = [:]
     /// Where a person watching remotely types and clicks, one per desktop view.
     /// Live views of displays and terminals. While one is watched, bots are kept off its computer.
     private var surfaces: [String: (computer: UUID, streamer: SurfaceStreamer)] = [:]
@@ -90,6 +91,9 @@ struct ComputerIdleWatch {
         let owner = ComputerBuildIdentity.principal(for: peer) + ":" + (request.agentID?.uuidString ?? "human")
         if request.operation == .terminalResolve {
             if let id = request.terminalID, let terminal = windowsTerminals[id], terminal.owner == owner {
+                var response = ComputerResponse(); response.computerID = terminal.computerID; return response
+            }
+            if let id = request.terminalID, let terminal = sshTerminals[id], terminal.owner == owner {
                 var response = ComputerResponse(); response.computerID = terminal.computerID; return response
             }
             if let id = request.terminalID, let terminal = localTerminals[id], terminal.owner == owner,
@@ -199,6 +203,7 @@ struct ComputerIdleWatch {
         }
         if session.computer.kind == .localMac { return try await handleLocal(request, session: session, store: store, owner: owner, stagingRoot: stagingRoot) }
         if session.computer.kind == .windows { return try await handleWindows(request, session: session, store: store, owner: owner, stagingRoot: stagingRoot) }
+        if session.computer.kind == .ssh { return try await handleSSH(request, session: session, store: store, owner: owner, socket: socket, stagingRoot: stagingRoot) }
         if request.operation == .revoke {
             let ids = terminals.filter { $0.value.owner == owner && $0.value.computerID == session.id }.map(\.key)
             for id in ids { await terminals.removeValue(forKey: id)?.close() }
@@ -354,7 +359,7 @@ struct ComputerIdleWatch {
     /// Windows needs macOS 27; on older systems its computers are not offered to clients.
     static func served(_ kind: ComputerKind) -> Bool {
         if kind == .windows, #unavailable(macOS 27) { return false }
-        return kind == .container || kind == .localMac || kind == .windows
+        return kind == .container || kind == .localMac || kind == .windows || kind == .ssh
     }
 
     private static func remote(_ session: ComputerSession) -> RemoteComputer {
@@ -442,6 +447,112 @@ struct ComputerIdleWatch {
             terminal.write(request.data ?? Data())
         case .terminalResize: terminal.resize(columns: request.columns ?? 120, rows: request.rows ?? 30)
         case .terminalClose: windowsTerminals.removeValue(forKey: id)?.close()
+        default: throw ComputerBridgeError("Unsupported computer operation.")
+        }
+        return .init()
+    }
+
+    /// Shells on the server, each its own SSH channel; files go through the same service as the Files view.
+    /// There is no screen, so a live view shows a terminal, as for a shell container.
+    private func handleSSH(_ request: ComputerRequest, session: ComputerSession, store: ComputerStore, owner: String,
+                           socket: SurfaceSocket?, stagingRoot: URL?) async throws -> ComputerResponse {
+        sshTerminals = sshTerminals.filter { _, terminal in
+            store.sessions.contains { $0.id == terminal.computerID && $0.sshRuntime?.connection === terminal.connection && $0.phase == .running }
+                && (!terminal.exited || Date().timeIntervalSince(terminal.touched) < 600)
+        }
+        if request.operation == .delete { throw ComputerBridgeError("Remove this computer in \(ComputerAppIdentity.name).") }
+        if request.operation == .revoke {
+            for (id, terminal) in sshTerminals where terminal.owner == owner && terminal.computerID == session.id {
+                sshTerminals.removeValue(forKey: id)?.close()
+            }
+            return .init()
+        }
+        if request.operation == .start || request.operation == .surfaceStream {
+            if session.phase.canStart { await store.start(session) }
+        }
+        if request.operation == .start {
+            guard session.phase == .running else { throw ComputerBridgeError(session.phase.startFailureDescription) }
+            return .init()
+        }
+        guard session.phase == .running, let runtime = session.sshRuntime else {
+            throw ComputerBridgeError("Computer is stopped. Start it in \(ComputerAppIdentity.name) or with computer start --computer \(session.id.uuidString).")
+        }
+        func open() async throws -> UUID {
+            guard sshTerminals.count < 64, sshTerminals.values.filter({ $0.computerID == session.id && !$0.exited }).count < 16 else {
+                throw ComputerBridgeError("Too many terminal sessions. Close an unused session first.")
+            }
+            let terminal = try await SSHProviderTerminal.open(computerID: session.id, owner: owner, connection: runtime.connection)
+            guard session.sshRuntime === runtime, session.phase == .running else {
+                terminal.close()
+                throw ComputerBridgeError("The computer stopped while opening its terminal.")
+            }
+            let id = UUID()
+            sshTerminals[id] = terminal
+            return id
+        }
+        if request.operation == .surfaceStream {
+            guard let socket else { throw ComputerBridgeError("A live view needs a connection of its own.") }
+            let shown = sshTerminals.filter { $0.value.owner == owner && $0.value.computerID == session.id && !$0.value.exited }
+            let id: UUID
+            if let requested = request.terminalID, shown[requested] != nil { id = requested }
+            else if let other = shown.max(by: { $0.value.touched < $1.value.touched })?.key { id = other }
+            else { id = try await open() }
+            guard let terminal = sshTerminals[id] else { throw ComputerBridgeError("The terminal is closed.") }
+            streamer("terminal:\(id)", computer: session.id, capture: { [weak terminal] in
+                terminal.flatMap { TerminalSurface.picture($0.replay.read(from: max(0, $0.replay.end - 16_000)).data ?? Data()) }
+            }, apply: { [weak terminal] input in
+                guard let terminal, !terminal.exited, let bytes = TerminalSurface.bytes(for: input) else { return }
+                terminal.touched = Date()
+                terminal.write(bytes)
+            }).attach(socket)
+            return .init()
+        }
+        if [.terminalOpen, .terminalWrite, .terminalResize, .fileUpload, .fileDownload].contains(request.operation), isWatched(session.id) {
+            throw ComputerBridgeError("A person is using this computer right now. Try again when they're done.")
+        }
+        if request.operation.isFileTransfer {
+            guard let id = request.transferID, let path = request.path else { throw ComputerBridgeError("Missing broker file-transfer reference.") }
+            let staging = try ComputerTransferFiles.staging(root: stagingRoot ?? transferRoot, id: id, create: false)
+            let files = SSHFileService(connection: runtime.connection)
+            defer { Task { await files.close() } }
+            var reply = ComputerResponse(); reply.path = try GuestFile.normalize(path)
+            if request.operation == .fileUpload {
+                let fd = try ComputerTransferFiles.openSource(staging)
+                let count: Int64
+                do { count = try ComputerTransferFiles.size(fd) } catch { Darwin.close(fd); throw error }
+                Darwin.close(fd)
+                try await files.upload(staging, to: reply.path!, progress: { _ in })
+                reply.byteCount = count
+            } else { reply.byteCount = try await files.download(reply.path!, to: staging) }
+            return reply
+        }
+        if request.operation == .terminalOpen { return .init(terminalID: try await open(), offset: 0, exited: false) }
+        if request.operation == .preview {
+            var reply = ComputerResponse(); reply.computerID = session.id; reply.view = "terminal"
+            let id = try ComputerPresentation.terminal(explicit: request.terminalID,
+                active: sshTerminals.filter { $0.value.owner == owner && $0.value.computerID == session.id && !$0.value.exited }.map(\.key))
+            guard let terminal = sshTerminals[id], terminal.owner == owner, terminal.computerID == session.id else {
+                throw ComputerBridgeError("Terminal session is unavailable or belongs to another agent.")
+            }
+            terminal.touched = Date()
+            reply = terminal.replay.read(from: max(0, terminal.replay.end - 8000))
+            reply.terminalID = id; reply.exited = terminal.exited; reply.computerID = session.id; reply.view = "terminal"
+            return reply
+        }
+        guard let id = request.terminalID, let terminal = sshTerminals[id], terminal.owner == owner, terminal.computerID == session.id else {
+            throw ComputerBridgeError("Terminal session is unavailable or belongs to another agent.")
+        }
+        terminal.touched = Date()
+        switch request.operation {
+        case .terminalRead:
+            var reply = terminal.replay.read(from: request.offset ?? 0)
+            reply.terminalID = id; reply.exited = terminal.exited
+            return reply
+        case .terminalWrite:
+            guard !terminal.exited else { throw ComputerBridgeError("This shell has exited. Open a new terminal session.") }
+            terminal.write(request.data ?? Data())
+        case .terminalResize: terminal.resize(columns: request.columns ?? 120, rows: request.rows ?? 30)
+        case .terminalClose: sshTerminals.removeValue(forKey: id)?.close()
         default: throw ComputerBridgeError("Unsupported computer operation.")
         }
         return .init()

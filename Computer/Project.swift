@@ -237,6 +237,8 @@ let project = Project(
         .remote(url: "https://github.com/sparkle-project/Sparkle", requirement: .exact("2.9.4")),
         .remote(url: "https://github.com/apple/containerization.git", requirement: .exact("0.43.0")),
         .remote(url: "https://github.com/migueldeicaza/SwiftTerm.git", requirement: .exact("1.20.0")),
+        .remote(url: "https://github.com/apple/swift-nio.git", requirement: .upToNextMajor(from: "2.86.0")),
+        .remote(url: "https://github.com/apple/swift-nio-ssh.git", requirement: .exact("0.15.0")),
     ],
     settings: .settings(
         base: [
@@ -311,6 +313,9 @@ let project = Project(
                 .package(product: "NoodleExternalToolsUI"),
                 .package(product: "LocalMacCore"),
                 .package(product: "SwiftTerm"),
+                .package(product: "NIOCore"),
+                .package(product: "NIOPosix"),
+                .package(product: "NIOSSH"),
                 .package(product: "Containerization"),
                 .package(product: "ContainerizationEXT4"),
                 .package(product: "ContainerizationExtras"),

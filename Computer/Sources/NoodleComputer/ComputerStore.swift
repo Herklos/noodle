@@ -68,7 +68,7 @@ enum ComputerDisplayMode: String {
         // A failed Local Mac connection does not prove that its account logged
         // out. The lifecycle service stops and verifies it before removal.
         if computer.kind == .localMac { return !phase.busy }
-        return phase == .stopped && virtual == nil && container == nil && localMac == nil && windowsRuntime == nil
+        return phase == .stopped && virtual == nil && container == nil && localMac == nil && windowsRuntime == nil && sshRuntime == nil
     }
     var virtual: VirtualComputer?
     /// A WindowsComputer, which needs macOS 27; see `windows`.
@@ -97,6 +97,17 @@ enum ComputerDisplayMode: String {
         }
     }
     var localTerminal: LocalMacTerminalConnection?
+    var sshRuntime: SSHComputer? {
+        didSet {
+            guard oldValue !== sshRuntime else { return }
+            fileBrowser?.disappear(); fileBrowser?.cancelTransfer(); fileBrowser = nil
+            sshTerminal?.close(); sshTerminal = nil; terminal = nil
+            if sshRuntime == nil { showingTerminal = false; showingFiles = false }
+        }
+    }
+    var sshTerminal: SSHTerminalConnection?
+    /// What the server asked to show the person while signing in, such as Tailscale's check link.
+    @Published var sshNotice: String?
     var container: ContainerComputer? {
         didSet { if container == nil { fileBrowser?.disappear(); fileBrowser?.cancelTransfer(); fileBrowser = nil } }
     }
@@ -113,6 +124,12 @@ enum ComputerDisplayMode: String {
         fileBrowser = model
         return model
     }
+    func filesModel(for runtime: SSHComputer) -> ComputerFilesModel {
+        if let fileBrowser { return fileBrowser }
+        let model = ComputerFilesModel(service: SSHFileService(connection: runtime.connection), computerID: id, workspace: nil)
+        fileBrowser = model
+        return model
+    }
     @available(macOS 27, *)
     func filesModel(for runtime: WindowsComputer) -> ComputerFilesModel {
         if let fileBrowser { return fileBrowser }
@@ -123,6 +140,11 @@ enum ComputerDisplayMode: String {
     init(_ computer: Computer) {
         self.id = computer.id
         self.computer = computer
+    }
+    func sshDisconnected(_ runtime: SSHComputer, reason: String) {
+        guard sshRuntime === runtime, phase == .running else { return }
+        sshRuntime = nil
+        phase = .failed(reason)
     }
     func localMacDisconnected(_ runtime: LocalMacComputer, reason: String) {
         guard localMac === runtime, phase == .running || phase == .starting else { return }
@@ -169,12 +191,14 @@ enum ComputerDisplayMode: String {
     let library: ComputerLibrary
     let cache: URL
     private let removeLocalMacAccount: (UUID) async throws -> Void
+    let sshSecrets: SSHSecretStore
     private var lease: Int32 = -1
 
     init(root: URL? = nil, removeLocalMacAccount: @escaping (UUID) async throws -> Void = {
         try await LocalMacSetup.stop($0, deleting: true)
-    }) throws {
+    }, sshSecrets: SSHSecretStore = .keychain) throws {
         self.removeLocalMacAccount = removeLocalMacAccount
+        self.sshSecrets = sshSecrets
         // Guest I/O closure must report an error, not terminate the Mac app.
         signal(SIGPIPE, SIG_IGN)
         let location =
@@ -230,7 +254,7 @@ enum ComputerDisplayMode: String {
     }
     var kernel: URL { Bundle.main.resourceURL!.appendingPathComponent("Runtime/vmlinux-arm64") }
 
-    func create(_ requested: Computer, source: URL?) async -> Bool {
+    func create(_ requested: Computer, source: URL?, sshSecret: SSHSecret? = nil) async -> Bool {
         guard !storageCleaning, creationTask == nil else { return false }
         creationID = requested.id
         creationName = requested.name
@@ -239,7 +263,7 @@ enum ComputerDisplayMode: String {
         creationCancelling = false
         error = nil
         setCreationStage("Preparing computer…")
-        let task = Task { await self.performCreation(requested, source: source) }
+        let task = Task { await self.performCreation(requested, source: source, sshSecret: sshSecret) }
         creationTask = task
         defer { creationTask = nil }
         return await withTaskCancellationHandler {
@@ -262,7 +286,7 @@ enum ComputerDisplayMode: String {
         creationLastActivity = .now
     }
 
-    private func performCreation(_ requested: Computer, source: URL?) async -> Bool {
+    private func performCreation(_ requested: Computer, source: URL?, sshSecret: SSHSecret?) async -> Bool {
         var computer = requested
         let directory = library.stagingDirectory(for: computer.id)
         let access = source?.startAccessingSecurityScopedResource() ?? false
@@ -282,8 +306,23 @@ enum ComputerDisplayMode: String {
             }
             try Self.requireVirtualizationLimits(computer)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-            computer.macAddress = computer.kind == .localMac ? nil : VZMACAddress.randomLocallyAdministered().string
-            if computer.kind == .localMac {
+            computer.macAddress = [.localMac, .ssh].contains(computer.kind) ? nil : VZMACAddress.randomLocallyAdministered().string
+            if computer.kind == .ssh, let destination = computer.ssh {
+                // Signing in once checks the address and sign-in, and trusts the server's key from then on.
+                setCreationStage("Connecting to \(destination.host)…")
+                let connection = try await SSHConnection.connect(to: destination, secret: sshSecret) { [weak self] text in
+                    Task { @MainActor in
+                        guard let self, self.creationID == requested.id else { return }
+                        self.creationDetail = text
+                    }
+                }
+                connection.close()
+                try Task.checkCancellation()
+                computer.ssh?.hostKey = connection.hostKey
+                computer.ssh?.credential = sshSecret?.credential
+                if let sshSecret { try sshSecrets.save(sshSecret, computer.id) }
+                computer.installationComplete = true
+            } else if computer.kind == .localMac {
                 // Creating a library entry does not install services or mutate
                 // accounts. Start resumes the separately approved setup.
                 computer.installationComplete = true
@@ -425,6 +464,7 @@ enum ComputerDisplayMode: String {
         } catch {
             creationWasCancelled = Task.isCancelled || error is CancellationError
             self.error = creationWasCancelled ? nil : error.localizedDescription
+            if computer.kind == .ssh { sshSecrets.delete(computer.id) }
             // Only this operation's uncommitted UUID staging directory is removed.
             try? FileManager.default.removeItem(at: directory)
             return false
@@ -486,7 +526,9 @@ enum ComputerDisplayMode: String {
         do {
             let computer = session.computer
             let directory = library.directory(for: computer.id)
-            if computer.kind == .localMac {
+            if computer.kind == .ssh {
+                try await connectSSH(session)
+            } else if computer.kind == .localMac {
                 try await LocalMacSetup.check()
                 var saved = computer; saved.localMacSetupRequested = true
                 session.computer = try library.save(saved)
@@ -570,6 +612,7 @@ enum ComputerDisplayMode: String {
             }
             if session.virtual?.machine.state == .stopped { session.virtual = nil }
             if session.computer.kind == .windows { session.windowsRuntime = nil }
+            if session.computer.kind == .ssh { session.sshRuntime?.close(); session.sshRuntime = nil }
             session.recordStartupFailure(error)
         }
     }
@@ -608,6 +651,7 @@ enum ComputerDisplayMode: String {
                 try await LocalMacSetup.stop(session.id)
                 session.localMac?.close(); session.localMac = nil
             }
+            if let ssh = session.sshRuntime { ssh.close(); session.sshRuntime = nil }
             if let virtual = session.virtual, virtual.machine.state != .stopped { try await virtual.stop() }
             try await session.container?.stop()
             session.virtual = nil
@@ -666,6 +710,21 @@ enum ComputerDisplayMode: String {
             } catch {
                 if session.localMac === runtime, session.phase == .running { self.error = error.localizedDescription }
             }
+            return
+        }
+        if let ssh = session.sshRuntime, session.phase == .running {
+            guard session.availableDisplayModes.contains(mode), !session.openingTerminal else { return }
+            if mode == .terminal, session.sshTerminal == nil || session.sshTerminal?.ended == true {
+                session.openingTerminal = true
+                defer { session.openingTerminal = false }
+                do { try await openSSHTerminal(session, runtime: ssh) }
+                catch {
+                    if session.sshRuntime === ssh { self.error = "Could not open the terminal: \(error.localizedDescription)" }
+                    return
+                }
+            }
+            session.showingFiles = mode == .files
+            session.showingTerminal = mode == .terminal
             return
         }
         if #available(macOS 27, *), let windows = session.windows, session.phase == .running {
@@ -759,6 +818,74 @@ enum ComputerDisplayMode: String {
         }
     }
 
+    private func connectSSH(_ session: ComputerSession) async throws {
+        guard var destination = session.computer.ssh else { throw ComputerError("This computer has no address.") }
+        session.sshRuntime?.close(); session.sshRuntime = nil
+        session.sshNotice = nil
+        defer { session.sshNotice = nil }
+        let secret = destination.credential == nil ? nil : try sshSecrets.load(session.id)
+        if destination.credential != nil, secret == nil {
+            throw ComputerError("The Keychain no longer has this computer's key or password. Delete the computer and add it again.")
+        }
+        let connection = try await SSHConnection.connect(to: destination, secret: secret) { [weak session] text in
+            Task { @MainActor in session?.sshNotice = text }
+        }
+        if destination.hostKey == nil {
+            destination.hostKey = connection.hostKey
+            var computer = session.computer
+            computer.ssh = destination
+            do { session.computer = try library.save(computer) } catch { connection.close(); throw error }
+        }
+        let runtime = SSHComputer(connection: connection)
+        runtime.onDisconnect = { [weak session, weak runtime] reason in
+            guard let session, let runtime else { return }
+            session.sshDisconnected(runtime, reason: reason)
+        }
+        session.sshRuntime = runtime
+        try await openSSHTerminal(session, runtime: runtime)
+        session.showingTerminal = true
+    }
+
+    private func openSSHTerminal(_ session: ComputerSession, runtime: SSHComputer) async throws {
+        session.sshTerminal?.close()
+        let terminal = GuestTerminal()
+        let connection = SSHTerminalConnection(connection: runtime.connection, terminal: terminal)
+        try await connection.start()
+        guard session.sshRuntime === runtime else { connection.close(); return }
+        session.sshTerminal = connection
+        session.terminal = terminal
+    }
+
+    /// Signs in with the new address and sign-in before keeping them, so a mistake leaves the old ones.
+    /// A different host or port is a different server, whose key is trusted afresh.
+    func changeSignIn(_ session: ComputerSession, to address: SSHDestination, secret: SSHSecret?, keepSaved: Bool = false) async throws {
+        guard let current = session.computer.ssh else { throw ComputerError("This computer has no address.") }
+        var destination = address
+        destination.hostKey = destination.host == current.host && destination.port == current.port ? current.hostKey : nil
+        let saved = keepSaved && current.credential != nil ? try sshSecrets.load(session.id) : nil
+        if keepSaved, current.credential != nil, saved == nil {
+            throw ComputerError("The Keychain no longer has this computer's key or password. Choose a new sign-in.")
+        }
+        let used = keepSaved ? saved : secret
+        let connection = try await SSHConnection.connect(to: destination, secret: used)
+        connection.close()
+        destination.hostKey = connection.hostKey
+        destination.credential = used?.credential
+        if !keepSaved {
+            if let secret { try sshSecrets.save(secret, session.id) } else { sshSecrets.delete(session.id) }
+        }
+        var computer = session.computer
+        computer.ssh = destination
+        session.computer = try library.save(computer)
+    }
+
+    /// Trusts whatever key the server presents at its next sign-in.
+    func forgetServerKey(_ session: ComputerSession) {
+        var computer = session.computer
+        computer.ssh?.hostKey = nil
+        do { session.computer = try library.save(computer) } catch { self.error = error.localizedDescription }
+    }
+
     func finishInstallation(_ session: ComputerSession) {
         guard session.phase == .stopped else { return }
         var computer = session.computer
@@ -811,7 +938,7 @@ enum ComputerDisplayMode: String {
 
     /// What a stopped computer runs with; it takes effect at the next start.
     func changeResources(_ session: ComputerSession, cpus: Int, memoryGiB: Int, networkEnabled: Bool) throws {
-        guard session.computer.kind != .localMac, session.phase == .stopped,
+        guard ![.localMac, .ssh].contains(session.computer.kind), session.phase == .stopped,
               session.virtual == nil, session.container == nil, session.windowsRuntime == nil else {
             throw ComputerError("Stop the computer before changing its resources.")
         }
@@ -824,7 +951,7 @@ enum ComputerDisplayMode: String {
     }
 
     private static func requireVirtualizationLimits(_ computer: Computer) throws {
-        guard computer.kind == .localMac || (computer.cpuCount <= VZVirtualMachineConfiguration.maximumAllowedCPUCount &&
+        guard [.localMac, .ssh].contains(computer.kind) || (computer.cpuCount <= VZVirtualMachineConfiguration.maximumAllowedCPUCount &&
             UInt64(computer.memoryGiB) * 1_073_741_824 <= VZVirtualMachineConfiguration.maximumAllowedMemorySize
         ) else {
             throw ComputerError("The requested CPU or memory allocation exceeds this Mac’s virtualization limits.")
@@ -856,6 +983,7 @@ enum ComputerDisplayMode: String {
         do {
             // Recoverable deletion, after the UI's explicit confirmation.
             try FileManager.default.trashItem(at: library.directory(for: session.id), resultingItemURL: nil)
+            if session.computer.kind == .ssh { sshSecrets.delete(session.id) }
             sessions.removeAll { $0.id == session.id }
             if selection == session.id { selection = sessions.first?.id }
         } catch { self.error = error.localizedDescription }
@@ -892,7 +1020,7 @@ enum ComputerDisplayMode: String {
             }
         }
         for session in sessions where session.phase == .running || session.container != nil || session.virtual != nil
-            || session.localMac != nil || session.windowsRuntime != nil {
+            || session.localMac != nil || session.windowsRuntime != nil || session.sshRuntime != nil {
             await stop(session, force: true)
         }
     }
