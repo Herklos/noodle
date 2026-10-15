@@ -19,8 +19,11 @@ final class MessageMarkdownCache: @unchecked Sendable {
 
     private final class SegmentsBox {
         let body: String
+        let layout: MessageTextLayout
         let value: [Segment]
-        init(body: String, value: [Segment]) { self.body = body; self.value = value }
+        init(body: String, layout: MessageTextLayout, value: [Segment]) {
+            self.body = body; self.layout = layout; self.value = value
+        }
     }
 
     private let values = NSCache<NSUUID, Box>()
@@ -39,19 +42,21 @@ final class MessageMarkdownCache: @unchecked Sendable {
         return rendered
     }
 
-    func segments(_ message: ChatMessage) -> [Segment] {
+    func segments(_ message: ChatMessage, layout: MessageTextLayout = .defaultValue) -> [Segment] {
         let key = message.id as NSUUID
-        if let cached = segmentValues.object(forKey: key), cached.body == message.body { return cached.value }
+        if let cached = segmentValues.object(forKey: key), cached.body == message.body, cached.layout == layout {
+            return cached.value
+        }
         let parts = MessageSegment.split(message.body)
-        let segments: [Segment] = parts.contains(where: { if case .table = $0 { true } else { false } })
-            ? parts.map {
-                switch $0 {
-                case .text(let text): .text(Self.render(text), source: text)
-                case .table(let table): .table(table)
+        let segments: [Segment] = layout != .together || parts.contains(where: { if case .table = $0 { true } else { false } })
+            ? parts.flatMap { part -> [Segment] in
+                switch part {
+                case .text(let text): layout.parts(text).map { .text(Self.render($0), source: $0) }
+                case .table(let table): [.table(table)]
                 }
             }
             : [.text(render(message), source: message.body)]
-        segmentValues.setObject(SegmentsBox(body: message.body, value: segments), forKey: key)
+        segmentValues.setObject(SegmentsBox(body: message.body, layout: layout, value: segments), forKey: key)
         return segments
     }
 

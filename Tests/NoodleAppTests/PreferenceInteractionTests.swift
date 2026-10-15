@@ -93,6 +93,21 @@ import NoodleCore
         }
     }
 
+    func testLongMessageLayoutsPersistAndRestoreTheSelectionAfterReopen() async throws {
+        let f = try fixture()
+        XCTAssertEqual(MessageTextLayout.defaultValue, .together)
+        let settings = host(ChatSettingsView(microphoneDevices: { [] }, systemMicrophoneID: { 0 }).defaultAppStorage(f.runtime.defaults))
+        for layout in [MessageTextLayout.chunks, .paragraphs, .together] {
+            press(try await control(layout.displayName, in: settings))
+            try await wait { f.runtime.defaults.string(forKey: MessageTextLayout.defaultsKey) == layout.rawValue }
+            let reopened = host(ChatSettingsView(microphoneDevices: { [] }, systemMicrophoneID: { 0 })
+                .defaultAppStorage(try reopenedDefaults(f)))
+            _ = try await control(layout.explanation, in: reopened)
+            let selected = try await control(layout.displayName, in: reopened)
+            XCTAssertTrue(checked(selected))
+        }
+    }
+
     func testNameMenuDescriptionsCanBeDisabledAndRestoredAcrossReopen() async throws {
         let f = try fixture()
         let settings = host(ChatSettingsView(microphoneDevices: { [] }, systemMicrophoneID: { 0 }).defaultAppStorage(f.runtime.defaults))

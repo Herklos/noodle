@@ -204,6 +204,7 @@ struct ConversationStatusAvatar: View {
 struct MessageBubble: View {
     @Environment(NoodleStore.self) private var store
     @AppStorage(ChatAttachmentLayout.defaultsKey) private var attachmentLayout = ChatAttachmentLayout.defaultValue.rawValue
+    @AppStorage(MessageTextLayout.defaultsKey) private var textLayout = MessageTextLayout.defaultValue.rawValue
     @State private var inspectedReaction: String?
     @State private var changingReaction = false
     @State private var isVisible = false
@@ -296,8 +297,10 @@ struct MessageBubble: View {
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: Self.contentSpacing) {
                 if showsTextBubble(attachments: attachments) {
-                    // Tables split the text into separate bubbles; reactions mark the first.
-                    let segments = MessageMarkdownCache.shared.segments(message)
+                    // Tables and the long message layout split the text into separate bubbles;
+                    // reactions mark the first.
+                    let segments = MessageMarkdownCache.shared.segments(
+                        message, layout: MessageTextLayout(rawValue: textLayout) ?? .defaultValue)
                     ForEach(segments.indices, id: \.self) { index in
                         segmentBubble(segments[index])
                             .overlay(alignment: .topTrailing) { if index == 0 { cornerReactions } }

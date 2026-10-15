@@ -115,6 +115,39 @@ import HubLink
         XCTAssertEqual(card, plain, accuracy: 0.5)
     }
 
+    func testLongMessageLayoutsBreakProseAtBlankLinesButNotInsideCode() {
+        let body = "First.\n\nSteps:\n1. One\n2. Two\n\n```\na\n\nb\n```\n\nLast."
+        XCTAssertEqual(MessageTextLayout.together.parts(body), [body])
+        XCTAssertEqual(MessageTextLayout.paragraphs.parts(body),
+                       ["First.", "Steps:\n1. One\n2. Two", "```\na\n\nb\n```", "Last."])
+        XCTAssertEqual(MessageTextLayout.chunks.parts(body), [body])
+
+        let long = Array(repeating: "word", count: 50).joined(separator: " ")
+        XCTAssertEqual(MessageTextLayout.chunks.parts("Intro:\n\n\(long)\n\n\(long)\n\n\(long)"),
+                       ["Intro:\n\n\(long)", long, long], "A lead-in keeps what follows it")
+    }
+
+    func testChangingTheLongMessageLayoutSplitsAnAlreadyRenderedMessage() throws {
+        let f = try fixture()
+        let message = ChatMessage(conversationID: f.directA.id, author: .agent(f.a.id),
+                                  body: "One.\n\nTwo.\n\n| A |\n|---|\n| 1 |\n\nThree.\n\nFour.", delivery: .delivered)
+        XCTAssertEqual(MessageMarkdownCache.shared.segments(message, layout: .together).count, 3)
+        XCTAssertEqual(MessageMarkdownCache.shared.segments(message, layout: .paragraphs).count, 5)
+        XCTAssertEqual(MessageMarkdownCache.shared.segments(message, layout: .together).count, 3)
+    }
+
+    func testParagraphLayoutShowsEachParagraphInItsOwnBubble() async throws {
+        let f = try fixture()
+        f.runtime.defaults.set(MessageTextLayout.paragraphs.rawValue, forKey: MessageTextLayout.defaultsKey)
+        let message = ChatMessage(conversationID: f.directA.id, author: .agent(f.a.id),
+                                  body: "Morning.\n\nAll quiet overnight.", delivery: .delivered)
+        let view = host(MessageBubble(message: message, hasConversationBackground: false,
+            selectedAttachmentID: .constant(nil), previewAttachment: { _, _ in }, showAgentProfile: nil)
+            .padding().environment(f.store).defaultAppStorage(f.runtime.defaults))
+        try await wait { self.shows("Morning.", in: view) }
+        XCTAssertTrue(shows("All quiet overnight.", in: view))
+    }
+
     func testNotificationsAndPreviewsLeaveTablesOut() throws {
         let f = try fixture()
         let body = "Here you go:\n\n| Day | Messages |\n|---|---|\n| Sep 1 | 4 |\n\nAll **quiet**."

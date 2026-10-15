@@ -10,6 +10,7 @@ All notable changes to Noodle are documented here, following
 
 - A morning demo scenario: scheduled research, a generated cover, a shared newsletter draft and a quick game before coffee.
 - A breach-response demo scenario: detection, incident response and threat research teams of agents working an active breach overnight.
+- Settings > Chat > Long messages can split long replies into a bubble per paragraph, or into short chunks that keep a lead-in with its list.
 
 ### Fixed
 
