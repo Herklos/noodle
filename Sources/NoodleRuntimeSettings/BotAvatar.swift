@@ -29,7 +29,7 @@ public struct BotAvatar: View {
 
     @MainActor public static func menuImage(for agent: AgentRecord) -> NSImage? {
         let size: CGFloat = 16
-        let renderer = ImageRenderer(content: BotAvatar(agent: agent, size: size, showsShadow: false))
+        let renderer = ImageRenderer(content: BotAvatar(agent: agent, size: size, showsShadow: false).environment(\.displayScale, 2))
         renderer.scale = 2
         guard let image = renderer.cgImage else { return nil }
         let result = NSImage(cgImage: image, size: NSSize(width: size, height: size))

@@ -20,6 +20,14 @@ final class IconAppearanceTests: XCTestCase {
         XCTAssertEqual(IconPalette.clamped(9), 5)
     }
 
+    /// A stored 512-pixel picture is drawn from a copy the size of the badge, not shrunk by SwiftUI.
+    func testDrawsFromACopyTheSizeOfTheBadge() throws {
+        let drawn = try XCTUnwrap(IconImage.thumbnail(image(width: 512, height: 512), pixels: 120))
+        XCTAssertEqual([drawn.width, drawn.height], [120, 120])
+        let small = try XCTUnwrap(IconImage.thumbnail(image(width: 64, height: 64), pixels: 120))
+        XCTAssertEqual([small.width, small.height], [64, 64], "A small picture is not enlarged")
+    }
+
     func testPNGEncodingScalesToFitAndRefusesOversizeOutput() throws {
         let prepared = try IconImage.prepare(image(width: 2048, height: 1024), encoding: .png(maxBytes: 2 * 1024 * 1024))
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: prepared))

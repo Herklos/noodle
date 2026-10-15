@@ -5,6 +5,11 @@
 ### Changed
 
 - The starter team made on your first Hub wear drawn faces that suit their names, in place of icons.
+- Bot Picture shows a Picture or Symbol switch, with only that choice's options beneath it, in place of Use Symbol Instead. Switching to Symbol and back keeps the picture, and Create Image reads Edit Image when there is a picture to start from. Editing a picture no longer adds the bot's name and description to your prompt.
+
+### What to Test
+
+- In a bot's Bot Picture, switch between Picture and Symbol; check the preview follows, the picture comes back after switching to Symbol and back, and saving keeps the one showing.
 
 ## [0.32.0] - 2026-10-14
 

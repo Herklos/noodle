@@ -5,6 +5,11 @@
 ### Changed
 
 - The shaded band at the top of the window is gone.
+- Icon editors show a Picture or Symbol switch, with only that choice's options beneath it, in place of Use Symbol Instead. Switching to Symbol and back keeps the picture until you press Done, and Create Image… reads Edit Image… when there is a picture to start from.
+
+### Fixed
+
+- Browser icons made from your own or generated pictures look smooth at small sizes instead of pixelated.
 
 ## [0.18.2] - 2026-10-14
 

@@ -45,6 +45,7 @@ public struct IconBadge: View {
     let size: CGFloat
     var showsShadow = true
     let initials: String?
+    @Environment(\.displayScale) private var displayScale
 
     /// `symbol` is drawn while the appearance has not chosen one of its own, or `initials` for a person.
     public init(appearance: IconAppearance, symbol: String, size: CGFloat, showsShadow: Bool = true, initials: String? = nil) {
@@ -53,8 +54,9 @@ public struct IconBadge: View {
 
     public var body: some View {
         ZStack {
-            if let data = appearance.iconImage, let image = NSImage(data: data) {
-                Image(nsImage: image).resizable().scaledToFill()
+            if let data = appearance.iconImage,
+               let image = IconImage.thumbnail(data, pixels: Int((size * displayScale).rounded(.up))) {
+                Image(decorative: image, scale: displayScale).resizable().interpolation(.high).scaledToFill()
             } else {
                 Circle().fill(LinearGradient(colors: IconPalette.gradients[IconPalette.index(for: appearance.iconColour)],
                     startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -134,6 +136,20 @@ public enum IconImage {
             }
             return encoded
         }
+    }
+
+    /// The picture shrunk until its shorter side is `pixels`, never enlarged. SwiftUI shrinks a large
+    /// picture into a small badge by sampling too few of its pixels, which looks pixelated.
+    public static func thumbnail(_ data: Data, pixels: Int) -> CGImage? {
+        guard pixels > 0, let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int, min(width, height) > 0 else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: min(max(width, height), max(width, height) * pixels / min(width, height)),
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ] as CFDictionary)
     }
 
     public static func load(_ url: URL, encoding: IconImageEncoding) throws -> Data {

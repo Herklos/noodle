@@ -106,6 +106,7 @@ enum NoodleNotifications {
         let renderer = ImageRenderer(
             content: BotAvatar(agent: agent, size: 128)
                 .padding(8)
+                .environment(\.displayScale, 2)
         )
         renderer.scale = 2
 

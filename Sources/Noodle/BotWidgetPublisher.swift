@@ -49,7 +49,7 @@ final class BotWidgetPublisher {
         if let cached = pictures[bot.id], cached.source == source {
             bot.image = cached.picture
         } else {
-            let renderer = ImageRenderer(content: BotAvatar(agent: agent, size: 80, showsShadow: false))
+            let renderer = ImageRenderer(content: BotAvatar(agent: agent, size: 80, showsShadow: false).environment(\.displayScale, 2))
             renderer.scale = 2
             bot.image = renderer.nsImage.flatMap { $0.tiffRepresentation }.flatMap(NSBitmapImageRep.init(data:))?
                 .representation(using: .png, properties: [:])

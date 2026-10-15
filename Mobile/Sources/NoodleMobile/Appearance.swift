@@ -208,6 +208,9 @@ struct BotPictureEditor: View {
     @State private var creating = false
     @State private var loading = false
     @State private var problem: String?
+    /// Picture is chosen but none is set yet.
+    @State private var choosingPicture = false
+    @State private var keptPicture: (data: Data?, digest: String?)?
 
     private var avatar: AvatarIdea {
         AvatarIdea(name: draft.name, description: draft.publicDescription, backstory: draft.backstory)
@@ -226,66 +229,16 @@ struct BotPictureEditor: View {
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
             }
-            Section("Image") {
-                PhotosPicker(selection: $photo, matching: .images) { Label("Choose Photo", systemImage: "photo") }
-                if supportsImagePlayground {
-                    Button { creating = true } label: { Label("Create Image", systemImage: "apple.image.playground") }
+            Section {
+                Picker("Show", selection: showsPicture) {
+                    Text("Picture").tag(true)
+                    Text("Symbol").tag(false)
                 }
-                NavigationLink {
-                    FacePicker(selection: draft.avatarImageData) { draft.avatarImageData = $0 }
-                } label: {
-                    Label("Choose Face", systemImage: "face.smiling")
-                }
-                Button {
-                    draft.removePicture()
-                } label: {
-                    Label(draft.hasPicture ? "Use Symbol Instead" : "Using Symbol",
-                          systemImage: draft.hasPicture ? "square.grid.2x2" : "checkmark")
-                }
-                .disabled(!draft.hasPicture)
-                if loading { ProgressView() }
-                if let problem { Text(problem).foregroundStyle(.red) }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .listRowBackground(Color.clear)
             }
-            Section("Colour") {
-                HStack(spacing: 12) {
-                    ForEach(0..<AgentAvatar.colourCount, id: \.self) { index in
-                        Button {
-                            draft.avatarColorIndex = index
-                            draft.removePicture()
-                        } label: {
-                            AgentAvatar.swatch(index).frame(width: 34, height: 34).overlay {
-                                if !draft.hasPicture && AgentAvatar.colourIndex(draft.avatarColorIndex) == index {
-                                    Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Colour \(index + 1)")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-            }
-            Section("Symbol") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 10) {
-                    ForEach(Self.symbols, id: \.self) { symbol in
-                        let selected = !draft.hasPicture && (draft.avatarSymbolName ?? "sparkles") == symbol
-                        Button {
-                            draft.avatarSymbolName = symbol
-                            draft.removePicture()
-                        } label: {
-                            Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
-                                .frame(maxWidth: .infinity).frame(height: 42)
-                                .background(selected ? Color.accentColor : Color.secondary.opacity(0.14),
-                                            in: RoundedRectangle(cornerRadius: 10))
-                                .foregroundStyle(selected ? Color.white : .primary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(symbol)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
+            if showsPicture.wrappedValue { pictureSources } else { symbolChoices }
         }
         .navigationTitle("Bot Picture")
         .navigationBarTitleDisplayMode(.inline)
@@ -294,10 +247,86 @@ struct BotPictureEditor: View {
             await load { try await photo.loadTransferable(type: BackgroundPhoto.self)?.data }
             self.photo = nil
         }
-        .imagePlaygroundSheet(isPresented: $creating, concepts: avatar.concepts, sourceImage: draft.avatarImageData.flatMap(UIImage.init(data:)).map(Image.init(uiImage:))) { url in
+        // Editing a picture is the person's prompt alone; the bot's idea only starts a new image.
+        .imagePlaygroundSheet(isPresented: $creating, concepts: draft.avatarImageData == nil ? avatar.concepts : [], sourceImage: draft.avatarImageData.flatMap(UIImage.init(data:)).map(Image.init(uiImage:))) { url in
             Task { await load { try Data(contentsOf: url) } }
         }
         .noodleImagePlayground()
+    }
+
+    /// Switching to the symbol puts the picture aside, so switching back brings it again.
+    private var showsPicture: Binding<Bool> {
+        Binding {
+            draft.hasPicture || choosingPicture
+        } set: { picture in
+            choosingPicture = picture
+            if picture {
+                if let keptPicture { draft.avatarImageData = keptPicture.data; draft.avatarImageDigest = keptPicture.digest }
+            } else if draft.hasPicture {
+                keptPicture = (draft.avatarImageData, draft.avatarImageDigest)
+                draft.removePicture()
+            }
+        }
+    }
+
+    @ViewBuilder private var pictureSources: some View {
+        Section {
+            PhotosPicker(selection: $photo, matching: .images) { Label("Choose Photo", systemImage: "photo") }
+            if supportsImagePlayground {
+                // With a picture in place, Image Playground starts from it.
+                Button { creating = true } label: {
+                    Label(draft.avatarImageData == nil ? "Create Image" : "Edit Image", systemImage: "apple.image.playground")
+                }
+            }
+            NavigationLink {
+                FacePicker(selection: draft.avatarImageData) { draft.avatarImageData = $0; keptPicture = nil }
+            } label: {
+                Label("Choose Face", systemImage: "face.smiling")
+            }
+            if loading { ProgressView() }
+            if let problem { Text(problem).foregroundStyle(.red) }
+        }
+    }
+
+    @ViewBuilder private var symbolChoices: some View {
+        Section("Colour") {
+            HStack(spacing: 12) {
+                ForEach(0..<AgentAvatar.colourCount, id: \.self) { index in
+                    Button {
+                        draft.avatarColorIndex = index
+                    } label: {
+                        AgentAvatar.swatch(index).frame(width: 34, height: 34).overlay {
+                            if AgentAvatar.colourIndex(draft.avatarColorIndex) == index {
+                                Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Colour \(index + 1)")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+        }
+        Section("Symbol") {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 10) {
+                ForEach(Self.symbols, id: \.self) { symbol in
+                    let selected = (draft.avatarSymbolName ?? "sparkles") == symbol
+                    Button {
+                        draft.avatarSymbolName = symbol
+                    } label: {
+                        Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
+                            .frame(maxWidth: .infinity).frame(height: 42)
+                            .background(selected ? Color.accentColor : Color.secondary.opacity(0.14),
+                                        in: RoundedRectangle(cornerRadius: 10))
+                            .foregroundStyle(selected ? Color.white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(symbol)
+                }
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     private func load(_ source: () async throws -> Data?) async {
@@ -307,6 +336,7 @@ struct BotPictureEditor: View {
         do {
             guard let data = try await source() else { throw LinkError("Photos could not provide this image.") }
             draft.avatarImageData = try BotPicture.prepare(data)
+            keptPicture = nil
         } catch {
             problem = error.localizedDescription
         }

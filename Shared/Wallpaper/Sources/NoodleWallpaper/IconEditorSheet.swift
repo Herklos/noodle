@@ -17,7 +17,7 @@ public struct IconEditorSheet: View {
     private let takesPhotos: Bool
     private let faces: [Data]
     @Environment(\.dismiss) private var dismiss
-    @State private var draft: IconAppearance
+    @State private var draft: IconEditorDraft
     @State private var failure: String?
     @State private var choosingFile = false
     @State private var choosingPhoto = false
@@ -34,7 +34,7 @@ public struct IconEditorSheet: View {
                 avatar: AvatarIdea? = nil, initials: String? = nil, takesPhotos: Bool = false, faces: [Data] = []) {
         _icon = icon; self.title = title; self.symbol = symbol; self.symbols = symbols; self.encoding = encoding; self.avatar = avatar
         self.initials = initials; self.takesPhotos = takesPhotos; self.faces = faces
-        _draft = State(initialValue: icon.wrappedValue)
+        _draft = State(initialValue: IconEditorDraft(icon.wrappedValue))
     }
 
     public var body: some View {
@@ -42,82 +42,23 @@ public struct IconEditorSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }.foregroundStyle(.blue)
                 Spacer(); Text(title).font(.headline).foregroundStyle(.primary); Spacer()
-                Button("Done") { icon = draft; dismiss() }.foregroundStyle(.blue)
+                Button("Done") { icon = draft.chosen; dismiss() }.foregroundStyle(.blue)
                     .disabled(isLoadingImage)
             }.buttonStyle(.plain).padding(16)
             Divider()
             VStack(spacing: 18) {
-                IconBadge(appearance: draft, symbol: symbol, size: 104, initials: initials)
+                IconBadge(appearance: draft.chosen, symbol: symbol, size: 104, initials: initials)
                     .overlay {
                         Circle().inset(by: -5)
                             .strokeBorder(isDropTargeted && !isLoadingImage ? Color.accentColor : .clear, lineWidth: 3)
                     }
                     .padding(.top, 4)
-                GroupBox("Image") {
-                    VStack(spacing: 8) {
-                        HStack(spacing: 8) {
-                            ImageSourceMenu(
-                                title: "Choose Image…",
-                                chooseFile: { choosingFile = true },
-                                choosePhoto: { photoSelection = nil; choosingPhoto = true },
-                                takePhoto: takesPhotos ? { takingPhoto = true } : nil
-                            ).frame(minWidth: 0, maxWidth: .infinity)
-                            if #available(macOS 15.1, *) {
-                                NoodleImagePlaygroundButton(sourceImageData: draft.iconImage, concepts: avatar?.concepts ?? []) { url in loadImage(url) }
-                                    .frame(minWidth: 0, maxWidth: .infinity)
-                            }
-                        }
-                        if !faces.isEmpty {
-                            Button { choosingFace = true } label: {
-                                Label("Choose Face…", systemImage: "face.smiling").frame(maxWidth: .infinity).frame(height: 20)
-                            }.buttonStyle(.bordered)
-                                .popover(isPresented: $choosingFace, arrowEdge: .bottom) {
-                                    FacePicker(faces: faces, selection: draft.iconImage) { face in
-                                        draft.iconImage = face; photoSelection = nil; choosingFace = false
-                                    }
-                                }
-                        }
-                        Divider()
-                        Button {
-                            draft.iconImage = nil; photoSelection = nil
-                        } label: {
-                            Label(draft.iconImage == nil ? "Using Symbol" : "Use Symbol Instead",
-                                  systemImage: draft.iconImage == nil ? "checkmark" : "square.grid.2x2")
-                                .frame(maxWidth: .infinity)
-                        }.buttonStyle(.bordered).disabled(draft.iconImage == nil)
-                        if isLoadingImage { ProgressView().controlSize(.small).frame(maxWidth: .infinity) }
-                    }.padding(8)
-                }
+                Picker("Show", selection: $draft.showsPicture) {
+                    Text("Picture").tag(true)
+                    Text("Symbol").tag(false)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
+                if draft.showsPicture { pictureSources } else { symbolChoices }
                 if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
-                GroupBox("Colour") {
-                    HStack(spacing: 12) {
-                        ForEach(IconPalette.gradients.indices, id: \.self) { index in
-                            Button { draft.iconColour = index; draft.iconImage = nil } label: {
-                                Circle().fill(LinearGradient(colors: IconPalette.gradients[index], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    .frame(width: 34, height: 34).overlay {
-                                        if draft.iconImage == nil && IconPalette.index(for: draft.iconColour) == index {
-                                            Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                        }
-                                    }
-                            }.buttonStyle(.plain).accessibilityLabel("Colour \(index + 1)")
-                        }
-                    }.frame(maxWidth: .infinity).padding(.vertical, 6)
-                }
-                GroupBox("Symbol") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 10) {
-                        if let initials {
-                            tile(nil, selected: draft.iconImage == nil && draft.iconSymbol == nil) {
-                                Text(initials).font(.system(size: 16, weight: .semibold, design: .rounded))
-                            }.accessibilityLabel("Initials")
-                        }
-                        ForEach(Array(symbols.enumerated()), id: \.offset) { _, candidate in
-                            let chosen = draft.iconSymbol ?? (initials == nil ? symbol : nil)
-                            tile(candidate, selected: draft.iconImage == nil && chosen == candidate) {
-                                Image(systemName: candidate).font(.system(size: 18, weight: .semibold))
-                            }.accessibilityLabel(candidate)
-                        }
-                    }.padding(8)
-                }
             }.padding(20)
         }.frame(width: 440).controlSize(.regular)
             .onDrop(of: BackgroundDrop.imageContentTypes, isTargeted: $isDropTargeted, perform: drop)
@@ -147,8 +88,72 @@ public struct IconEditorSheet: View {
             }
     }
 
+    private var pictureSources: some View {
+        GroupBox { VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                ImageSourceMenu(
+                    title: "Choose Image…",
+                    chooseFile: { choosingFile = true },
+                    choosePhoto: { photoSelection = nil; choosingPhoto = true },
+                    takePhoto: takesPhotos ? { takingPhoto = true } : nil
+                ).frame(minWidth: 0, maxWidth: .infinity)
+                if #available(macOS 15.1, *) {
+                    // With a picture in place, Image Playground starts from it.
+                    NoodleImagePlaygroundButton(sourceImageData: draft.icon.iconImage, concepts: draft.playgroundIdea(avatar)?.concepts ?? [],
+                                                title: draft.icon.iconImage == nil ? "Create Image…" : "Edit Image…") { url in loadImage(url) }
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                }
+            }
+            if !faces.isEmpty {
+                Button { choosingFace = true } label: {
+                    Label("Choose Face…", systemImage: "face.smiling").frame(maxWidth: .infinity).frame(height: 20)
+                }.buttonStyle(.bordered)
+                    .popover(isPresented: $choosingFace, arrowEdge: .bottom) {
+                        FacePicker(faces: faces, selection: draft.icon.iconImage) { face in
+                            draft.setPicture(face); photoSelection = nil; choosingFace = false
+                        }
+                    }
+            }
+            if isLoadingImage { ProgressView().controlSize(.small).frame(maxWidth: .infinity) }
+        }.padding(8) }
+    }
+
+    private var symbolChoices: some View {
+        VStack(spacing: 18) {
+            GroupBox("Colour") {
+                HStack(spacing: 12) {
+                    ForEach(IconPalette.gradients.indices, id: \.self) { index in
+                        Button { draft.icon.iconColour = index } label: {
+                            Circle().fill(LinearGradient(colors: IconPalette.gradients[index], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 34, height: 34).overlay {
+                                    if IconPalette.index(for: draft.icon.iconColour) == index {
+                                        Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                    }
+                                }
+                        }.buttonStyle(.plain).accessibilityLabel("Colour \(index + 1)")
+                    }
+                }.frame(maxWidth: .infinity).padding(.vertical, 6)
+            }
+            GroupBox("Symbol") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 10) {
+                    if let initials {
+                        tile(nil, selected: draft.icon.iconSymbol == nil) {
+                            Text(initials).font(.system(size: 16, weight: .semibold, design: .rounded))
+                        }.accessibilityLabel("Initials")
+                    }
+                    ForEach(Array(symbols.enumerated()), id: \.offset) { _, candidate in
+                        let chosen = draft.icon.iconSymbol ?? (initials == nil ? symbol : nil)
+                        tile(candidate, selected: chosen == candidate) {
+                            Image(systemName: candidate).font(.system(size: 18, weight: .semibold))
+                        }.accessibilityLabel(candidate)
+                    }
+                }.padding(8)
+            }
+        }
+    }
+
     private func tile(_ candidate: String?, selected: Bool, @ViewBuilder label: () -> some View) -> some View {
-        Button { draft.iconSymbol = candidate; draft.iconImage = nil } label: {
+        Button { draft.icon.iconSymbol = candidate } label: {
             label()
                 .frame(maxWidth: .infinity).frame(height: 42)
                 .background(selected ? Color.accentColor : Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
@@ -178,8 +183,37 @@ public struct IconEditorSheet: View {
         do {
             let data = try await image()
             guard !Task.isCancelled else { return }
-            draft.iconImage = data
+            draft.setPicture(data)
         } catch { if !Task.isCancelled { failure = error.localizedDescription } }
+    }
+}
+
+/// A picture and a symbol on a colour, both kept while the person switches between them;
+/// Done saves the one showing.
+struct IconEditorDraft: Equatable {
+    /// The symbol and colour, and the picture whether it shows or not.
+    var icon: IconAppearance
+    var showsPicture: Bool
+
+    init(_ icon: IconAppearance) {
+        self.icon = icon
+        showsPicture = icon.iconImage != nil
+    }
+
+    var chosen: IconAppearance {
+        var chosen = icon
+        if !showsPicture { chosen.iconImage = nil }
+        return chosen
+    }
+
+    /// Image Playground starts from the bot's idea only for a new image; editing a picture is the person's prompt alone.
+    func playgroundIdea(_ idea: AvatarIdea?) -> AvatarIdea? {
+        icon.iconImage == nil ? idea : nil
+    }
+
+    mutating func setPicture(_ data: Data) {
+        icon.iconImage = data
+        showsPicture = true
     }
 }
 

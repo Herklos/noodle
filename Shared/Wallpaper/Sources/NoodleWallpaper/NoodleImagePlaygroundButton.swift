@@ -10,14 +10,16 @@ public struct NoodleImagePlaygroundButton: View {
     let sourceImageData: Data?
     let concepts: [ImagePlaygroundConcept]
     let shape: CGSize?
+    let title: String
     let onCompletion: (URL) -> Void
 
     /// `shape` is the screen a background fills; pictures leave it out and stay square.
     public init(sourceImageData: Data?, concepts: [ImagePlaygroundConcept] = [], shape: CGSize? = nil,
-                onCompletion: @escaping (URL) -> Void) {
+                title: String = "Create Image…", onCompletion: @escaping (URL) -> Void) {
         self.sourceImageData = sourceImageData
         self.concepts = concepts
         self.shape = shape
+        self.title = title
         self.onCompletion = onCompletion
     }
 
@@ -30,7 +32,7 @@ public struct NoodleImagePlaygroundButton: View {
     }
     private var triggerButton: some View {
         Button { isPresented = true } label: {
-            Label("Create Image…", systemImage: "apple.intelligence").frame(maxWidth: .infinity)
+            Label(title, systemImage: "apple.intelligence").frame(maxWidth: .infinity)
                 .frame(height: 20)
         }.buttonStyle(.bordered)
     }

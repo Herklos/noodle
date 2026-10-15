@@ -120,3 +120,37 @@ import XCTest
         block(NSDraggingItem(pasteboardWriter: url as NSURL), 0, &stop)
     }
 }
+
+final class IconEditorDraftTests: XCTestCase {
+    func testOpensOnWhatTheIconShows() {
+        XCTAssertTrue(IconEditorDraft(IconAppearance(image: Data([1]))).showsPicture)
+        XCTAssertFalse(IconEditorDraft(IconAppearance(symbol: "bolt.fill")).showsPicture)
+    }
+
+    func testSwitchingToTheSymbolAndBackKeepsThePicture() {
+        var draft = IconEditorDraft(IconAppearance(symbol: "bolt.fill", colour: 2, image: Data([1])))
+        draft.showsPicture = false
+        draft.icon.iconColour = 4
+        XCTAssertEqual(draft.chosen, IconAppearance(symbol: "bolt.fill", colour: 4))
+        draft.showsPicture = true
+        XCTAssertEqual(draft.chosen, IconAppearance(symbol: "bolt.fill", colour: 4, image: Data([1])))
+    }
+
+    func testANewPictureShowsItself() {
+        var draft = IconEditorDraft(IconAppearance(colour: 1))
+        draft.setPicture(Data([2]))
+        XCTAssertEqual(draft.chosen, IconAppearance(colour: 1, image: Data([2])))
+    }
+}
+
+final class IconEditorPlaygroundIdeaTests: XCTestCase {
+    private let idea = AvatarIdea(name: "Alfred", description: "A butler")
+
+    func testANewImageStartsFromTheBotsIdea() {
+        XCTAssertEqual(IconEditorDraft(IconAppearance(colour: 1)).playgroundIdea(idea), idea)
+    }
+
+    func testEditingAPictureLeavesThePromptToThePerson() {
+        XCTAssertNil(IconEditorDraft(IconAppearance(image: Data([1]))).playgroundIdea(idea))
+    }
+}
