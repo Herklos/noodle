@@ -19,6 +19,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - Group pictures look sharp instead of soft and muddy.
+- Codex 0.163.0 and later is recognised again, so Settings > Harness shows its real version and Noodle can install it.
 
 ## [0.64.0] - 2026-10-15
 

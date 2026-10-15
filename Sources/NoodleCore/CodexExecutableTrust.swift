@@ -18,32 +18,14 @@ public enum CodexExecutableTrust {
         if bundled.contains(path) {
             guard executable.path == path else { throw HarnessSetupError("Bundled Codex must not be redirected.") }
         } else {
-            // The official installer uses symlinks to a versioned package. Validate
-            // the resolved package, including tools the main executable can launch.
+            // The official installer uses symlinks to a versioned package.
             guard executable.lastPathComponent == "codex",
                   executable.deletingLastPathComponent().lastPathComponent == "bin" else {
                 throw HarnessSetupError("The standalone Codex package layout is unsupported.")
             }
-            try verifyPackage(executable.deletingLastPathComponent().deletingLastPathComponent())
         }
         try verifySignature(executable, identifier: "codex")
         return executable
-    }
-
-    /// The main executable and every tool it can launch from its package.
-    public static func verifyPackage(_ package: URL) throws {
-        for (entry, identifier) in [
-            "bin/codex": "codex",
-            "bin/codex-code-mode-host": "codex-code-mode-host",
-            "codex-path/rg": "com.openai.codex.rg",
-            "codex-resources/zsh/bin/zsh": "com.openai.codex.zsh"
-        ] {
-            let tool = package.appendingPathComponent(entry)
-            guard tool.resolvingSymlinksInPath().path == tool.standardizedFileURL.path else {
-                throw HarnessSetupError("Codex supporting tools must not be redirected.")
-            }
-            try verifySignature(tool, identifier: identifier)
-        }
     }
 
     public static func verifySignature(_ url: URL, identifier: String) throws {

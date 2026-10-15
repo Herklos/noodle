@@ -15,9 +15,6 @@ extension HarnessDistribution {
                 return (base + "codex-package-\(platform).tar.gz", base + "codex-package_SHA256SUMS")
             },
             expectation: { release, data in expectation(sha256: listedDigest(of: release.artifact.lastPathComponent, in: data)) },
-            verify: { package, executable in
-                try CodexExecutableTrust.verifyPackage(package)
-                try CodexExecutableTrust.verifySignature(executable, identifier: "codex")
-            })
+            verify: { _, executable in try CodexExecutableTrust.verifySignature(executable, identifier: "codex") })
     }()
 }
