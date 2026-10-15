@@ -7,6 +7,7 @@ struct ConversationAvatar: View {
     let participants: [AgentRecord]
     let isGroup: Bool
     let size: CGFloat
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         if isGroup {
@@ -26,37 +27,57 @@ struct ConversationAvatar: View {
     }
 
     private func singleMemberGroupAvatar(_ agent: AgentRecord) -> some View {
-        ZStack {
+        let frames = Self.memberFrames(count: 1, size: size, scale: displayScale)
+        return ZStack(alignment: .topLeading) {
+            let back = Self.snapped(size * 0.88, scale: displayScale)
+            let backOrigin = Self.snapped(size * 0.06, scale: displayScale) + (size - back) / 2
             Circle()
                 .fill(.quaternary)
-                .frame(width: size * 0.88, height: size * 0.88)
-                .offset(x: size * 0.06, y: size * 0.06)
+                .frame(width: back, height: back)
+                .offset(x: backOrigin, y: backOrigin)
 
-            BotAvatar(agent: agent, size: size * 0.86)
-                .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
-                .offset(x: -size * 0.06, y: -size * 0.06)
+            member(agent, in: frames[0])
         }
         .frame(width: size, height: size)
     }
 
     private var multiMemberGroupAvatar: some View {
-        ZStack {
-            Circle().fill(.quaternary)
-            ForEach(Array(participants.prefix(3).enumerated()), id: \.element.id) { index, agent in
-                BotAvatar(agent: agent, size: size * 0.62)
-                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
-                    .offset(groupOffset(index))
+        let members = Array(participants.prefix(3))
+        let frames = Self.memberFrames(count: members.count, size: size, scale: displayScale)
+        return ZStack(alignment: .topLeading) {
+            Circle().fill(.quaternary).frame(width: size, height: size)
+            ForEach(Array(zip(members, frames)), id: \.0.id) { agent, frame in
+                member(agent, in: frame)
             }
         }
         .frame(width: size, height: size)
     }
 
-    private func groupOffset(_ index: Int) -> CGSize {
-        switch index {
-        case 0: return CGSize(width: -size * 0.18, height: -size * 0.14)
-        case 1: return CGSize(width: size * 0.18, height: -size * 0.14)
-        default: return CGSize(width: 0, height: size * 0.19)
+    private func member(_ agent: AgentRecord, in frame: CGRect) -> some View {
+        BotAvatar(agent: agent, size: frame.width, showsShadow: false)
+            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+            .offset(x: frame.minX, y: frame.minY)
+    }
+
+    /// Where each member picture sits inside the group picture, from its top-left corner.
+    /// On whole pixels, or the pictures get resampled and look soft.
+    static func memberFrames(count: Int, size: CGFloat, scale: CGFloat) -> [CGRect] {
+        let snap = { snapped($0, scale: scale) }
+        if count == 1 {
+            let side = snap(size * 0.86)
+            let origin = snap((size - side) / 2 - size * 0.06)
+            return [CGRect(x: origin, y: origin, width: side, height: side)]
         }
+        let side = snap(size * 0.62)
+        let centre = (size - side) / 2
+        let offsets = [CGPoint(x: -0.18, y: -0.14), CGPoint(x: 0.18, y: -0.14), CGPoint(x: 0, y: 0.19)]
+        return offsets.prefix(count).map {
+            CGRect(x: snap(centre + size * $0.x), y: snap(centre + size * $0.y), width: side, height: side)
+        }
+    }
+
+    private static func snapped(_ value: CGFloat, scale: CGFloat) -> CGFloat {
+        (value * scale).rounded() / scale
     }
 }
 

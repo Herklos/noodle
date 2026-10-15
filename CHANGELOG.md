@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Group pictures look sharp instead of soft and muddy.
+
 ## [0.64.0] - 2026-10-15
 
 ### Changed
