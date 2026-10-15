@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-15
+
 ### Changed
 
 - Conversations accept the new background gradients chosen in Noodle and on iPhone.

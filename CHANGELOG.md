@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-10-15
+
 ### Changed
 
 - The starter team the welcome makes wear drawn faces that suit their names, in place of icons.
