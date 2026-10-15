@@ -39,11 +39,15 @@ import SwiftUI
             }
             stage = .making
             let names = StarterTeam.names(style: .real, avoiding: Set(chats.agents.map(\.draft.name)))
-            for (member, name) in zip(StarterTeam.members, names).dropFirst(team.count) {
+            // Bots on a Hub are listed with their picture's digest, so a retry knows the faces the first members wear by it.
+            let digests = Set((chats.agents + team).compactMap { $0.draft.avatarImageDigest ?? $0.draft.avatarImageData.map(LinkPicture.digest) })
+            let worn = Set(BotFaces.all.map(\.imageData).filter { digests.contains(LinkPicture.digest($0)) })
+            let faces = StarterTeam.faces(for: names, avoiding: worn)
+            for (member, (name, face)) in zip(StarterTeam.members, zip(names, faces)).dropFirst(team.count) {
                 let bot = try await chats.create(LinkBotDraft(
                     name: name, provider: harness.provider, profile: harness.profile, model: harness.initialModel,
                     publicDescription: member.publicDescription, backstory: member.backstory,
-                    avatarSymbolName: member.symbol, avatarColorIndex: member.colorIndex))
+                    avatarSymbolName: member.symbol, avatarColorIndex: member.colorIndex, avatarImageData: face))
                 team.append(bot)
             }
             if group == nil {

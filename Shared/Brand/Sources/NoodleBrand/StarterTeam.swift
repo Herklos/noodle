@@ -39,4 +39,14 @@ public enum StarterTeam {
         }
         return names
     }
+
+    /// A bundled face for each of `names` that suits the name, none of them `worn` nor shared while any is left.
+    public static func faces(for names: [String], avoiding worn: Set<Data>) -> [Data?] {
+        var worn = worn
+        return names.map { name in
+            let face = BotFaces.random(for: BotNameGenerator.presentation(of: name) ?? nil, avoiding: worn)
+            if let face { worn.insert(face) }
+            return face
+        }
+    }
 }

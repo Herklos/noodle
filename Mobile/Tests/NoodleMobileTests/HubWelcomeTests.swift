@@ -101,6 +101,12 @@ private actor WelcomeHub {
         #expect(bots.map(\.draft.avatarSymbolName) == StarterTeam.members.map(\.symbol))
         #expect(bots.map(\.draft.avatarColorIndex) == StarterTeam.members.map(\.colorIndex))
         #expect(Set(bots.map(\.draft.name)).count == 3, "Each has a name of its own.")
+        #expect(Set(bots.compactMap(\.draft.avatarImageData)).count == 3, "Each wears a face of their own.")
+        for bot in bots {
+            let presentation = BotNameGenerator.presentation(of: bot.draft.name) ?? nil
+            #expect(bot.draft.avatarImageData.map { BotFaces.fits($0, presentation: presentation) } == true,
+                    "\(bot.draft.name) wears a bundled face that suits the name.")
+        }
         for bot in bots {
             #expect(bot.draft.provider == "codex")
             #expect(bot.draft.profile == Self.codex.profile)
@@ -170,6 +176,7 @@ private actor WelcomeHub {
         #expect(bots.map(\.id) == welcome.team.map(\.id))
         #expect(bots.map(\.draft.backstory) == StarterTeam.members.map(\.backstory))
         #expect(Set(bots.map(\.draft.name)).count == 3)
+        #expect(Set(bots.compactMap(\.draft.avatarImageData)).count == 3, "No face is given twice.")
         #expect(await hub.groups.map(\.draft.botIDs) == [bots.map(\.id)])
     }
 }

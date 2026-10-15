@@ -13,9 +13,11 @@ extension NoodleStore {
     /// fewer than the team when one could not be; the error is then in `errorMessage`.
     func createStarterTeam(on provider: HarnessProvider, style: BotNameStyle) -> [AgentRecord] {
         var team: [AgentRecord] = []
-        for (member, name) in zip(StarterTeam.members, StarterTeam.names(style: style, avoiding: Set(agents.map(\.displayName)))) {
+        let names = StarterTeam.names(style: style, avoiding: Set(agents.map(\.displayName)))
+        let faces = StarterTeam.faces(for: names, avoiding: Set(agents.compactMap(\.avatarImageData)))
+        for (member, (name, face)) in zip(StarterTeam.members, zip(names, faces)) {
             guard createAgent(named: name, harnessIdentifier: provider.rawValue, modelIdentifier: nil, reasoningEffort: nil,
-                              avatarSymbolName: member.symbol, avatarColorIndex: member.colorIndex, avatarImageData: nil,
+                              avatarSymbolName: member.symbol, avatarColorIndex: member.colorIndex, avatarImageData: face,
                               publicDescription: member.publicDescription, backstory: member.backstory, introduces: false),
                   let bot = agents.last else { return team }
             team.append(bot)

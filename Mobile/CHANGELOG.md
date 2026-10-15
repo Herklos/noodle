@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The starter team made on your first Hub wear drawn faces that suit their names, in place of icons.
+
 ## [0.32.0] - 2026-10-14
 
 ### Added

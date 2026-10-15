@@ -16,6 +16,13 @@ import NoodleBrand
         XCTAssertEqual(Set(names).count, 3, "Each has a name of its own.")
         XCTAssertTrue(Set(names).isDisjoint(with: ["Ada", "Grace"]), "Nor one a bot already has.")
         XCTAssertEqual(Set(team.compactMap(\.avatarColorIndex)).count, 3)
+        let faces = team.compactMap(\.avatarImageData)
+        XCTAssertEqual(Set(faces).count, 3, "Each wears a face of their own.")
+        for bot in team {
+            let presentation = BotNameGenerator.presentation(of: bot.displayName) ?? nil
+            XCTAssertTrue(bot.avatarImageData.map { BotFaces.fits($0, presentation: presentation) } ?? false,
+                          "\(bot.displayName) wears a bundled face that suits the name.")
+        }
         for bot in team { XCTAssertFalse(bot.publicDescription?.isEmpty ?? true, "\(bot.displayName) says what it does.") }
         let group = try XCTUnwrap(f.store.selectedConversation, "The group opens.")
         XCTAssertEqual(group.kind, .group)
