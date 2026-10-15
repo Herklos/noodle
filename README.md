@@ -1,41 +1,60 @@
 <div align="center">
 
-<img src="Support/AppIcon.png" alt="Noodle" width="88">
+<img src="Support/AppIcon.png" alt="Noodle" width="96">
 
 # Noodle
 
-<p><b>Personal AI agents.</b></p>
+**Personal AI agents for your Mac, iPhone and iPad.**<br>
+Free and open source. Runs on the AI subscriptions you already have.
 
-<a href="https://github.com/pdparchitect/noodle/releases/latest/download/Noodle-arm64.dmg"><img alt="Download Noodle for Mac" src="https://img.shields.io/badge/Download%20for%20Mac-0071e3?style=for-the-badge&logo=apple&logoColor=white" height="48"></a>
+<a href="https://github.com/pdparchitect/noodle/releases/latest/download/Noodle-arm64.dmg"><img alt="Download Noodle for Mac" src="https://img.shields.io/badge/Download%20for%20Mac-1f2328?style=for-the-badge&logo=apple&logoColor=white" height="44"></a>
 
-[Website](https://usenoodle.app) · [Apps](#apps) · [Documentation](docs/README.md) · [Security](docs/security.md) · [Privacy](docs/privacy.md) · [Devlog](https://x.com/search?q=from%3Apdp%20noodle&f=live)
+[Website](https://usenoodle.app) · [Apps](#apps) · [Documentation](docs/README.md) · [Security](docs/security.md) · [Privacy](docs/privacy.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 <p align="center">
-  <img width="100%" alt="Noodle on a Mac with Chloe's morning brief, and Noodle Mobile on an iPhone in front of it listing the same agents." src=".github/readme/hero.png" />
-</p>
-
-<p align="center">
-  <img width="49%" alt="Noodle Mobile on four iPhones: the agent list, a new bot, a new tool and a game an agent built." src=".github/readme/mobile.png" />
-  <img width="49%" alt="Three apps agents built, open in Noodle Applet: Molecule Bench, Tiny Empires and Castle Road." src=".github/readme/applets.png" />
+  <img width="100%" alt="Noodle on a Mac: Chloe, a personal assistant agent, sends the morning brief and waits for a yes before switching the car insurance." src=".github/readme/hero.png" />
 </p>
 
 Give an agent a task, or bring several into a group to work toward a shared goal.
-Each agent keeps its own workspace and backstory.
+Each agent keeps its own workspace, backstory and history, and runs on the
+[harness](docs/harness-setup.md) you choose, using your existing account:
+**Codex, Claude Code, FX, Grok Build, Muse Code, OpenCode v2, Antigravity** and
+**Apple Intelligence** on device.
 
-Agents run on the [harness](docs/harness-setup.md) you choose, using your existing account:
-
-<p>
-  <img alt="Codex" src="https://img.shields.io/badge/Codex-10a37f?style=flat-square">
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-d97757?style=flat-square">
-  <img alt="FX" src="https://img.shields.io/badge/FX-0a0a0a?style=flat-square">
-  <img alt="Grok Build" src="https://img.shields.io/badge/Grok%20Build-e11d48?style=flat-square">
-  <img alt="Muse Code" src="https://img.shields.io/badge/Muse%20Code-0866ff?style=flat-square">
-  <img alt="OpenCode v2" src="https://img.shields.io/badge/OpenCode%20v2-eab308?style=flat-square">
-  <img alt="Antigravity" src="https://img.shields.io/badge/Antigravity-4285f4?style=flat-square">
-  <img alt="Apple Intelligence, on device" src="https://img.shields.io/badge/Apple%20Intelligence-on%20device-a855f7?style=flat-square">
-</p>
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img width="100%" alt="The Morning crew group: three agents research, write and draw a newsletter cover before breakfast." src=".github/readme/groups.png"><br>
+      <b>Groups.</b> Several agents in one conversation, working toward a shared goal.
+    </td>
+    <td width="50%" valign="top">
+      <img width="100%" alt="Noodle Mobile on iPhone: the agent list and a group sharing a game an agent built." src=".github/readme/mobile.png"><br>
+      <b>Noodle Mobile.</b> Chat with your agents from iPhone and iPad.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img width="100%" alt="Noodle Computer showing an agent's own desktop with a terminal open on /workspace." src=".github/readme/computer.png"><br>
+      <b>Noodle Computer.</b> Linux, macOS and Windows computers for you and your agents.
+    </td>
+    <td width="50%" valign="top">
+      <img width="100%" alt="Tabletop Turbo, a racing game an agent built, open in Noodle Applet." src=".github/readme/applet.png"><br>
+      <b>Noodle Applet.</b> Tools, websites, experiments and games your agents build.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img width="100%" alt="Noodle Browser with chatbotkit.com open in a browser you sign in to and hand to an agent." src=".github/readme/browser.png"><br>
+      <b>Noodle Browser.</b> Signed-in browsers you assign to agents.
+    </td>
+    <td width="50%" valign="top">
+      <img width="100%" alt="Noodle Hub: the people invited to the Hub and the devices they use." src=".github/readme/hub.png"><br>
+      <b>Noodle Hub.</b> Share your harnesses with family and friends from an always-on Mac.
+    </td>
+  </tr>
+</table>
 
 ## Apps
 
@@ -43,7 +62,7 @@ Agents run on the [harness](docs/harness-setup.md) you choose, using your existi
 | --- | --- | --- |
 | **[Noodle Suite](https://github.com/pdparchitect/noodle/releases/download/suite-latest/Noodle-Suite-arm64.dmg)** | Noodle and its released companion apps in one installer. Each app updates independently. | macOS 26 |
 | **[Noodle](https://github.com/pdparchitect/noodle/releases/latest/download/Noodle-arm64.dmg)** | Personal AI agents that get things done. | macOS 26 |
-| **[Noodle Computer](https://github.com/pdparchitect/noodle/releases/download/computer-latest/Noodle-Computer-arm64.dmg)** | Linux and macOS computers for you and your agents. | macOS 26 |
+| **[Noodle Computer](https://github.com/pdparchitect/noodle/releases/download/computer-latest/Noodle-Computer-arm64.dmg)** | Linux, macOS and Windows computers for you and your agents. | macOS 26 |
 | **[Noodle Applet](https://github.com/pdparchitect/noodle/releases/download/applet-latest/Noodle-Applet-arm64.dmg)** | Run tools, websites, experiments, and games created by you and your agents. | macOS 15 |
 | **[Noodle Browser](https://github.com/pdparchitect/noodle/releases/download/browser-latest/Noodle-Browser-arm64.dmg)** | Dedicated browsers you sign in to and assign to agents, with persistent profiles, tabs, history, bookmarks, and file transfers. | macOS 26 |
 | **[Noodle Hub](https://github.com/pdparchitect/noodle/releases/download/hub-latest/Noodle-Hub-arm64.dmg)** | Share your harnesses with family and friends from an always-on Mac. Their bots run there, with your sign-ins kept on the Hub. | macOS 26 |
@@ -58,9 +77,12 @@ Noodle Computer, Noodle Applet, Noodle Browser, Noodle Hub, and Noodle Mobile ar
 2. Create a bot, choose its harness, and describe its role in the backstory.
 3. Give it a task and the files or context it needs. For a shared goal, create a group and add the agents you want working together.
 
-All harnesses start with restricted access. Optional
-unrestricted access can reach files and services beyond the bot's workspace. See
+All harnesses start with restricted access. Optional unrestricted access can reach
+files and services beyond the bot's workspace. See
 [how the sandbox works, its strengths, and its limitations](docs/security.md).
+
+<details>
+<summary><b>Computers, browsers, Hubs and your phone</b></summary>
 
 To give a bot a computer, create a Shell or Desktop in Noodle Computer, then add it
 in the bot's **Computers** tab. Several bots can share the same computer.
@@ -82,6 +104,8 @@ nobody else can join. The Mac stays awake while this is on. Away from home, the 
 reaches it as it would a Noodle Hub: Noodle asks your router to forward its port, or you
 can add an address of your own.
 
+</details>
+
 ## Features
 
 - **Persistent agents** with their own workspace, backstory, and history.
@@ -96,30 +120,13 @@ can add an address of your own.
 
 ## Documentation
 
-- [Working with agents](docs/usage.md)
-- [Harness setup](docs/harness-setup.md)
-- [Games](docs/gaming.md)
-- [Noodle Computer](Computer/README.md)
-- [Noodle Applet](Applet/README.md)
-- [Noodle Browser](Browser/README.md)
-- [Noodle Hub](Hub/README.md)
-- [Security](docs/security.md)
-- [Privacy](docs/privacy.md)
-- [Releases](docs/releases.md)
-- [All documentation](docs/README.md)
+[Working with agents](docs/usage.md) · [Harness setup](docs/harness-setup.md) · [Games](docs/gaming.md) ·
+[Noodle Computer](Computer/README.md) · [Noodle Applet](Applet/README.md) · [Noodle Browser](Browser/README.md) ·
+[Noodle Hub](Hub/README.md) · [Security](docs/security.md) · [Privacy](docs/privacy.md) ·
+[Releases](docs/releases.md) · [All documentation](docs/README.md)
 
-## Project
-
-- [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-
-## Follow
-
-- [@pdp on X](https://x.com/pdp)
-- [All posts about Noodle](https://x.com/search?q=from%3Apdp%20noodle&f=live)
-
-## Comparison
+<details>
+<summary><b>How Noodle compares</b></summary>
 
 | | Grok Bot | Muse | Noodle |
 | --- | --- | --- | --- |
@@ -133,3 +140,9 @@ can add an address of your own.
 | Tools | Cloud connectors, no local MCP | Cloud connectors, no local MCP | Extensible tool support: any MCP you can think of, plus tool apps installed on your Mac |
 | On-device tools | Shell commands only | None | Built-in OS capabilities such as OCR, image generation, background removal and much more |
 | Data | Cloud only, no privacy mode | Trains on your chats | Your data stays local |
+
+</details>
+
+## Project
+
+[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [@pdp on X](https://x.com/pdp) · [All posts about Noodle (devlog)](https://x.com/search?q=from%3Apdp%20noodle&f=live)
