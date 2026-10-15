@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- A breach-response demo scenario: detection, incident response and threat research teams of agents working an active breach overnight.
+
 ### Fixed
 
 - Group pictures look sharp instead of soft and muddy.
