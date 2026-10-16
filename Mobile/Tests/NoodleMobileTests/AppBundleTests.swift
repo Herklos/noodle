@@ -37,6 +37,21 @@ import UserNotifications
         #expect(point == "com.apple.usernotifications.service")
     }
 
+    /// The share extension ships inside the app and shares its group, where the Hubs and the list it offers
+    /// are kept. It takes the conversations iOS suggests, which the app tells iOS about.
+    @Test func theShareExtensionSharesTheAppsGroupAndTakesSuggestions() throws {
+        let app = try #require(Bundle.main.bundleIdentifier)
+        let plugIn = try #require(Bundle.main.builtInPlugInsURL?.appendingPathComponent("NoodleMobileShare.appex"))
+        let bundle = try #require(Bundle(url: plugIn))
+        #expect(bundle.bundleIdentifier == "\(app).share")
+        #expect(bundle.object(forInfoDictionaryKey: "NoodleAppGroup") as? String == AppGroup.identifier)
+        let extensionInfo = try #require(bundle.object(forInfoDictionaryKey: "NSExtension") as? [String: Any])
+        #expect(extensionInfo["NSExtensionPointIdentifier"] as? String == "com.apple.share-services")
+        let attributes = try #require(extensionInfo["NSExtensionAttributes"] as? [String: Any])
+        #expect((attributes["IntentsSupported"] as? [String])?.contains("INSendMessageIntent") == true)
+        #expect((Bundle.main.object(forInfoDictionaryKey: "NSUserActivityTypes") as? [String])?.contains("INSendMessageIntent") == true)
+    }
+
     /// iOS finds the app's answers to a tapped notification and one arriving while open. In Swift 6 a
     /// callback in the wrong form still builds but is never called, so this asks as iOS does.
     @Test @MainActor func notificationCallbacksReachTheApp() {

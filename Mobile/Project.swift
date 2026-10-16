@@ -54,8 +54,10 @@ let project = Project(
                 "NSMicrophoneUsageDescription": "Record voice messages you choose to send, transcribed on this device, talk with bots on calls you start, and let noodlets you open listen when they ask.",
                 // A call keeps going with the screen locked or another app in front; CallKit refuses calls without voip.
                 "UIBackgroundModes": ["audio", "voip"],
-                // Shared with the notification extension, which reaches the Hubs kept there.
+                // Shared with the notification and share extensions, which reach the Hubs kept there.
                 "NoodleAppGroup": "group.$(MOBILE_APP_BUNDLE_ID)",
+                // Conversations told to iOS, which the share sheet suggests and reply notifications show as messages.
+                "NSUserActivityTypes": ["INSendMessageIntent"],
             ]),
             sources: ["Sources/NoodleMobile/**", "Sources/Shared/**"],
             // The Mac's samples of each harness voice, to hear before choosing one.
@@ -63,7 +65,7 @@ let project = Project(
             entitlements: .file(path: "Support/NoodleMobile.entitlements"),
             dependencies: [.package(product: "HubLink"), .package(product: "NoodleWallpaperCore"), .package(product: "NoodleBrand"),
                            .package(product: "NoodletRuntime"),
-                           .target(name: "NoodleMobileNotifications")],
+                           .target(name: "NoodleMobileNotifications"), .target(name: "NoodleMobileShare")],
             settings: .settings(base: [
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(MOBILE_APP_BUNDLE_ID)",
                 "CODE_SIGN_STYLE": "Automatic",
@@ -94,6 +96,43 @@ let project = Project(
             dependencies: [.package(product: "HubLink")],
             settings: .settings(base: [
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(MOBILE_APP_BUNDLE_ID).notifications",
+                "CODE_SIGN_STYLE": "Automatic",
+            ])
+        ),
+        // Noodle in the share sheet: sends what another app shares to a bot or group, straight to its Hub.
+        .target(
+            name: "NoodleMobileShare",
+            destinations: .iOS,
+            product: .appExtension,
+            productName: "NoodleMobileShare",
+            bundleId: "com.pdparchitect.noodle.mobile.share",
+            deploymentTargets: .iOS("26.0"),
+            infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": "$(MOBILE_APP_NAME)",
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+                "NoodleAppGroup": "group.$(MOBILE_APP_BUNDLE_ID)",
+                "NSExtension": [
+                    "NSExtensionPointIdentifier": "com.apple.share-services",
+                    "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).ShareViewController",
+                    "NSExtensionAttributes": [
+                        "NSExtensionActivationRule": [
+                            "NSExtensionActivationSupportsImageWithMaxCount": 10,
+                            "NSExtensionActivationSupportsMovieWithMaxCount": 10,
+                            "NSExtensionActivationSupportsFileWithMaxCount": 10,
+                            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+                            "NSExtensionActivationSupportsText": true,
+                        ],
+                        // The conversations iOS suggests at the top of the share sheet open here.
+                        "IntentsSupported": ["INSendMessageIntent"],
+                    ],
+                ],
+            ]),
+            sources: ["Sources/NoodleMobileShare/**", "Sources/Shared/**"],
+            entitlements: .file(path: "Support/NoodleMobileShare.entitlements"),
+            dependencies: [.package(product: "HubLink")],
+            settings: .settings(base: [
+                "PRODUCT_BUNDLE_IDENTIFIER": "$(MOBILE_APP_BUNDLE_ID).share",
                 "CODE_SIGN_STYLE": "Automatic",
             ])
         ),

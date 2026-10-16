@@ -101,6 +101,7 @@ case "$command" in
         app=("$unpacked"/Payload/*.app)
         codesign -d --entitlements :- "$app[1]" > "$unpacked/app.plist" 2>/dev/null
         codesign -d --entitlements :- "$app[1]/PlugIns/NoodleMobileNotifications.appex" > "$unpacked/notifications.plist" 2>/dev/null
+        codesign -d --entitlements :- "$app[1]/PlugIns/NoodleMobileShare.appex" > "$unpacked/share.plist" 2>/dev/null
         python3 - "$folder/Support" "$unpacked" <<'PY'
 import plistlib, sys
 support, unpacked = sys.argv[1:3]
@@ -109,7 +110,7 @@ def fill(value):
         return value.replace('$(MOBILE_APP_BUNDLE_ID)', 'com.pdparchitect.noodle.mobile').replace('$(MOBILE_CLOUDKIT_ENVIRONMENT)', 'Production')
     if isinstance(value, list): return [fill(item) for item in value]
     return value
-for claimed_file, signed_file in [('NoodleMobile', 'app'), ('NoodleMobileNotifications', 'notifications')]:
+for claimed_file, signed_file in [('NoodleMobile', 'app'), ('NoodleMobileNotifications', 'notifications'), ('NoodleMobileShare', 'share')]:
     claimed = {key: fill(value) for key, value in plistlib.load(open(f'{support}/{claimed_file}.entitlements', 'rb')).items()}
     signed = plistlib.load(open(f'{unpacked}/{signed_file}.plist', 'rb'))
     if 'aps-environment' in claimed: claimed['aps-environment'] = 'production'

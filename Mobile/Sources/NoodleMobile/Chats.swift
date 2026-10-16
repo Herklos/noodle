@@ -275,7 +275,27 @@ enum HubThread: HubConversation {
     private func saveCache() {
         try? JSONEncoder().encode(Cache(agents: agents, groups: groups, conversations: conversations, read: read, start: start))
             .write(to: cacheURL, options: .atomic)
+        let targets = shareTargets
+        guard targets != savedShareTargets else { return }
+        ShareTargets.save(targets, in: pairing.directory)
+        savedShareTargets = targets
     }
+
+    /// What the share sheet offers from this Hub: what the list shows and can be written to, in its order.
+    var shareTargets: [ShareTarget] {
+        let hubName = pairing.hub?.name ?? ""
+        return sortedThreads.filter { !isArchived($0) && composerUnavailableReason(for: $0) == nil }.map { thread in
+            var target = switch thread {
+            case .bot(let bot): ShareTarget(bot: bot, hub: pairing.directory, hubName: hubName)
+            case .group(let group): ShareTarget(group: group, members: members(of: group), hub: pairing.directory, hubName: hubName)
+            }
+            target.pinned = isPinned(thread)
+            target.recency = recency(of: thread)
+            return target
+        }
+    }
+
+    @ObservationIgnored private var savedShareTargets: [ShareTarget]?
 
     var threads: [HubThread] { agents.map(HubThread.bot) + groups.map(HubThread.group) }
 
@@ -509,6 +529,8 @@ enum HubThread: HubConversation {
 
     /// What this phone keeps of a conversation that is gone.
     private func forget(_ conversation: some HubConversation) {
+        let key = ShareTarget.Key(hub: pairing.directory.lastPathComponent, conversation: conversation.conversationID)
+        Task { await ConversationSuggestions.forget([key]) }
         conversations[conversation.conversationID] = nil
         read[conversation.conversationID] = nil
         linkPreviews.forget(conversation.conversationID)
@@ -716,6 +738,9 @@ enum HubThread: HubConversation {
         for gone in conversations.keys where !kept.contains(gone) {
             Task { await HubNotifications.clearDelivered(conversation: gone) }
         }
+        let hub = pairing.directory.lastPathComponent
+        let gone = conversations.keys.filter { !kept.contains($0) }.map { ShareTarget.Key(hub: hub, conversation: $0) }
+        if !gone.isEmpty { Task { await ConversationSuggestions.forget(gone) } }
         conversations = conversations.filter { kept.contains($0.key) }
         linkPreviews.keep(only: kept)
     }
@@ -757,17 +782,8 @@ enum HubThread: HubConversation {
     private func isNewest(_ message: LinkMessage) -> Bool { conversations[message.conversationID]?.last?.id == message.id }
 
     func send(_ body: String, files: [OutgoingFile] = [], to conversation: some HubConversation) async throws {
-        let attachments = try files.map { file in
-            LinkAttachment(id: file.id, filename: file.filename, mediaType: file.mediaType,
-                           byteCount: try file.url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0, voice: file.voice,
-                           pixelSize: file.mediaType.hasPrefix("image/") ? LinkPixelSize(pictureAt: file.url) : nil)
-        }
-        // As on the Mac, a message of files alone says how many, and a recording alone what it is.
-        let text = !body.isEmpty || files.isEmpty ? body
-            : files.count == 1 && files[0].voice != nil ? Self.voiceBody
-            : "Sent \(files.count) attachment\(files.count == 1 ? "" : "s")"
-        let outgoing = LinkOutgoingMessage(conversationID: conversation.conversationID, id: UUID(), body: text,
-                                           attachmentIDs: attachments.map(\.id))
+        let (outgoing, attachments) = try OutgoingMessages.make(body, files: files, to: conversation.conversationID)
+        let text = outgoing.body
         // Kept first, files included, so a message that does not go through can go later.
         for (file, attachment) in zip(files, attachments) { try keep(file.url, as: attachment) }
         unsent[outgoing.id] = UnsentMessage(outgoing: outgoing, attachments: attachments, typed: body)
@@ -807,6 +823,9 @@ enum HubThread: HubConversation {
                 merge([sent], into: conversationID)
                 try? await load(conversationID)
                 saveCache()
+                if let target = shareTargets.first(where: { $0.key.conversation == conversationID }) {
+                    await ConversationSuggestions.donate(ConversationSuggestions.intent(sentTo: target), .outgoing, of: target)
+                }
                 return
             } catch {
                 unsent[id]?.reason = error.localizedDescription
@@ -857,8 +876,6 @@ enum HubThread: HubConversation {
         try await send("", files: [OutgoingFile(url: audio, filename: "Voice message.caf", mediaType: "audio/x-caf",
                                                             voice: voice)], to: conversation)
     }
-
-    static let voiceBody = "Voice message"
 
     /// The file on this phone, downloaded from the Hub the first time it is asked for.
     func file(for attachment: LinkAttachment, in conversation: some HubConversation) async throws -> URL {
@@ -1063,15 +1080,6 @@ enum HubThread: HubConversation {
             .sorted { ($0.element.createdAt, $0.offset) < ($1.element.createdAt, $1.offset) }
             .map(\.element)
     }
-}
-
-/// A file picked on the phone, waiting to be sent. Its ID becomes the attachment's.
-struct OutgoingFile: Identifiable, Equatable {
-    let id = UUID()
-    let url: URL
-    let filename: String
-    let mediaType: String
-    var voice: LinkVoice?
 }
 
 /// The home screen once paired: the bots and groups of the Hubs shown, newest conversation first.
@@ -1813,7 +1821,7 @@ struct ChatView: View {
             .ignoresSafeArea()
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            attach { try result.get().map(PickedFiles.copy) }
+            attach { try result.get().map { try PickedFiles.copy($0) } }
         }
         .environment(\.watchLive) { watchingAt = $1; watching = $0 }
         .environment(\.openURL, OpenURLAction { url in
@@ -2258,7 +2266,7 @@ private struct Bubble: View {
     /// A message of files alone carries a body like "Sent 2 attachments", which the files already show.
     private var showsText: Bool {
         !(message.attachments.count > 0 && message.body.wholeMatch(of: /Sent \d+ attachments?/) != nil)
-            && !(message.attachments.contains { $0.voice != nil } && message.body == HubChats.voiceBody)
+            && !(message.attachments.contains { $0.voice != nil } && message.body == OutgoingMessages.voiceBody)
     }
 
     private func lift(_ text: String, folded: Bool, at index: Int) {
@@ -2809,94 +2817,8 @@ struct ThreadAvatar: View {
             AgentAvatar(draft: bot.draft, size: size, phase: chats.phase(of: bot))
         case .group(let group):
             let active = chats.activeMembers(of: group)
-            let members = active.isEmpty ? chats.members(of: group) : active
-            if members.count == 1, let bot = members.first {
-                // One bot in front of a disc, so it still reads as a group.
-                ZStack {
-                    Circle().fill(.quaternary).frame(width: size * 0.88, height: size * 0.88)
-                        .offset(x: size * 0.06, y: size * 0.06)
-                    AgentAvatar(draft: bot.draft, size: size * 0.86)
-                        .overlay { Circle().stroke(Color(.systemBackground), lineWidth: 2) }
-                        .offset(x: -size * 0.06, y: -size * 0.06)
-                }
-                .frame(width: size, height: size)
-            } else {
-                ZStack {
-                    Circle().fill(.quaternary)
-                    ForEach(Array(members.prefix(3).enumerated()), id: \.element.id) { index, bot in
-                        AgentAvatar(draft: bot.draft, size: size * 0.62)
-                            .overlay { Circle().stroke(Color(.systemBackground), lineWidth: 2) }
-                            .offset(Self.offset(index, size: size))
-                    }
-                }
-                .frame(width: size, height: size)
-            }
+            GroupAvatar(faces: (active.isEmpty ? chats.members(of: group) : active).map(BotFace.init), size: size)
         }
-    }
-
-    private static func offset(_ index: Int, size: CGFloat) -> CGSize {
-        switch index {
-        case 0: CGSize(width: -size * 0.18, height: -size * 0.14)
-        case 1: CGSize(width: size * 0.18, height: -size * 0.14)
-        default: CGSize(width: 0, height: size * 0.19)
-        }
-    }
-}
-
-/// The bot's picture, or its symbol on its colour, as Noodle on the Mac shows it.
-struct AgentAvatar: View {
-    /// The same gradients as the Mac's bot avatars, indexed the same way.
-    private static let gradients: [[Color]] = [
-        [.blue, .cyan], [.purple, .pink], [.orange, .yellow], [.mint, .teal], [.indigo, .blue], [.pink, .orange],
-    ]
-    let draft: LinkBotDraft
-    let size: CGFloat
-    /// Shown as a dot in the corner, as on the Mac. Nil shows none.
-    var phase: LinkBotPhase?
-
-    static var colourCount: Int { gradients.count }
-
-    /// The Mac's colours: working blue, failed red, ready green, anything else grey.
-    static func colour(of phase: LinkBotPhase) -> Color {
-        switch phase {
-        case .working: .blue
-        case .failed: .red
-        case .ready: .green
-        case .offline, .starting: .gray
-        }
-    }
-
-    /// Bots may store any integer; it wraps onto the palette.
-    static func colourIndex(_ colour: Int) -> Int { Int(colour.magnitude % UInt(gradients.count)) }
-
-    static func swatch(_ index: Int) -> some View {
-        Circle().fill(LinearGradient(colors: gradients[index], startPoint: .topLeading, endPoint: .bottomTrailing))
-    }
-
-    var body: some View {
-        Group {
-            if let data = draft.avatarImageData, let image = DecodedImages.picture(data) {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Self.swatch(Self.colourIndex(draft.avatarColorIndex))
-                    .overlay {
-                        Image(systemName: draft.avatarSymbolName ?? "sparkles")
-                            .font(.system(size: size * 0.45, weight: .semibold)).foregroundStyle(.white)
-                    }
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(alignment: .bottomTrailing) {
-            if let phase {
-                let dot = max(8, size * 0.24)
-                Circle().fill(Self.colour(of: phase))
-                    .frame(width: dot, height: dot)
-                    .overlay { Circle().strokeBorder(Color(.systemBackground), lineWidth: 2) }
-                    .accessibilityLabel(phase.rawValue.capitalized)
-            }
-        }
-        .accessibilityHidden(phase == nil)
     }
 }
 

@@ -3,11 +3,11 @@ import Foundation
 import HubLink
 import os
 
-/// The group the app shares with its notification extension, named in both Info.plists.
+/// The group the app shares with its notification and share extensions, named in each Info.plist.
 enum AppGroup {
     static var identifier: String? { Bundle.main.object(forInfoDictionaryKey: "NoodleAppGroup") as? String }
 
-    /// Where the Hubs this device joined are kept, so the notification extension can reach them too.
+    /// Where the Hubs this device joined are kept, so the extensions can reach them too.
     static var hubs: URL? {
         identifier.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }?
             .appendingPathComponent("Library/Application Support/Hubs", isDirectory: true)
@@ -53,13 +53,19 @@ enum PushTopic {
     }
 }
 
-/// What a notification of unread replies shows: the bot, and what it said last.
+/// What a notification of unread replies shows: the bot or group, and what was said last.
 enum ReplyNotification {
     static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "NoodleMobile", category: "Notifications")
 
     struct Content: Equatable, Sendable {
         let title: String
+        /// What was said, after the bot's name in a group.
         let body: String
+        /// What was said alone, for a notification that shows who said it.
+        let text: String
+        /// The bot that said it.
+        let sender: BotFace?
+        let target: ShareTarget
     }
 
     /// Asks the Hub the notification came from; nil when the phone no longer has that Hub or it cannot be reached.
@@ -71,11 +77,24 @@ enum ReplyNotification {
             log.error("The Hub could not be reached for a notification's reply: \(error.localizedDescription, privacy: .public)")
             return nil
         }
-        guard case .bots(let bots) = listed,
-              let bot = bots.first(where: { $0.conversationID == route.conversation }),
-              case .messages(let page)? = try? await pairing.request(.messagePage(LinkMessagePage(conversationID: route.conversation, limit: 10))),
+        guard case .bots(let unpictured) = listed else { return nil }
+        // Pictures as the app fetched them, which the bots list leaves out.
+        let bots = pairing.keptPictures(unpictured), hubName = pairing.hub?.name ?? ""
+        let target: ShareTarget
+        if let bot = bots.first(where: { $0.conversationID == route.conversation }) {
+            target = ShareTarget(bot: bot, hub: directory, hubName: hubName)
+        } else if case .groups(let groups)? = try? await pairing.request(.groups), let group = groups.first(where: { $0.id == route.conversation }) {
+            target = ShareTarget(group: group, members: group.draft.botIDs.compactMap { id in bots.first { $0.id == id } },
+                                 hub: directory, hubName: hubName)
+        } else {
+            return nil
+        }
+        guard case .messages(let page)? = try? await pairing.request(.messagePage(LinkMessagePage(conversationID: route.conversation, limit: 10))),
               let reply = page.messages.last(where: { if case .bot = $0.author { true } else { false } }) else { return nil }
-        let body = reply.body.isEmpty ? (reply.attachments.first?.filename ?? "Attachment") : MessageSegment.previewText(reply.body)
-        return Content(title: bot.draft.name, body: body)
+        let text = reply.body.isEmpty ? (reply.attachments.first?.filename ?? "Attachment") : MessageSegment.previewText(reply.body)
+        var speaker: LinkBot?
+        if case .bot(let id) = reply.author { speaker = bots.first { $0.id == id } }
+        let body = target.isGroup && speaker != nil ? "\(speaker!.draft.name): \(text)" : text
+        return Content(title: target.name, body: body, text: text, sender: speaker.map(BotFace.init), target: target)
     }
 }

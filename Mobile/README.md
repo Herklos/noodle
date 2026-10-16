@@ -14,6 +14,10 @@ there, with their titles and previews. A noodlet runs on the phone itself; Run o
 shows it live from the Hub instead, and Noodle remembers which you chose. In a bot's settings, Tools, Computers and Browsers choose what it
 may use on the Hub.
 
+To send something from another app, such as a screenshot, a photo or a page, tap Share
+and choose Noodle, then a bot or group. The ones you talk to most also show at the top
+of the share sheet.
+
 A game noodlet plays on a TV while Screen Mirroring is on, or while a TV is connected by
 cable, and the phone becomes its controller. Show on iPhone brings it back to the phone.
 

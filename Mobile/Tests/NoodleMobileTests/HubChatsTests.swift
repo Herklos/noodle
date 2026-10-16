@@ -730,6 +730,52 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(await hub.downloads == 0)
     }
 
+    /// The share sheet offers what the list shows, without asking the Hub: archived bots and groups stay out.
+    @Test func theShareSheetOffersWhatTheListShows() async throws {
+        let hub = FakeHub()
+        let house = await hub.addGroup(named: "House", saying: "Hi all")
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let offered = ShareTargets.all(in: hubs)
+        #expect(Set(offered.map(\.name)) == ["Scout", "House"])
+        #expect(offered.allSatisfy { $0.key.hub == chats.pairing.directory.lastPathComponent && $0.hubName == "Studio" })
+        let group = try #require(offered.first { $0.isGroup })
+        #expect(group.key.conversation == house.id)
+        #expect(group.faces.map(\.name) == ["Scout"])
+        #expect(offered.first { !$0.isGroup }?.key.conversation == scout.conversationID)
+
+        try await chats.setArchived(true, .group(house))
+        #expect(ShareTargets.all(in: hubs).map(\.name) == ["Scout"])
+    }
+
+    /// What the share sheet sends goes straight to the Hub, files first, and shows in the app like any message.
+    @Test func whatTheShareSheetSendsReachesTheHub() async throws {
+        let hub = FakeHub()
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+        try await chats.reload()
+        let target = try #require(ShareTargets.all(in: hubs).first)
+        let data = Data((0..<(LinkProtocol.chunkSize + 1000)).map { UInt8($0 % 251) })
+        let file = try PickedFiles.store(data, named: "Screenshot.png", type: .png)
+
+        try await SharedSend.send("Look at this", files: [file], to: target, hubs: hubs)
+
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let sent = try #require(chats.messages(of: scout).first { $0.body == "Look at this" })
+        #expect(sent.attachments.map(\.filename) == ["Screenshot.png"])
+        let attachment = try #require(sent.attachments.first)
+        #expect(await hub.data(of: attachment.id) == data)
+        // A picture alone says what was sent, as the app's own composer does.
+        try await SharedSend.send("", files: [try PickedFiles.store(data, named: "Again.png", type: .png)], to: target, hubs: hubs)
+        #expect(await hub.bodies(saying: "Sent 1 attachment") == 1)
+    }
+
     @Test func aBotsFileIsDownloadedOnceAndKept() async throws {
         let hub = FakeHub()
         let attachment = await hub.botSends(Data("report".utf8), named: "report.txt", mediaType: "text/plain")
@@ -1093,9 +1139,27 @@ private actor RecordedSubscriptions: PushSubscriptions {
         let conversation = await hub.bot.conversationID
 
         let route = NotificationRoute(topic: PushTopic.topic(for: chats.pairing), conversation: conversation)
-        let reply = await ReplyNotification.content(for: route, hubs: hubs)
-        #expect(reply == ReplyNotification.Content(title: "Scout", body: "All done."))
+        let reply = try #require(await ReplyNotification.content(for: route, hubs: hubs))
+        #expect((reply.title, reply.body) == ("Scout", "All done."))
+        // The bot who said it, so iOS shows its picture and suggests the conversation when sharing.
+        #expect(reply.sender?.name == "Scout")
+        #expect(reply.target.key == ShareTarget.Key(hub: chats.pairing.directory.lastPathComponent, conversation: conversation))
         #expect(await ReplyNotification.content(for: NotificationRoute(topic: "unknown", conversation: conversation), hubs: hubs) == nil)
+    }
+
+    /// A group's notification is the group's, with the bot that wrote last.
+    @Test func aGroupsNotificationShowsTheGroupAndWhoReplied() async throws {
+        let hub = FakeHub()
+        let house = await hub.addGroup(named: "House", saying: "Lunch is ready")
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+
+        let route = NotificationRoute(topic: PushTopic.topic(for: chats.pairing), conversation: house.id)
+        let reply = try #require(await ReplyNotification.content(for: route, hubs: hubs))
+        #expect((reply.title, reply.body) == ("House", "Scout: Lunch is ready"))
+        #expect(reply.sender?.name == "Scout")
+        #expect(reply.target.isGroup)
     }
 
     /// Tables stay in the conversation; the notification and the pinned bubble show the text around them.

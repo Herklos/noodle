@@ -633,39 +633,6 @@ struct PendingFileChip: View {
     }
 }
 
-/// Copies picked files where they stay readable until sent.
-enum PickedFiles {
-    static func store(_ data: Data, named filename: String, type: UTType?) throws -> OutgoingFile {
-        let url = try folder().appendingPathComponent(filename)
-        try data.write(to: url)
-        return OutgoingFile(url: url, filename: filename, mediaType: type?.preferredMIMEType ?? "application/octet-stream")
-    }
-
-    /// A file from the Files app, which is readable only while its access is held.
-    static func copy(_ source: URL) throws -> OutgoingFile {
-        let accessing = source.startAccessingSecurityScopedResource()
-        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
-        let url = try folder().appendingPathComponent(source.lastPathComponent)
-        try FileManager.default.copyItem(at: source, to: url)
-        return OutgoingFile(url: url, filename: source.lastPathComponent,
-                            mediaType: UTType(filenameExtension: source.pathExtension)?.preferredMIMEType ?? "application/octet-stream")
-    }
-
-    static func photo(_ item: PhotosPickerItem, number: Int) async throws -> OutgoingFile? {
-        guard let data = try await item.loadTransferable(type: Data.self) else { return nil }
-        let type = item.supportedContentTypes.first
-        let kind = type?.conforms(to: .movie) == true ? "Video" : "Photo"
-        return try store(data, named: "\(kind) \(number).\(type?.preferredFilenameExtension ?? "jpg")", type: type)
-    }
-
-    private static func folder() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Outgoing", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-}
-
 /// The camera, returning one photo.
 struct CameraPicker: UIViewControllerRepresentable {
     static var isAvailable: Bool { UIImagePickerController.isSourceTypeAvailable(.camera) }
@@ -945,56 +912,4 @@ struct FileOnHub: Transferable {
         FileRepresentation(exportedContentType: .data) { SentTransferredFile(try await $0.download()) }
             .suggestedFileName { $0.filename }
     }
-}
-
-/// Pictures decoded once and kept while memory allows, so a bubble, card or avatar drawn again, as
-/// when scrolled back into view, shows at once rather than decoding again on the main thread.
-enum DecodedImages {
-    private nonisolated(unsafe) static let pictures: NSCache<NSData, UIImage> = cache()
-    private nonisolated(unsafe) static let files: NSCache<NSString, UIImage> = cache()
-
-    private static func cache<Key>() -> NSCache<Key, UIImage> {
-        let cache = NSCache<Key, UIImage>()
-        cache.totalCostLimit = 48 * 1024 * 1024
-        return cache
-    }
-
-    /// What it takes in memory, so the caches stay within their limit.
-    private static func cost(of image: UIImage) -> Int {
-        image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
-    }
-
-    /// The picture in these bytes, decoded ready to draw.
-    static func picture(_ data: Data) -> UIImage? {
-        let key = data as NSData
-        if let image = pictures.object(forKey: key) { return image }
-        guard let decoded = UIImage(data: data) else { return nil }
-        let image = decoded.preparingForDisplay() ?? decoded
-        pictures.setObject(image, forKey: key, cost: cost(of: image))
-        return image
-    }
-
-    /// A file's picture as decoded at this size before, if it still is.
-    static func shown(_ file: URL, at pixels: Int) -> UIImage? {
-        files.object(forKey: key(file, pixels))
-    }
-
-    static func keep(_ image: UIImage, of file: URL, at pixels: Int) {
-        files.setObject(image, forKey: key(file, pixels), cost: cost(of: image))
-    }
-
-    /// Decodes only as many pixels as are shown, once.
-    static func downsampled(_ file: URL, to pixels: Int) -> UIImage? {
-        if let image = shown(file, at: pixels) { return image }
-        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-              let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: pixels,
-              ] as CFDictionary) else { return nil }
-        let image = UIImage(cgImage: decoded)
-        keep(image, of: file, at: pixels)
-        return image
-    }
-
-    private static func key(_ file: URL, _ pixels: Int) -> NSString { "\(pixels) \(file.path)" as NSString }
 }

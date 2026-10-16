@@ -1,4 +1,5 @@
 import HubLink
+import Intents
 import SwiftUI
 import UIKit
 
@@ -39,6 +40,13 @@ struct NoodleMobileApp: App {
             }
             // An invitation link opened from Messages, Mail or a QR code in the Camera app.
             .onOpenURL { url in hubs.offer(url.absoluteString) }
+            // A conversation iOS suggested, as in Spotlight, opens like a tapped notification.
+            .onContinueUserActivity(NSStringFromClass(INSendMessageIntent.self)) { activity in
+                guard let key = ((activity.interaction?.intent as? INSendMessageIntent)?.conversationIdentifier)
+                    .flatMap(ShareTarget.Key.init(identifier:)),
+                      let pairing = hubs.hubs.first(where: { CurrentHub.name(of: $0) == key.hub }) else { return }
+                delegate.opening = NotificationRoute(topic: PushTopic.topic(for: pairing), conversation: key.conversation)
+            }
             .alert("Join this Hub?", isPresented: Binding(get: { hubs.offered != nil }, set: { if !$0 { hubs.declineOffered() } }),
                    presenting: hubs.offered) { invitation in
                 Button("Cancel", role: .cancel) {}

@@ -2,13 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- Noodle is in the share sheet: send a screenshot, photo, video, file, link or text from any app to a bot or group, with a message.
+- The bots and groups you talk to most recently show at the top of the share sheet, as in Messages, ready to send to in one tap.
+
 ### Changed
 
 - Inline code in messages is a little smaller and dimmer, so it sits more quietly in the text.
+- Reply notifications show the bot's picture, and a group's notification names the group and the bot that replied.
 
 ### What to Test
 
 - Ask a bot for a reply with inline code, such as a file path; check the code is slightly smaller and dimmer than the words around it in light and dark mode, and still readable in your own blue bubbles.
+- Take a screenshot, tap its thumbnail, tap Share and choose Noodle; pick a bot, add a message and tap Send. Check the screenshot and message arrive in the conversation.
+- Share several photos from Photos, a page from Safari and a PDF from Files to a bot and to a group; check each arrives with its name.
+- After sending to a bot a few times, open the share sheet again; check the bot shows in the top row with its picture, and tapping it opens Noodle's share sheet with that bot already chosen.
+- Get a reply while Noodle is closed; check the notification shows the bot's picture, and a group's reply shows the group's name and the bot.
+- Leave a Hub; check its bots stop showing in the share sheet.
 
 ## [0.34.0] - 2026-10-16
 

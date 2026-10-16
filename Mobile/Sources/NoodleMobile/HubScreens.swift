@@ -670,6 +670,8 @@ struct ProfileView: View {
         .confirmationDialog("Leave \(pairing.hubName)?", isPresented: $leaving, titleVisibility: .visible) {
             Button("Leave", role: .destructive) {
                 dismiss()
+                let suggested = ShareTargets.load(in: pairing.directory).map(\.key)
+                Task { await ConversationSuggestions.forget(suggested) }
                 hubs.leave(pairing)
             }
         } message: {
