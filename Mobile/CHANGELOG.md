@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Inline code in messages is a little smaller and dimmer, so it sits more quietly in the text.
+
+### What to Test
+
+- Ask a bot for a reply with inline code, such as a file path; check the code is slightly smaller and dimmer than the words around it in light and dark mode, and still readable in your own blue bubbles.
+
 ## [0.34.0] - 2026-10-16
 
 ### Added

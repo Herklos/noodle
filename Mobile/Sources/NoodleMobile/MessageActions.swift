@@ -48,7 +48,7 @@ struct MessageText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(Self.markdown(text, onTint: onTint))
+            Text(Self.markdown(text, onTint: onTint, foreground: foreground))
                 .lineLimit(folded ? MessageFolding.foldedLines : nil)
             if folded {
                 Button("Read more", action: expand)
@@ -67,7 +67,8 @@ struct MessageText: View {
 
     /// Inline markdown, with only web and mail links left tappable, as on the Mac.
     /// On a tinted bubble links are underlined, since they share the text's colour.
-    static func markdown(_ body: String, onTint: Bool = false) -> AttributedString {
+    /// Inline code is a size smaller and dimmed from the bubble's text, as mono at full size looks heavy.
+    static func markdown(_ body: String, onTint: Bool = false, foreground: Color = .primary) -> AttributedString {
         guard var text = try? AttributedString(markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
             return AttributedString(body)
         }
@@ -76,6 +77,10 @@ struct MessageText: View {
                 text[run.range].link = nil
             } else if onTint, run.link != nil {
                 text[run.range].underlineStyle = .single
+            }
+            if run.inlinePresentationIntent?.contains(.code) == true {
+                text[run.range].font = .system(.callout, design: .monospaced)
+                text[run.range].foregroundColor = foreground.opacity(0.65)
             }
         }
         return text

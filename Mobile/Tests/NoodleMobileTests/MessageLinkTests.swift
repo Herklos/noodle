@@ -19,6 +19,16 @@ import Testing
         #expect(underline == nil)
     }
 
+    /// Inline code is a size smaller and dimmer than the bubble's own text, so it sits quietly in a reply.
+    @Test func inlineCodeIsSmallerAndDimmer() throws {
+        let text = MessageText.markdown("Run `swift test` now.", foreground: .white)
+        let code = try #require(text.runs.first { $0.inlinePresentationIntent?.contains(.code) == true })
+        #expect(code.font == .system(.callout, design: .monospaced))
+        #expect(code.foregroundColor == .white.opacity(0.65))
+        let prose = try #require(text.runs.first { $0.inlinePresentationIntent == nil })
+        #expect(prose.font == nil && prose.foregroundColor == nil)
+    }
+
     private static let page = URL(string: "https://www.example.com/oven")!
     private static let card = LinkCard(title: "Bosch Series 4", site: "example.com", image: Data([1, 2, 3]))
 
