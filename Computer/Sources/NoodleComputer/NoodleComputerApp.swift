@@ -622,7 +622,7 @@ struct ComputerRow: View {
       Button("Edit Computer…", systemImage: "slider.horizontal.3") { editing = true }
       Button("Change Background…", systemImage: "photo") { changingBackground = true }
       Divider()
-      if session.computer.kind == .container {
+      if session.offersImageUpgrade {
         ComputerImageUpdateButton(session: session) { updating = true }
         Divider()
       }
@@ -1016,7 +1016,7 @@ struct EditComputerView: View {
           DestructiveActionButton(title: "Delete Computer") { deleting = true }
             .disabled(!session.canDelete)
           Spacer()
-          if session.computer.kind == .container {
+          if session.offersImageUpgrade {
             ComputerImageUpdateButton(session: session) { updating = true }
           }
           if session.virtual != nil || session.container != nil || session.localMac != nil || session.windowsRuntime != nil

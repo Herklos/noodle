@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Upgrade appears in Edit Computer and the computer's menu only when a newer image is available.
+
 ## [0.31.0] - 2026-10-16
 
 ### Added

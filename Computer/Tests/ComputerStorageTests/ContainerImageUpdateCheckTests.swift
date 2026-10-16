@@ -1,4 +1,5 @@
 import XCTest
+import ComputerCore
 import ContainerizationOCI
 @testable import NoodleComputer
 
@@ -29,5 +30,18 @@ final class ContainerImageUpdateCheckTests: XCTestCase {
     func testMissingLocalIndexIsUnknown() {
         let remote = Descriptor(mediaType: MediaTypes.dockerManifest, digest: new, size: 1)
         XCTAssertNil(ContainerComputer.imageIsCurrent(stored: synthesized, remote: remote) { _ in nil })
+    }
+}
+
+@MainActor final class ContainerImageUpgradeOfferTests: XCTestCase {
+    // Upgrade is offered only once the check has found a newer image.
+    func testUpgradeIsOfferedOnlyWhenANewerImageIsAvailable() {
+        let session = ComputerSession(Computer(name: "Container", kind: .container))
+        XCTAssertFalse(session.offersImageUpgrade)
+        session.imageUpdateAvailable = true
+        XCTAssertTrue(session.offersImageUpgrade)
+        let shell = ComputerSession(Computer(name: "SSH", kind: .ssh))
+        shell.imageUpdateAvailable = true
+        XCTAssertFalse(shell.offersImageUpgrade)
     }
 }

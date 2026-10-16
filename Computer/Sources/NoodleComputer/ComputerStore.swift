@@ -50,6 +50,7 @@ enum ComputerDisplayMode: String {
     @Published var commandRunning = false
     @Published var updateResult: String?
     @Published var imageUpdateAvailable = false
+    var offersImageUpgrade: Bool { computer.kind == .container && imageUpdateAvailable }
     @Published var updateStatus: String?
     @Published var updateProgress: Double?
     @Published var display: NativeDisplay?
