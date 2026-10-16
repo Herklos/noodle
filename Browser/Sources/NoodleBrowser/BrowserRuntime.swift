@@ -18,6 +18,9 @@ import WebKit
     /// How many pages run at once in each browser. Every running page costs memory and processor
     /// time, so the least recently used ones stop, keeping their tab, and load again when used.
     static let runningPageLimit = 8
+    /// From this many tabs, opening another asks the bot to close the ones it no longer needs,
+    /// well before the 100-tab limit.
+    static let manyTabs = 30
     var showBrowser: ((UUID) -> Void)?
     var willRemoveBrowser: ((UUID) -> Void)?
     private var server: BrowserConnectionServer?
@@ -390,7 +393,10 @@ import WebKit
         if request.operation == .open {
             let tab = try makeTab(browserID: id)
             if let url = request.url { tab.navigate(try BrowserRequest.navigationURL(url)) }
-            response.tabID = tab.id; response.tabs = [tab.info]; return response
+            response.tabID = tab.id; response.tabs = [tab.info]
+            let count = try library.profile(id).tabs.count
+            if count >= Self.manyTabs { response.text = "This browser has \(count) open tabs. Close the ones you no longer need." }
+            return response
         }
         if request.operation == .download {
             guard let record = profile.downloads.first(where: { $0.id == request.fileID }), record.state == "complete" else { throw BrowserError("Download is not complete or does not belong to this browser.") }

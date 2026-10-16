@@ -129,6 +129,20 @@ final class BrowserRuntimeTests: XCTestCase {
         let opened = try await runtime.perform(.init(.open, browserID: a.id))
         XCTAssertNotNil(try used(XCTUnwrap(opened.tabID)))
     }
+    /// Bots opening tab after tab are told to close some before the browser fills up.
+    @MainActor func testOpeningManyTabsAsksToCloseSome() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root)
+        var a = try library.create(name: "A")
+        a.tabs = (0..<(BrowserRuntime.manyTabs - 2)).map { BrowserTabInfo(url: "https://example.com/\($0)") }; try library.update(a)
+        let runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let fewer = try await runtime.perform(.init(.open, browserID: a.id))
+        XCTAssertNil(fewer.text)
+        let many = try await runtime.perform(.init(.open, browserID: a.id))
+        XCTAssertEqual(many.text, "This browser has \(BrowserRuntime.manyTabs) open tabs. Close the ones you no longer need.")
+    }
     /// Only the most recently used pages keep running. The rest stop but stay in the tab strip,
     /// with their address and icon, and load again when used; the tab on screen and one waiting on
     /// a dialog keep running.
