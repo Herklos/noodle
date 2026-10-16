@@ -5,6 +5,7 @@
 ### Changed
 
 - Once a browser has 30 tabs, a bot that opens another is asked to close the ones it no longer needs.
+- A page that cannot load, or whose process stopped, shows an error page saying what went wrong, with a Reload button, instead of a red line above a blank tab.
 
 ## [0.19.1] - 2026-10-16
 

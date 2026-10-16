@@ -18,6 +18,35 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.web.window === tab.surface)
     }
 
+    /// A page that cannot load, or whose process stopped, gives way to an error page that says
+    /// what went wrong; a load that fails after the page appeared leaves the page in place.
+    @MainActor func testFailedPagesShowAnErrorPage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let tab = try runtime.makeTab(browserID: try library.create(name: "Work").id)
+        tab.webViewWebContentProcessDidTerminate(tab.web)
+        XCTAssertEqual(tab.failure?.title, "This page stopped working")
+        XCTAssertNotNil(tab.info.error)
+        tab.navigate(try XCTUnwrap(URL(string: "about:blank")))
+        XCTAssertNil(tab.failure)
+        tab.webView(tab.web, didFailProvisionalNavigation: nil, withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet))
+        XCTAssertEqual(tab.failure?.title, "No internet connection")
+        tab.navigate(try XCTUnwrap(URL(string: "about:blank")))
+        tab.webView(tab.web, didFail: nil, withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut))
+        XCTAssertNil(tab.failure)
+        XCTAssertNotNil(tab.info.error)
+        tab.webView(tab.web, didFailProvisionalNavigation: nil, withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled))
+        XCTAssertNil(tab.failure)
+
+        let site = URL(string: "https://example.com/news")
+        XCTAssertEqual(BrowserPageFailure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotFindHost), url: site).detail,
+                       "The server address of example.com could not be found.")
+        XCTAssertEqual(BrowserPageFailure(NSError(domain: NSURLErrorDomain, code: NSURLErrorServerCertificateUntrusted), url: site).title,
+                       "Can't connect securely")
+    }
+
     /// Sites serve their full pages only to browsers they recognise, and tabs out of sight run
     /// slower, as in Safari, so dozens of open tabs do not keep working at full speed.
     @MainActor func testTabsPassAsSafariAndSlowDownOutOfSight() async throws {

@@ -14,6 +14,8 @@ import WebKit
     weak var runtime: BrowserRuntime?
     @Published var info: BrowserTabInfo
     @Published var dialog: BrowserDialog?
+    /// Shown in place of a page that could not load or whose process stopped.
+    @Published private(set) var failure: BrowserPageFailure?
     /// The page's own icon, kept while the tab stays on the same site.
     private(set) var favicon: NSImage? { willSet { runtime?.objectWillChange.send() } }
     private var faviconURL: URL?
@@ -159,7 +161,7 @@ import WebKit
         unsafeBitCast(method_getImplementation(method), to: Setter.self)(web, selector, enabled)
     }
     func navigate(_ url: URL) {
-        info.error = nil
+        info.error = nil; failure = nil
         web.load(URLRequest(url: url))
     }
     func stop() {
@@ -183,7 +185,7 @@ import WebKit
         webMCPAllowed = false; webMCPFramePolicies.removeAll()
         resetPointer()
         finishedDocument = false; visitID = nil; visitedURL = nil; visitedTitle = nil
-        frames.removeAll(); info.error = nil; update()
+        frames.removeAll(); info.error = nil; failure = nil; update()
         if dialog != nil { answerDialog(accept: false, text: nil) }
     }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -203,19 +205,24 @@ import WebKit
         }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(error) }
-    private func failed(_ error: Error) {
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        // The web view may still show the last page; the error names the one that failed.
+        if failed(error) { failure = BrowserPageFailure(error, url: (error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? webView.url) }
+    }
+    @discardableResult private func failed(_ error: Error) -> Bool {
         // WebKit ends a load that became a download (102) or went to a plug-in (204) as if it failed.
         let error = error as NSError
         switch (error.domain, error.code) {
-        case (NSURLErrorDomain, NSURLErrorCancelled), ("WebKitErrorDomain", 102), ("WebKitErrorDomain", 204): return
+        case (NSURLErrorDomain, NSURLErrorCancelled), ("WebKitErrorDomain", 102), ("WebKitErrorDomain", 204): return false
         default: break
         }
         info.error = error.localizedDescription; info.loading = false; runtime?.saveTab(self)
+        return true
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         resetPointer()
         failed(BrowserError("Page process stopped. Reload this tab to continue."))
+        failure = .stopped
         let pending = operations.values; operations.removeAll(); pending.forEach { $0() }
     }
     /// Page-initiated loads never reach local files or other applications.
@@ -505,5 +512,40 @@ private final class LimitedRead: NSObject, URLSessionDataDelegate, @unchecked Se
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let (continuation, data) = lock.withLock { defer { finish = nil }; return (finish, self.data) }
         continuation?.resume(returning: error == nil && data.count <= limit ? data : nil)
+    }
+}
+
+/// What a tab says, as browsers do, when its page could not load or its process stopped.
+struct BrowserPageFailure: Equatable {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    static let stopped = BrowserPageFailure(symbol: "exclamationmark.triangle", title: "This page stopped working",
+                                            detail: "Something went wrong while showing this page.")
+
+    init(symbol: String, title: String, detail: String) { self.symbol = symbol; self.title = title; self.detail = detail }
+
+    init(_ error: Error, url: URL?) {
+        let error = error as NSError, site = url?.host ?? "This site"
+        guard error.domain == NSURLErrorDomain else {
+            self.init(symbol: "exclamationmark.triangle", title: "Can't open this page", detail: error.localizedDescription); return
+        }
+        switch error.code {
+        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff:
+            self.init(symbol: "wifi.slash", title: "No internet connection", detail: "Check your network and try again.")
+        case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+            self.init(symbol: "globe", title: "Can't find this site", detail: "The server address of \(site) could not be found.")
+        case NSURLErrorCannotConnectToHost:
+            self.init(symbol: "globe", title: "Can't reach this site", detail: "\(site) refused to connect.")
+        case NSURLErrorTimedOut:
+            self.init(symbol: "clock", title: "Can't reach this site", detail: "\(site) took too long to respond.")
+        case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid, NSURLErrorClientCertificateRejected,
+             NSURLErrorClientCertificateRequired:
+            self.init(symbol: "lock.slash", title: "Can't connect securely", detail: "\(site) did not offer a connection that could be trusted.")
+        default:
+            self.init(symbol: "exclamationmark.triangle", title: "Can't open this page", detail: error.localizedDescription)
+        }
     }
 }

@@ -554,7 +554,10 @@ private struct BrowserTabView: View {
     @State private var dialogText = ""
     var body: some View {
         VStack(spacing: 0) {
-            if let error = tab.info.error { Text(error).font(.caption).foregroundStyle(.red).padding(8) }
+            if tab.failure == nil, let error = tab.info.error {
+                Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).padding(8).background(.quaternary.opacity(0.35))
+            }
             if let dialog = tab.dialog {
                 HStack {
                     VStack(alignment: .leading) { Text(dialog.origin).font(.caption.weight(.semibold)); Text(dialog.message).lineLimit(4) }
@@ -565,7 +568,25 @@ private struct BrowserTabView: View {
                 }.padding(12)
             }
             BrowserWebView(tab: tab).id(tab.id)
+                .overlay { if let failure = tab.failure { BrowserFailureView(failure: failure) { tab.web.reload() } } }
         }
+    }
+}
+/// Laid out as Chrome's error pages: a left-aligned column a little above the middle.
+private struct BrowserFailureView: View {
+    let failure: BrowserPageFailure
+    let reload: () -> Void
+    var body: some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 14) {
+                Image(systemName: failure.symbol).font(.system(size: 44, weight: .light)).foregroundStyle(.secondary).padding(.bottom, 10)
+                Text(failure.title).font(.title.weight(.semibold))
+                Text(failure.detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Reload", action: reload).buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 14)
+            }.frame(maxWidth: 520, alignment: .leading)
+            Spacer(); Spacer()
+        }.padding(40).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
     }
 }
 struct BrowserWebView: NSViewRepresentable {
