@@ -28,6 +28,17 @@ import XCTest
         XCTAssertEqual(f.factory.processes.count, 2)
     }
 
+    func testSignInRetryRestartsBotWhoseStatusChanged() throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
+        process.transition(.failed, failure: .authenticationRequired)
+        var updated = agent
+        updated.status = "Reviewing PRs"
+        let request = try XCTUnwrap(f.runtime.kick(agent: updated, repository: f.repository))
+        f.runtime.confirmKick(request, repository: f.repository)
+        XCTAssertEqual(process.stops, 1, "A bot's own status line is not a configuration change")
+        XCTAssertEqual(f.factory.processes.count, 2)
+    }
+
     func testKickRetriesFailedSettingsRestartAndPreservesUnfinishedWork() throws {
         let f = try fixture(), agent = try f.agent(), old = try f.start(agent)
         old.hasInterruptedWork = true
@@ -276,6 +287,17 @@ import XCTest
         XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
         XCTAssertEqual(try Data(contentsOf: url), session, "The session is resumed, not replaced")
         XCTAssertFalse(f.factory.processes.last!.launch.recoverInterruptedWork, "Nothing was interrupted, so no turn is started")
+    }
+
+    func testBotWaitingForSignInComesBackAfterItsStatusChanged() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
+        f.runtime.checkSignIn = { _ in true }
+        process.transition(.failed, failure: .authenticationRequired)
+        var updated = agent
+        updated.status = "Reviewing PRs"
+        f.runtime.reconcile(agents: [updated], repository: f.repository)
+        try await f.clock.waitUntil { f.factory.processes.count == 2 }
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
     }
 
     func testLoginThatLooksValidButStillFailsIsRetriedOnlyAFewTimes() async throws {

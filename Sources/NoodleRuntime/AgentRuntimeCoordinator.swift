@@ -667,7 +667,7 @@ public final class AgentRuntimeCoordinator {
         snapshots = snapshots.filter { liveIDs.contains($0.key) }
 
         if let repository {
-            for agent in agents where processes[agent.id]?.configuration != agent
+            for agent in agents where processes[agent.id]?.runs(agent) != true
                 && !blockedRestarts.contains(agent.id)
                 && !(blockedRecoveries.contains(agent.id) && connectionRecoveryAttempts[agent.id] != nil) {
                 restart(agent: agent, repository: repository)
@@ -870,7 +870,7 @@ public final class AgentRuntimeCoordinator {
         guard !isStoppingAll, !changingAccess.contains(agent.id),
               lifecycleID == request.lifecycleID, runtimeIDs[agent.id] == request.runtimeID,
               snapshot(for: agent.id).phase == .failed, snapshot(for: agent.id).failure == request.failure,
-              processes[agent.id].map({ $0.configuration == agent }) ?? true,
+              processes[agent.id]?.runs(agent) ?? true,
               accessConfiguration.isExtended(for: agent) == request.extendedAccess else { return }
         let recovery: SessionRecovery
         switch request.failure {
@@ -1134,7 +1134,7 @@ public final class AgentRuntimeCoordinator {
     /// retried a few times with growing gaps, then only after the harness was seen signed out.
     private func retryOnceSignedIn(_ agent: AgentRecord, repository: WorkspaceRepository) {
         guard let checkSignIn, !signInChecks.contains(agent.id), let runtimeID = runtimeIDs[agent.id],
-              processes[agent.id]?.configuration == agent else { return }
+              processes[agent.id]?.runs(agent) == true else { return }
         if let next = nextSignInCheck[agent.id], now() < next { return }
         nextSignInCheck[agent.id] = now().addingTimeInterval(Self.signInCheckInterval)
         signInChecks.insert(agent.id)

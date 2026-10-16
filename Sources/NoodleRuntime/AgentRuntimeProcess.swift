@@ -79,3 +79,12 @@ public struct AgentRuntimeLaunch {
         }
     }
 }
+
+extension AgentRuntimeProcess {
+    /// A bot sets its own status line while it runs; that is not a change to how it runs.
+    func runs(_ agent: AgentRecord) -> Bool {
+        var started = configuration
+        started.status = agent.status
+        return started == agent
+    }
+}
