@@ -21,7 +21,13 @@ extension ComputerStore {
         }
     }
 
-    func cleanStorage(preview: StorageReport) {
+    /// Computers whose disks Free Up Space can only reach by stopping them.
+    var storageRunningSessions: [ComputerSession] {
+        sessions.filter { $0.container != nil || $0.virtual != nil }
+    }
+
+    /// Without `stopRunning`, running computers keep going and their disks are left alone.
+    func cleanStorage(preview: StorageReport, stopRunning: Bool = true) {
         guard !storageBusy, !storageOperationsBusy else {
             storageError = "Wait for computer creation, startup or updates to finish, then refresh Storage."
             return
@@ -30,20 +36,27 @@ extension ComputerStore {
         storageCleaning = true
         storageError = nil
         storageTask = Task {
-            defer { storageBusy = false; storageCleaning = false; storageTask = nil }
-            let running = sessions.filter { $0.phase == .running }
+            defer { storageBusy = false; storageCleaning = false; storageProgress = nil; storageTask = nil }
+            let running = stopRunning ? sessions.filter { $0.phase == .running } : []
+            let skipping = stopRunning ? [] : Set(storageRunningSessions.map(\.computer.id))
             do {
-                for session in sessions where session.container != nil || session.virtual != nil {
-                    await stopComputer(session, force: true)
+                if stopRunning {
+                    for session in storageRunningSessions {
+                        storageProgress = ("Stopping \(session.computer.name)…", 0)
+                        await stopComputer(session, force: true)
+                    }
+                    guard storageRunningSessions.isEmpty else {
+                        throw ComputerError("A computer could not stop. Nothing was removed. Stop it and try again.")
+                    }
                 }
-                guard sessions.allSatisfy({ $0.container == nil && $0.virtual == nil }) else {
-                    throw ComputerError("A computer could not stop. No caches were removed. Stop it and try again.")
+                storageError = try await StorageMaintenance.clean(library: library, preview: preview, skipping: skipping) { label, fraction in
+                    await MainActor.run { self.storageProgress = (label, fraction) }
                 }
-                storageError = try await StorageMaintenance.clean(library: library, preview: preview)
             } catch { storageError = error.localizedDescription }
             // Restore the previously running set even if cleanup failed. Quitting
             // cancels maintenance, so it must never start guests again on shutdown.
             for session in running where session.container == nil && session.virtual == nil && !Task.isCancelled {
+                storageProgress = ("Restarting \(session.computer.name)…", 1)
                 await startComputer(session)
                 if session.phase != .running {
                     storageError = (storageError ?? "") + "\n\(session.computer.name) could not restart: \(session.phase.label). Check the computer’s console."

@@ -3,8 +3,10 @@ import AppKit
 import SwiftUI
 import ComputerCore
 import Containerization
+import ContainerizationEXT4
 import ContainerizationOCI
 import CryptoKit
+import SystemPackage
 @testable import NoodleComputer
 
 final class StorageMaintenanceTests: XCTestCase {
@@ -94,7 +96,7 @@ final class StorageMaintenanceTests: XCTestCase {
         XCTAssertThrowsError(try StorageMaintenance.snapshot(at: runtime))
     }
 
-    func testImageGarbageCollectionKeepsActiveAndRecoveryDigests() async throws {
+    func testFreeingSpaceRemovesRecoveryCopiesAndTheirImages() async throws {
         let library = try fixture()
         defer { try? FileManager.default.removeItem(at: library.root) }
         let imagePath = library.root.appendingPathComponent("Runtime/Images")
@@ -128,18 +130,87 @@ final class StorageMaintenanceTests: XCTestCase {
             try generation.activate(in: directory)
         }
         let preview = try await StorageMaintenance.inspect(library: library)
-        XCTAssertEqual(preview.obsoleteImages, ["example.com/unused:old"])
-        _ = try await StorageMaintenance.clean(library: library, preview: preview)
-        let remaining = try await Set(images.list().map(\.reference))
-        XCTAssertEqual(remaining, ["example.com/active:old", "example.com/recovery:old", ContainerComputer.initReference])
+        XCTAssertEqual(preview.obsoleteImages, ["example.com/recovery:old", "example.com/unused:old"])
+        XCTAssertEqual(preview.recoveryCopies, [.init(computer: computer.id, generation: previous.generation, active: state.generation)])
+        XCTAssertGreaterThan(preview.reclaimableBytes, 0)
+        XCTAssertLessThan(preview.reclaimableBytes(skipping: [computer.id]), preview.reclaimableBytes)
+        // A running computer's disks are left alone when freeing from stopped computers only.
+        _ = try await StorageMaintenance.clean(library: library, preview: preview, skipping: [computer.id])
         XCTAssertEqual(try ContainerDiskState.load(in: directory), state)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.directory(in: directory).appendingPathComponent("Upper.ext4").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.directory(in: directory).path))
+        let stopped = try await StorageMaintenance.inspect(library: library)
+        XCTAssertEqual(stopped.recoveryCopies, preview.recoveryCopies)
+        _ = try await StorageMaintenance.clean(library: library, preview: stopped)
+        let remaining = try await Set(images.list().map(\.reference))
+        XCTAssertEqual(remaining, ["example.com/active:old", ContainerComputer.initReference])
+        let after = try ContainerDiskState.load(in: directory)
+        XCTAssertEqual(after.generation, state.generation)
+        XCTAssertNil(after.previousGeneration)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: previous.directory(in: directory).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: state.directory(in: directory).appendingPathComponent("Upper.ext4").path))
+        let cleaned = try await StorageMaintenance.inspect(library: library)
+        XCTAssertTrue(cleaned.recoveryCopies.isEmpty)
+        XCTAssertFalse(cleaned.canClean)
         // Corrupt metadata must retain every cached image and skip blob GC.
         try Data("invalid".utf8).write(to: directory.appendingPathComponent("ContainerDisk.json"))
         let unknown = try await StorageMaintenance.inspect(library: library)
         XCTAssertNil(unknown.protectedImages)
         XCTAssertTrue(unknown.obsoleteImages.isEmpty)
-        XCTAssertEqual(unknown.orphanedBytes, 0)
+        XCTAssertTrue(unknown.recoveryCopies.isEmpty)
+    }
+
+    func testCompactionReturnsOnlyFreeBlocks() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let disk = directory.appendingPathComponent("Upper.ext4")
+        let megabyte = 1_048_576
+        let kept = Data((0..<megabyte).map { _ in UInt8.random(in: 0...255) })
+        let formatter = try EXT4.Formatter(FilePath(disk.path), minDiskSize: 64 * UInt64(megabyte), journal: .default)
+        let stream = InputStream(data: kept)
+        stream.open()
+        try formatter.create(path: FilePath("/kept.bin"), mode: EXT4.Inode.Mode(.S_IFREG, 0o644), buf: stream)
+        stream.close()
+        try formatter.close()
+        // A deleted file's blocks: free in ext4 but still holding data on the Mac.
+        let handle = try FileHandle(forUpdating: disk)
+        let free = try XCTUnwrap(DiskCompaction.freeRanges(handle.fileDescriptor, mounted: false))
+        let target = try XCTUnwrap(free.last { $0.count >= 4 * megabyte })
+        try handle.seek(toOffset: UInt64(target.lowerBound))
+        try handle.write(contentsOf: Data((0..<4 * megabyte).map { _ in UInt8.random(in: 1...255) }))
+        try handle.synchronize()
+        try handle.close()
+        XCTAssertGreaterThanOrEqual(try DiskCompaction.reclaimableBytes(at: disk), Int64(4 * megabyte))
+        XCTAssertGreaterThanOrEqual(try DiskCompaction.compact(at: disk), Int64(4 * megabyte))
+        XCTAssertEqual(try DiskCompaction.reclaimableBytes(at: disk), 0)
+        let reader = try EXT4.EXT4Reader(blockDevice: FilePath(disk.path))
+        var read = Data(count: kept.count)
+        let count = try read.withUnsafeMutableBytes { try reader.readFile(at: FilePath("/kept.bin"), into: $0) }
+        XCTAssertEqual(count, kept.count)
+        XCTAssertEqual(read, kept)
+    }
+
+    func testCompactionSkipsDisksNeedingJournalRecovery() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let disk = directory.appendingPathComponent("Upper.ext4")
+        try EXT4.Formatter(FilePath(disk.path), minDiskSize: 16 * 1_048_576, journal: .default).close()
+        let handle = try FileHandle(forUpdating: disk)
+        let free = try XCTUnwrap(DiskCompaction.freeRanges(handle.fileDescriptor, mounted: false))
+        try handle.seek(toOffset: UInt64(try XCTUnwrap(free.last).lowerBound))
+        try handle.write(contentsOf: Data(repeating: 0xAB, count: 65_536))
+        // Set needs_recovery, as an unclean stop leaves it.
+        try handle.seek(toOffset: 1024 + 0x60)
+        var incompatible = try XCTUnwrap(handle.read(upToCount: 1))
+        incompatible[0] |= 0x4
+        try handle.seek(toOffset: 1024 + 0x60)
+        try handle.write(contentsOf: incompatible)
+        try handle.synchronize()
+        try handle.close()
+        XCTAssertEqual(try DiskCompaction.reclaimableBytes(at: disk), 0)
+        XCTAssertGreaterThan(try DiskCompaction.reclaimableBytes(at: disk, estimate: true), 0)
+        XCTAssertEqual(try DiskCompaction.compact(at: disk), 0)
     }
 
     @MainActor func testStorageControllerAndLayout() async throws {
@@ -174,8 +245,8 @@ final class StorageMaintenanceTests: XCTestCase {
         await store.storageTask?.value
         XCTAssertFalse(store.storageCleaning)
         XCTAssertFalse(store.storageBusy)
-        XCTAssertEqual(store.storageReport?.removableCount, 0)
-        XCTAssertTrue(store.storageError?.contains("preserved") == true)
+        XCTAssertEqual(store.storageReport?.reclaimableBytes, 0)
+        XCTAssertTrue(store.storageError?.contains("Freed") == true)
     }
 
     @MainActor func testMaintenanceBlocksRuntimeMutations() async throws {

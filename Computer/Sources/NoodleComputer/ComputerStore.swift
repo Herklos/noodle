@@ -183,6 +183,8 @@ enum ComputerDisplayMode: String {
     @Published var storageReport: StorageReport?
     @Published var storageBusy = false
     @Published var storageCleaning = false
+    /// What Free Up Space is doing now and how far along it is.
+    @Published var storageProgress: (label: String, fraction: Double)?
     @Published var storageError: String?
     var storageTask: Task<Void, Never>?
     @Published var error: String? {

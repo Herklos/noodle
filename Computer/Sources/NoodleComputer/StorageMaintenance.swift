@@ -11,14 +11,23 @@ struct StorageReport: Sendable {
     let runtimeBytes: Int64
     let computerBytes: Int64
     let sharedBytes: Int64
-    let orphanedBytes: UInt64
+    /// Everything Free Up Space returns: unused images and installers, copies kept from
+    /// before image updates, and free space inside computer disks.
+    let reclaimableBytes: Int64
+    /// The part of `reclaimableBytes` inside each computer's own folder.
+    let computerReclaimableBytes: [UUID: Int64]
     let obsoleteImages: [String]
     let obsoleteFiles: [String]
+    let recoveryCopies: [StorageMaintenance.RecoveryCopy]
     let runtimeSnapshot: [String: StorageMaintenance.FileStamp]
     let protectedImages: Set<String>?
 
-    var removableCount: Int { obsoleteImages.count + obsoleteFiles.count }
-    var canClean: Bool { removableCount > 0 || orphanedBytes > 0 }
+    var canClean: Bool { reclaimableBytes > 0 }
+
+    /// What cleaning frees while leaving these computers' disks alone.
+    func reclaimableBytes(skipping computers: Set<UUID>) -> Int64 {
+        reclaimableBytes - computers.compactMap { computerReclaimableBytes[$0] }.reduce(0, +)
+    }
 }
 
 enum StorageMaintenance {
@@ -27,6 +36,14 @@ enum StorageMaintenance {
         let allocated: Int64
         let modified: Date?
         let inode: UInt64
+    }
+
+    /// The base/overlay pair an image update replaced. Nothing restores it, and its
+    /// overlay stops sharing blocks with the active copy as the computer writes.
+    struct RecoveryCopy: Equatable, Sendable {
+        let computer: UUID
+        let generation: UUID
+        let active: UUID
     }
 
     /// Reject links, including directory links, before handing paths to ImageStore
@@ -136,23 +153,43 @@ enum StorageMaintenance {
         return parsed.description
     }
 
+    /// Images still needed once cleanup has removed the recovery copies, so their images go too.
     static func protectedImages(library: ComputerLibrary) throws -> Set<String>? {
         var keep = try Set([ContainerComputer.initReference, Computer.shellImage].map(normalized))
         for computer in try library.load() where computer.kind == .container {
             keep.insert(try normalized(computer.imageReference))
-            let directory = library.directory(for: computer.id)
-            // Missing/corrupt recovery metadata means we cannot prove an image unused.
-            guard let state = try? ContainerDiskState.load(in: directory) else { return nil }
+            // Missing/corrupt disk metadata means we cannot prove an image unused.
+            guard let state = try? ContainerDiskState.load(in: library.directory(for: computer.id)) else { return nil }
             keep.insert(state.imageDigest)
-            if let previous = state.previousGeneration {
-                let file = directory.appendingPathComponent("Layers/\(previous.uuidString.lowercased())/State.json")
-                guard let data = try? Data(contentsOf: file),
-                      let recovery = try? JSONDecoder().decode(ContainerDiskState.self, from: data),
-                      recovery.generation == previous else { return nil }
-                keep.insert(recovery.imageDigest)
-            }
         }
         return keep
+    }
+
+    /// Each container computer's active writable disk and its recovery copy, if any.
+    static func containerDisks(library: ComputerLibrary) throws -> [(computer: UUID, upper: String, recovery: RecoveryCopy?)] {
+        try library.load().filter { $0.kind == .container }.compactMap { computer in
+            let directory = library.directory(for: computer.id)
+            guard let state = try? ContainerDiskState.load(in: directory) else { return nil }
+            let prefix = "Computers/\(computer.id.uuidString.lowercased())/Layers/"
+            let upper = prefix + state.generation.uuidString.lowercased() + "/Upper.ext4"
+            guard let previous = state.previousGeneration, previous != state.generation,
+                  FileManager.default.fileExists(atPath: directory.appendingPathComponent("Layers/\(previous.uuidString.lowercased())").path)
+            else { return (computer.id, upper, nil) }
+            return (computer.id, upper, RecoveryCopy(computer: computer.id, generation: previous, active: state.generation))
+        }
+    }
+
+    /// Repoints the computer at its active pair alone, then deletes the replaced pair, so an
+    /// interruption never leaves the metadata naming a missing generation.
+    static func removeRecoveryCopy(_ copy: RecoveryCopy, library: ComputerLibrary) throws {
+        let directory = library.directory(for: copy.computer)
+        let state = try ContainerDiskState.load(in: directory)
+        guard state.generation == copy.active, state.previousGeneration == copy.generation else {
+            throw ComputerError("A computer's disk changed since the preview. Refresh Storage and try again.")
+        }
+        try ContainerDiskState(generation: state.generation, imageReference: state.imageReference,
+                               imageDigest: state.imageDigest).activate(in: directory)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("Layers/\(copy.generation.uuidString.lowercased())"))
     }
 
     static func removableFiles(in files: [String: FileStamp]) -> [String] {
@@ -171,14 +208,20 @@ enum StorageMaintenance {
         let keep = try protectedImages(library: library)
         let imagePath = runtime.appendingPathComponent("Images")
         var obsolete: [String] = []
-        var orphaned: UInt64 = 0
+        var referenced: Set<String>?
         if FileManager.default.fileExists(atPath: imagePath.path) {
             let images = try ImageStore(path: imagePath)
             if let keep {
-                obsolete = try await images.list().filter {
-                    !keep.contains(try normalized($0.reference)) && !keep.contains($0.digest)
-                }.map(\.reference).sorted()
-                orphaned = try await images.calculateOrphanedBlobsSize()
+                var kept = Set<String>()
+                for image in try await images.list() {
+                    if keep.contains(try normalized(image.reference)) || keep.contains(image.digest) {
+                        for digest in try await image.referencedDigests() {
+                            kept.insert(digest.split(separator: ":").last.map(String.init) ?? digest)
+                        }
+                    } else { obsolete.append(image.reference) }
+                }
+                obsolete.sort()
+                referenced = kept
             }
         }
         // ImageStore can initialize bookkeeping. Capture the preview after opening it.
@@ -188,6 +231,26 @@ enum StorageMaintenance {
             footprint.unique.filter { name, _ in prefixes.contains { name.hasPrefix($0) } }.values.reduce(0, +)
         }
         let cacheBytes = bytes(under: ["Runtime/Images/", "Runtime/Restore Images/", "Runtime/Linux Images/"])
+        let obsoleteFiles = removableFiles(in: files)
+        // Blob garbage collection removes every blob the kept images do not reference.
+        let blobs = "Runtime/Images/content/blobs/sha256/"
+        let imageBytes = referenced.map { kept in
+            footprint.unique.filter { name, _ in name.hasPrefix(blobs) && !kept.contains(String(name.dropFirst(blobs.count))) }
+                .values.reduce(0, +)
+        } ?? 0
+        let disks = try containerDisks(library: library)
+        let recoveryCopies = disks.compactMap(\.recovery)
+        var perComputer: [UUID: Int64] = [:]
+        for disk in disks {
+            let recovery = disk.recovery.map { copy in
+                bytes(under: ["Computers/\(copy.computer.uuidString.lowercased())/Layers/\(copy.generation.uuidString.lowercased())/"])
+            } ?? 0
+            // Running computers' disks read as unclean; estimate from their current bitmaps.
+            let compact = (try? DiskCompaction.reclaimableBytes(at: library.root.appendingPathComponent(disk.upper), estimate: true)) ?? 0
+            if recovery + compact > 0 { perComputer[disk.computer] = recovery + compact }
+        }
+        let reclaimable = obsoleteFiles.compactMap { footprint.unique["Runtime/" + $0] }.reduce(0, +)
+            + imageBytes + perComputer.values.reduce(0, +)
         let capacity = try library.root.resourceValues(forKeys: [.volumeAvailableCapacityKey])
         let filesystem = try FileManager.default.attributesOfFileSystem(forPath: library.root.path)
         guard let freeBytes = capacity.volumeAvailableCapacity.map(Int64.init)
@@ -198,33 +261,61 @@ enum StorageMaintenance {
             cacheBytes: cacheBytes,
             runtimeBytes: bytes(under: ["Runtime/"]) - cacheBytes,
             computerBytes: bytes(under: ["Computers/", "Staging/"]),
-            sharedBytes: footprint.shared,
-            orphanedBytes: orphaned, obsoleteImages: obsolete, obsoleteFiles: removableFiles(in: files),
+            sharedBytes: footprint.shared, reclaimableBytes: reclaimable, computerReclaimableBytes: perComputer,
+            obsoleteImages: obsolete, obsoleteFiles: obsoleteFiles,
+            recoveryCopies: recoveryCopies,
             runtimeSnapshot: files, protectedImages: keep)
     }
 
-    static func clean(library: ComputerLibrary, preview: StorageReport) async throws -> String {
+    /// Leaves the disks of `skipping` alone; every other computer must be stopped.
+    static func clean(library: ComputerLibrary, preview: StorageReport, skipping: Set<UUID> = [],
+                      progress: @escaping @Sendable (String, Double) async -> Void = { _, _ in }) async throws -> String {
         let current = try await inspect(library: library)
         guard current.runtimeSnapshot == preview.runtimeSnapshot,
               current.protectedImages == preview.protectedImages,
               current.obsoleteImages == preview.obsoleteImages,
-              current.obsoleteFiles == preview.obsoleteFiles else {
-            throw ComputerError("The cache changed since the preview. Refresh Storage before cleaning it.")
+              current.obsoleteFiles == preview.obsoleteFiles,
+              current.recoveryCopies == preview.recoveryCopies else {
+            throw ComputerError("Storage changed since the preview. Refresh Storage and try again.")
         }
         try Task.checkCancellation()
+        let names = Dictionary(try library.load().map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let copies = current.recoveryCopies.filter { !skipping.contains($0.computer) }
+        let disks = try containerDisks(library: library).filter { !skipping.contains($0.computer) }
+        let steps = Double(copies.count + disks.count + 1)
+        var done = 0.0
+        var problems: [String] = []
+        for copy in copies {
+            await progress("Removing the old disk copy of \(names[copy.computer] ?? "a computer")…", done / steps)
+            do { try removeRecoveryCopy(copy, library: library) }
+            catch { problems.append(error.localizedDescription) }
+            done += 1
+        }
+        // After the copies are gone: these disks no longer share blocks with them.
+        for disk in disks {
+            try Task.checkCancellation()
+            await progress("Compacting \(names[disk.computer] ?? "a computer")’s disk…", done / steps)
+            do { try DiskCompaction.compact(at: library.root.appendingPathComponent(disk.upper)) }
+            catch { problems.append(error.localizedDescription) }
+            done += 1
+        }
+        await progress("Removing unused downloads…", done / steps)
         let runtime = library.root.appendingPathComponent("Runtime")
         let imagePath = runtime.appendingPathComponent("Images")
-        var freed: UInt64 = 0
         if current.protectedImages != nil, FileManager.default.fileExists(atPath: imagePath.path) {
             let images = try ImageStore(path: imagePath)
             for reference in current.obsoleteImages {
                 try await images.delete(reference: reference, performCleanup: false)
             }
-            freed = try await images.cleanUpOrphanedBlobs().freed
+            try await images.cleanUpOrphanedBlobs()
         }
         for name in current.obsoleteFiles {
             try FileManager.default.removeItem(at: runtime.appendingPathComponent(name))
         }
-        return "Removed \(current.removableCount) cached items; reclaimed \(ByteCountFormatter.string(fromByteCount: Int64(freed), countStyle: .file)) of image blobs. Removed caches can be downloaded again. Computer disks and recovery copies were preserved."
+        let after = try library.root.resourceValues(forKeys: [.volumeAvailableCapacityKey]).volumeAvailableCapacity.map(Int64.init)
+        let freed = after.map { ByteCountFormatter.string(fromByteCount: max(0, $0 - current.freeBytes), countStyle: .file) }
+        return ([freed.map { "Freed \($0)." } ?? "Freed unused space.",
+                 "Your computers’ files were kept. Removed downloads are fetched again when needed."] + problems)
+            .joined(separator: "\n")
     }
 }

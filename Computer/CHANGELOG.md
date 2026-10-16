@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Settings › Storage shows how much space can be freed and a single **Free Up Space** button. It removes unused downloads and the copy of each computer's disk kept from before its last image upgrade, and returns space computers no longer use inside their disks, which previously only grew. If computers are running, you choose between stopping them to free everything or freeing space from stopped computers only, and a progress bar shows each step.
+
 ## [0.31.1] - 2026-10-16
 
 ### Changed
