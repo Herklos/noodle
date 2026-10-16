@@ -9,6 +9,8 @@ import SwiftUI
 @MainActor @Observable final class VoiceRecorder {
     enum Phase { case idle, preparing, recording, finishing, ready, failed }
     private(set) var phase: Phase = .idle
+    /// The screen stays on while the person speaks and the words are transcribed.
+    static func keepsAwake(_ phase: Phase) -> Bool { [.preparing, .recording, .finishing].contains(phase) }
     private(set) var duration: TimeInterval = 0
     private(set) var levels: [Float] = []
     private(set) var liveLevels: [Float] = []

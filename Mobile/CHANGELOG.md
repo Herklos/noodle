@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The screen stays on while you dictate a voice message and it is transcribed, instead of dimming and locking.
+
+### What to Test
+
+- Set Auto-Lock to 30 seconds, start a voice message and keep talking for over a minute; check the screen never dims, and dims again as usual after you send or cancel it.
+
 ## [0.35.0] - 2026-10-16
 
 ### Added

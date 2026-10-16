@@ -1878,7 +1878,11 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12).padding(.top, 8)
         // No bar behind the composer: the conversation's background runs to the bottom, as in Messages.
-        .onDisappear { Task { await recorder.discard() } }
+        .onChange(of: VoiceRecorder.keepsAwake(recorder.phase), initial: true) { _, awake in KeepAwake.dictating = awake }
+        .onDisappear {
+            KeepAwake.dictating = false
+            Task { await recorder.discard() }
+        }
     }
 
     private var messageComposer: some View {

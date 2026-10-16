@@ -564,11 +564,18 @@ final class ControllerReader: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Keeps the phone from dimming and locking, while a noodlet needs it or the console is open.
+/// Keeps the phone from dimming and locking, while a noodlet needs it, the console is open or a voice message is dictated.
 @MainActor enum KeepAwake {
     static var resting = false
+    static var dictating = false { didSet { apply() } }
+    private static var awake = false
 
-    static func set(_ awake: Bool) { UIApplication.shared.isIdleTimerDisabled = awake || resting }
+    static func set(_ awake: Bool) {
+        self.awake = awake
+        apply()
+    }
+
+    private static func apply() { UIApplication.shared.isIdleTimerDisabled = awake || resting || dictating }
 }
 
 extension AppDelegate {

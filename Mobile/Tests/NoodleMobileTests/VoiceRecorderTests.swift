@@ -2,6 +2,7 @@ import AVFoundation
 @testable import NoodleMobile
 import Speech
 import Testing
+import UIKit
 
 @MainActor @Suite struct VoiceRecorderTests {
     @Test func discardingAnIdleRecorderDoesNotDeactivateAnotherCallsAudio() async {
@@ -10,6 +11,23 @@ import Testing
         let recorder = VoiceRecorder(directory: directory, deactivateAudioSession: { deactivations += 1 })
         await recorder.discard()
         #expect(deactivations == 0, "An idle recorder never owned the call's audio session")
+    }
+
+    // Dictating keeps the screen awake, and ending it leaves a noodlet's own hold in place.
+    @Test func dictationKeepsTheScreenAwakeWithoutClobberingOtherHolds() {
+        #expect([VoiceRecorder.Phase.preparing, .recording, .finishing].allSatisfy(VoiceRecorder.keepsAwake))
+        #expect(![VoiceRecorder.Phase.idle, .ready, .failed].contains(where: VoiceRecorder.keepsAwake))
+        defer { KeepAwake.dictating = false; KeepAwake.set(false) }
+        KeepAwake.set(false)
+        KeepAwake.dictating = true
+        #expect(UIApplication.shared.isIdleTimerDisabled)
+        KeepAwake.set(false)
+        #expect(UIApplication.shared.isIdleTimerDisabled, "Another holder letting go must not end dictation's hold")
+        KeepAwake.set(true)
+        KeepAwake.dictating = false
+        #expect(UIApplication.shared.isIdleTimerDisabled, "Dictation ending must not end a noodlet's hold")
+        KeepAwake.set(false)
+        #expect(!UIApplication.shared.isIdleTimerDisabled)
     }
 
     // The engine delivers tapped audio on its own thread, never on the main actor.
