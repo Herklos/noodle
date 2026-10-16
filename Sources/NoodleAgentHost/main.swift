@@ -15,6 +15,14 @@ private enum HostPaths {
     /// Where harnesses are installed and keep their logins, as the app's own storage decides.
     static let home: URL = HarnessStorage.accountHome(applicationSupport: applicationSupport)
 
+    /// The Keychain a bot's login comes from. The user's items belong to the system
+    /// profile and must never stand in for a profile's login, and the login Keychain
+    /// belongs to the person's own home, not to one the app's storage gives harnesses.
+    static func loginSecret(_ profile: HarnessProfile?) -> (String, String) throws -> Data? {
+        if let profile { return profiles.loginSecret(profile) }
+        return home == HarnessStorage.systemHome ? RestrictedHarnessStorage.readSecret : { _, _ in nil }
+    }
+
     static func executable(_ path: String, provider: HarnessProvider) throws -> URL {
         // A harness Noodle installed is held to the same vendor signature, in Noodle's storage.
         if let managed = try managedHarnesses.trustedExecutable(at: path, provider: provider) { return managed }
@@ -186,16 +194,8 @@ if CommandLine.arguments.count == 11, CommandLine.arguments[1] == "--harness-chi
         if restricted {
             let layout = AgentStorageLayout(workspace: workspace)
             let repository = layout.package.deletingLastPathComponent().deletingLastPathComponent()
-            if let harnessProfile {
-                // The user's Keychain items belong to the system profile and must never stand in for a profile's login.
-                try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: loginHome,
-                                                     secret: profiles.loginSecret(harnessProfile))
-            } else if HostPaths.home == HarnessStorage.systemHome {
-                try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: loginHome)
-            } else {
-                // The login Keychain belongs to the person's own home, not to one the app's storage gives harnesses.
-                try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: loginHome, secret: { _, _ in nil })
-            }
+            try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: loginHome,
+                                                 secret: HostPaths.loginSecret(harnessProfile))
             let privateHome = RestrictedHarnessStorage.home(workspace: workspace)
             let codexHome = privateHome.appendingPathComponent(".codex", isDirectory: true)
             let temporary = workspace.appendingPathComponent(".noodle/tmp", isDirectory: true)
@@ -358,8 +358,8 @@ private final class HostSession: NSObject, AgentHostService {
                 }
                 let executable = try HostPaths.executable(executablePath, provider: provider)
                 let workspace = try HostPaths.workspace(agentID)
-                let loginHome = try HostPaths.profiles.selected(workspace: workspace, provider: provider)
-                    .map(HostPaths.profiles.loginHome) ?? HostPaths.home
+                let profile = try HostPaths.profiles.selected(workspace: workspace, provider: provider)
+                let loginHome = profile.map(HostPaths.profiles.loginHome) ?? HostPaths.home
                 if provider == .codex { SharedLogins.shared.refreshCodexIfDue(loginHome: loginHome, executable: executable) }
                 let child = Process()
                 child.executableURL = Bundle.main.executableURL
@@ -400,7 +400,7 @@ private final class HostSession: NSObject, AgentHostService {
                 }
                 try child.run()
                 SharedLogins.shared.add(self, provider: provider, workspace: workspace, loginHome: loginHome,
-                                        restricted: restricted, executable: executable)
+                                        secret: HostPaths.loginSecret(profile), restricted: restricted, executable: executable)
                 self.process = child
                 self.activity = HostActivity.shared.hold()
                 self.groupID = child.processIdentifier
@@ -820,6 +820,7 @@ private final class SharedLogins: @unchecked Sendable {
         let provider: HarnessProvider
         let workspace: URL
         let loginHome: URL
+        let secret: (String, String) throws -> Data?
         let restricted: Bool
         let executable: URL
     }
@@ -831,10 +832,11 @@ private final class SharedLogins: @unchecked Sendable {
     /// Guarded by the refresh queue.
     private var failedRefreshes: [URL: Date] = [:]
 
-    func add(_ owner: AnyObject, provider: HarnessProvider, workspace: URL, loginHome: URL, restricted: Bool, executable: URL) {
+    func add(_ owner: AnyObject, provider: HarnessProvider, workspace: URL, loginHome: URL,
+             secret: @escaping (String, String) throws -> Data?, restricted: Bool, executable: URL) {
         queue.async { [self] in
             bots[ObjectIdentifier(owner)] = Bot(provider: provider, workspace: workspace, loginHome: loginHome,
-                                                restricted: restricted, executable: executable)
+                                                secret: secret, restricted: restricted, executable: executable)
             guard timer == nil else { return }
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(2))
@@ -858,10 +860,18 @@ private final class SharedLogins: @unchecked Sendable {
         for bot in running where bot.provider == .codex && refreshed.insert(bot.loginHome).inserted {
             refreshCodexIfDue(loginHome: bot.loginHome, executable: bot.executable)
         }
+        // Each Keychain item is read once per round, however many bots share it.
+        var items: [String: Data?] = [:]
         // The first pass collects a refresh; the second passes it to the bots before it.
         for _ in 0..<2 {
             for bot in running where bot.restricted {
-                try? RestrictedHarnessStorage.exchange(provider: bot.provider, workspace: bot.workspace, loginHome: bot.loginHome)
+                try? RestrictedHarnessStorage.exchange(provider: bot.provider, workspace: bot.workspace, loginHome: bot.loginHome) { service, account in
+                    let key = [bot.loginHome.path, service, account].joined(separator: "\n")
+                    if let item = items[key] { return item }
+                    let item = try? bot.secret(service, account)
+                    items[key] = item
+                    return item
+                }
             }
         }
     }

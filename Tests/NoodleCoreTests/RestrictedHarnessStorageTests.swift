@@ -251,6 +251,31 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertTrue(String(decoding: try b.read(".credentials.json", limit: 4096), as: UTF8.self).contains("new-sign-in"))
     }
 
+    func testALoginRefreshedInTheKeychainReachesRunningBotsWithoutARestart() throws {
+        let (home, first, second) = try fixture()
+        var login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"one"}}"#.utf8)
+        let secret: (String, String) throws -> Data? = { _, _ in login }
+        for workspace in [first, second] {
+            try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        // The person's own Claude Code refreshed, spending the token the bots hold.
+        login = Data(#"{"claudeAiOauth":{"accessToken":"second","refreshToken":"two"}}"#.utf8)
+        for workspace in [first, second] {
+            try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+            let copy = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/.claude")
+            XCTAssertTrue(String(decoding: try copy.read(".credentials.json", limit: 4096), as: UTF8.self).contains("second"))
+        }
+        // A bot's own refresh is still handed to the others while the item is unchanged.
+        let a = try WorkspaceMailbox(workspace: first, path: ".noodle/home/.claude")
+        let refreshed = Data(#"{"claudeAiOauth":{"accessToken":"bot","refreshToken":"three"}}"#.utf8)
+        try a.writeData(refreshed, named: ".credentials.json")
+        for workspace in [first, second] {
+            try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        let b = try WorkspaceMailbox(workspace: second, path: ".noodle/home/.claude")
+        XCTAssertEqual(try b.read(".credentials.json", limit: 4096), refreshed)
+    }
+
     func testEveryCopiedLoginIsHandedBackAndNotOnlyCodex() throws {
         // Muse, FX and Antigravity rotate refresh tokens in their copies too.
         let cases: [(HarnessProvider, String, String, (String, String) throws -> Data?)] = [

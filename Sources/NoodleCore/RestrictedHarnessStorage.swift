@@ -35,13 +35,10 @@ public enum RestrictedHarnessStorage {
         switch provider {
         case .claudeCode:
             // Noodle's sign-in uses the standard Claude.ai account. The native
-            // CLI prefers this exact Keychain item, with a file fallback. Copy
-            // only that OAuth login, never other integrations in the payload.
+            // CLI prefers this exact Keychain item, with a file fallback.
             guard let data = try secret("Claude Code-credentials", NSUserName()) ?? sourceData(".credentials.json"),
-                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let oauth = payload["claudeAiOauth"] as? [String: Any],
-                  let token = oauth["accessToken"] as? String, !token.isEmpty else { throw missing(provider) }
-            try share(".credentials.json", from: .item(JSONSerialization.data(withJSONObject: ["claudeAiOauth": oauth], options: [.sortedKeys])))
+                  let login = try claudeLogin(data) else { throw missing(provider) }
+            try share(".credentials.json", from: .item(login))
         case .codex, .grokBuild:
             try share("auth.json")
             if provider == .codex {
@@ -98,15 +95,30 @@ public enum RestrictedHarnessStorage {
     }
 
     /// Hands a login a running bot refreshed to the login it shares, and the
-    /// shared login to the bot, without reading the Keychain again.
-    public static func exchange(provider: HarnessProvider, workspace: URL, loginHome: URL) throws {
+    /// shared login to the bot. A Keychain login the person's own harness
+    /// refreshed meanwhile replaces both, since its refresh spent the bot's token.
+    public static func exchange(provider: HarnessProvider, workspace: URL, loginHome: URL,
+                                secret: (String, String) throws -> Data? = { _, _ in nil }) throws {
         guard let accountPath = accountPath(provider) else { return }
         let destination = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/" + accountPath)
         let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime")
         let shared = try SharedLogin(provider: provider, workspace: workspace, loginHome: loginHome, accountPath: accountPath)
-        for name in loginNames(provider) where shared.holds(name, runtime: runtime) {
-            _ = try shared.exchange(name, from: .unknown, destination: destination, runtime: runtime)
+        let item: Data? = switch provider {
+        case .claudeCode: (try? secret("Claude Code-credentials", NSUserName())).flatMap { try? claudeLogin($0) }
+        case .antigravity: (try? secret("gemini", "antigravity")).flatMap(AntigravityProtocol.fileLogin)
+        default: nil
         }
+        for name in loginNames(provider) where shared.holds(name, runtime: runtime) {
+            _ = try shared.exchange(name, from: item.map { .item($0) } ?? .unknown, destination: destination, runtime: runtime)
+        }
+    }
+
+    /// Only the Claude.ai OAuth login, never other integrations in the payload.
+    private static func claudeLogin(_ data: Data) throws -> Data? {
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = payload["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String, !token.isEmpty else { return nil }
+        return try JSONSerialization.data(withJSONObject: ["claudeAiOauth": oauth], options: [.sortedKeys])
     }
 
     /// Codex routes every model through the one provider its config selects, so

@@ -5,6 +5,8 @@
 ### Fixed
 
 - The Usage window's bot menu shows the chosen bot's name next to its picture.
+- A bot waiting for sign-in comes back by itself again after the bot changed its own status.
+- Bots on a Claude Code or Antigravity login pick up a login refreshed on the Hub's Mac while they run, instead of failing with a revoked token.
 
 ## [0.35.0] - 2026-10-15
 

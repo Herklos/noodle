@@ -14,6 +14,7 @@ All notable changes to Noodle are documented here, following
 
 - The Usage window's bot menu shows the chosen bot's name next to its picture.
 - A bot waiting for sign-in comes back by itself again, and Kick's Retry Now restarts it, after the bot changed its own status.
+- Bots on a Claude Code or Antigravity login pick up a login refreshed by your own Claude Code or Antigravity while they run, instead of failing with a revoked token.
 
 ## [0.65.0] - 2026-10-16
 
