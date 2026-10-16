@@ -71,6 +71,14 @@ case "$command" in
         # One simulator rather than clones of it, except on CI.
         parallel=()
         [[ -n "${CI:-}" ]] || parallel=(-parallel-testing-enabled NO)
+        # The simulator runs at full priority whatever the build's, so one the tests booted is shut down after them.
+        # Shutting down can leave its processes running on their own, so those go too.
+        if [[ -z "${CI:-}" ]] && ! xcrun simctl list devices booted | grep -q "$simulator"; then
+            trap 'xcrun simctl shutdown "$simulator" 2>/dev/null || true
+                  for pid in $(pgrep -f "simruntime/Contents/Resources/RuntimeRoot"); do
+                      ps -E -p "$pid" -o command= 2>/dev/null | grep -q "SIMULATOR_UDID=$simulator" && kill -9 "$pid" 2>/dev/null
+                  done; true' EXIT
+        fi
         build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
             -derivedDataPath "$folder/Derived" -destination "id=$simulator" "${parallel[@]}" \
             -retry-tests-on-failure -test-iterations 2 -collect-test-diagnostics never "$@" test
