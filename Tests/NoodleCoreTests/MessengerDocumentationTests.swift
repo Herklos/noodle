@@ -47,6 +47,7 @@ final class MessengerDocumentationTests: XCTestCase {
     func testMessagesSayWhichConversationToUse() {
         let guidance = MessengerDeliveryKind.message.reference.guidance
         XCTAssertTrue(guidance.contains("description"))
+        XCTAssertTrue(guidance.contains("without a description, its name"))
         XCTAssertTrue(guidance.contains("where it was asked"))
         XCTAssertTrue(guidance.contains("not a member"))
         XCTAssertTrue(guidance.contains("For Noodle Media:"))
