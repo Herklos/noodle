@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- In a group, tapping a bot's picture beside its messages shows its profile from the bottom of the screen, with Reply, Message, Call and Edit, as on the Mac.
+
 ### Fixed
 
 - The screen stays on while you dictate a voice message and it is transcribed, instead of dimming and locking.
@@ -9,6 +13,11 @@
 ### What to Test
 
 - Set Auto-Lock to 30 seconds, start a voice message and keep talking for over a minute; check the screen never dims, and dims again as usual after you send or cancel it.
+- In a group, tap a bot's picture beside its messages; check its profile slides up with its picture, name, status and description.
+- Tap Message; check the bot's own conversation opens, and Back returns to the group.
+- Tap Reply; check the message field starts with the bot's name.
+- With a bot that can take calls, tap Call; check the call starts and its conversation opens with the call bar.
+- Tap Edit on your own bot; check its editor opens. For a bot someone shared with you, check there is no Edit.
 
 ## [0.35.0] - 2026-10-16
 

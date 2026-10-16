@@ -1405,6 +1405,27 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(avatars[messages[1].id] == scout)
     }
 
+    /// A bot's picture in a group offers what the Mac's profile does: reply, its own conversation, a call, editing.
+    @Test func groupBotProfileOffersTheMacsActions() {
+        let draft = LinkBotDraft(name: "Scout", provider: "claude")
+        let own = LinkBot(id: UUID(), conversationID: UUID(), draft: draft, createdAt: Date(), canCall: true)
+        let shared = LinkBot(id: UUID(), conversationID: UUID(), draft: draft, createdAt: Date(), owner: "Ada")
+
+        #expect(AgentProfile.actions(for: own, canOpen: true, inCall: false) == [.reply, .message, .call, .edit])
+        // A bot someone shared is only talked with; one already on a call is not called again.
+        #expect(AgentProfile.actions(for: shared, canOpen: true, inCall: false) == [.reply, .message])
+        #expect(AgentProfile.actions(for: own, canOpen: false, inCall: true) == [.reply, .edit])
+        #expect(AgentProfile.replying(to: "Scout", draft: "what do you think?") == "Scout, what do you think?")
+    }
+
+    /// Opening a bot's conversation from a group goes on top of it, or back to it when it is already open beneath.
+    @Test func openingAConversationFromAGroupStacksOrGoesBack() {
+        let (direct, group) = (ChatLink(hub: "Home", thread: UUID()), ChatLink(hub: "Home", thread: UUID()))
+
+        #expect(ChatLink.path([group], opening: direct) == [group, direct])
+        #expect(ChatLink.path([direct, group], opening: direct) == [direct])
+    }
+
     @Test func botPicturesAreShrunkAndStoredAsTheMacStoresThem() throws {
         let big = UIGraphicsImageRenderer(size: CGSize(width: 1600, height: 1200), format: {
             let format = UIGraphicsImageRendererFormat()

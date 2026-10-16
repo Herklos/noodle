@@ -1199,6 +1199,9 @@ struct AgentsView: View {
             .navigationDestination(for: ChatLink.self) { link in
                 if let hub = chats.first(where: { CurrentHub.name(of: $0.pairing) == link.hub }) {
                     ChatView(chats: hub, threadID: link.thread)
+                        .environment(\.openThread) { hub, thread in
+                            path = ChatLink.path(path, opening: ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread))
+                        }
                 }
             }
             .toolbar {
@@ -1414,6 +1417,19 @@ private struct FollowKey: Equatable {
 struct ChatLink: Hashable {
     let hub: String
     let thread: UUID
+
+    /// Opens a conversation from another, as a bot's profile in a group does: on top, or back to it when it is already open beneath.
+    static func path(_ path: [ChatLink], opening link: ChatLink) -> [ChatLink] {
+        guard let index = path.firstIndex(of: link) else { return path + [link] }
+        return Array(path[...index])
+    }
+}
+
+extension EnvironmentValues {
+    /// Opens another of a Hub's conversations by its thread; nil where no conversation list is there to open it.
+    @Entry var openThread: (@MainActor (HubChats, UUID) -> Void)? = nil
+    /// Shows a bot's profile, from its picture beside its messages in a group.
+    @Entry var showAgent: @MainActor (LinkBot) -> Void = { _ in }
 }
 
 enum MoreChoice { case createBot, createGroup, console, profiles, settings }
@@ -1661,6 +1677,11 @@ struct ChatView: View {
     @State private var homeBar: CGFloat = 0
     /// Whether the keyboard is up, when the composer sits just above it rather than as low as search.
     @State private var keyboardUp = false
+    /// The bot whose profile is open from its picture in a group, and what was picked there, done once the profile has gone.
+    @State private var profile: LinkBot?
+    @State private var profileChoice: (action: AgentProfile.Action, bot: LinkBot)?
+    @State private var editingBot: LinkBot?
+    @Environment(\.openThread) private var openThread
     @Environment(\.dismiss) private var dismiss
 
     init(chats: HubChats, threadID: UUID) {
@@ -1704,7 +1725,7 @@ struct ChatView: View {
                             CallCardRow(name: thread.name, message: message, record: record, live: liveCard == message.id ? call : nil)
                         } else {
                             Bubble(chats: chats, thread: thread, message: message, author: authors[message.id],
-                                   avatar: avatars[message.id].flatMap { chats.agent($0)?.draft }, besideAvatars: thread.group != nil,
+                                   avatar: avatars[message.id].flatMap(chats.agent), besideAvatars: thread.group != nil,
                                    delivery: message.id == latestOwn || chats.isUnsent(message) ? chats.delivery(of: message) : nil)
                         }
                         // What was said on a call after this message and before the next.
@@ -1806,6 +1827,15 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: $editing) { ThreadEditor(chats: chats, thread: thread) }
+        .sheet(item: $profile, onDismiss: finishProfileChoice) { bot in
+            AgentProfile(bot: bot, actions: AgentProfile.actions(for: bot, canOpen: openThread != nil,
+                                                                inCall: chats.calls.call?.threadID == bot.id)) { action in
+                profileChoice = (action, bot)
+                profile = nil
+            }
+        }
+        .sheet(item: $editingBot) { ThreadEditor(chats: chats, thread: .bot($0)) }
+        .environment(\.showAgent) { profile = $0 }
         .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: 10,
                       matching: .any(of: [.images, .videos]))
         .onChange(of: photos) { _, items in
@@ -1856,6 +1886,20 @@ struct ChatView: View {
             } else {
                 LiveSurfaceScreen(chats: chats, thread: thread, attachment: attachment)
             }
+        }
+    }
+
+    private func finishProfileChoice() {
+        guard let (action, bot) = profileChoice else { return }
+        profileChoice = nil
+        switch action {
+        case .reply: draft = AgentProfile.replying(to: bot.draft.name, draft: draft)
+        case .message: openThread?(chats, bot.id)
+        case .call:
+            chats.calls.start(threadID: bot.id, conversationID: bot.conversationID, name: bot.draft.name)
+            // The call's bar is in its conversation, so show it, as on the Mac.
+            openThread?(chats, bot.id)
+        case .edit: editingBot = bot
         }
     }
 
@@ -2111,14 +2155,82 @@ enum MessageFolding {
     }
 }
 
+/// A bot's profile, from its picture in a group, with what the Mac's offers there that the phone does.
+struct AgentProfile: View {
+    enum Action: Hashable { case reply, message, call, edit }
+    let bot: LinkBot
+    let actions: [Action]
+    let choose: (Action) -> Void
+
+    /// Its conversation and a call need somewhere to open them; a bot someone shared is only talked with.
+    static func actions(for bot: LinkBot, canOpen: Bool, inCall: Bool) -> [Action] {
+        var actions: [Action] = [.reply]
+        if canOpen { actions.append(.message) }
+        if canOpen, bot.canCall, !inCall { actions.append(.call) }
+        if bot.owner == nil { actions.append(.edit) }
+        return actions
+    }
+
+    /// Names the bot at the start of the message, as the Mac's Reply does.
+    static func replying(to name: String, draft: String) -> String { "\(name), " + draft }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            AgentAvatar(draft: bot.draft, size: 88)
+            Text(bot.draft.name)
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+            if let note = bot.archivedAt == nil ? bot.status : "Archived" {
+                Text(note)
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.quaternary, in: Capsule())
+            }
+            ScrollView {
+                let about = bot.draft.publicDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                Text(about.isEmpty ? "No description yet." : about)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+            .frame(maxHeight: 120)
+            HStack(spacing: 12) {
+                ForEach(actions, id: \.self) { action in
+                    let (title, symbol, label) = switch action {
+                    case .reply: ("Reply", "arrowshape.turn.up.left", "Reply in Group")
+                    case .message: ("Message", "bubble.left", "Direct Message")
+                    case .call: ("Call", "phone", "Call \(bot.draft.name)")
+                    case .edit: ("Edit", "pencil", "Edit Bot")
+                    }
+                    Button { choose(action) } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: symbol).font(.system(size: 18)).frame(height: 20)
+                            Text(title).font(.caption)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .accessibilityLabel(label)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        }
+        .padding(24)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
 private struct Bubble: View {
     let chats: HubChats
     let thread: HubThread
     let message: LinkMessage
     /// In a group, the bot's name above the first of its messages in a row.
     let author: String?
-    /// In a group, the bot's picture beside the last of its messages in a row.
-    let avatar: LinkBotDraft?
+    /// In a group, the bot's picture beside the last of its messages in a row, which opens its profile.
+    let avatar: LinkBot?
     /// Whether bot messages keep room for a picture beside them, so a run of them lines up.
     let besideAvatars: Bool
     /// Shown under your latest message, and under any that did not go through.
@@ -2129,6 +2241,7 @@ private struct Bubble: View {
     @State private var segmentFrames: [Int: CGRect] = [:]
     @Environment(\.focusMessage) private var focusMessage
     @Environment(\.unsentActions) private var unsentActions
+    @Environment(\.showAgent) private var showAgent
     @AppStorage(AttachmentLayout.key) private var attachmentLayout = AttachmentLayout.standard.rawValue
     @AppStorage(MessageTextLayout.key) private var textLayout = MessageTextLayout.standard.rawValue
 
@@ -2168,7 +2281,9 @@ private struct Bubble: View {
         case .bot:
             HStack(alignment: .bottom, spacing: 6) {
                 if let avatar {
-                    AgentAvatar(draft: avatar, size: Self.avatarSize)
+                    Button { showAgent(avatar) } label: { AgentAvatar(draft: avatar.draft, size: Self.avatarSize) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Show profile for \(avatar.draft.name)")
                 } else if besideAvatars {
                     Color.clear.frame(width: Self.avatarSize, height: 0)
                 }
