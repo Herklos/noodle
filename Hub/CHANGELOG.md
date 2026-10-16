@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The Usage window's bot menu shows the chosen bot's name next to its picture.
+
 ## [0.35.0] - 2026-10-15
 
 ### Changed

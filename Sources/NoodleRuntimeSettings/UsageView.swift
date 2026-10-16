@@ -198,6 +198,8 @@ public struct UsageView: View {
                 }
             }
             .pickerStyle(.menu)
+            // Toolbars show only a label's icon unless told otherwise.
+            .labelStyle(.titleAndIcon)
             .padding(.horizontal, 6)
             .help("Bot")
         }

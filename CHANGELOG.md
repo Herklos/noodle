@@ -10,6 +10,10 @@ All notable changes to Noodle are documented here, following
 
 - Inline code in messages is a little smaller and dimmer, so it sits more quietly in the text.
 
+### Fixed
+
+- The Usage window's bot menu shows the chosen bot's name next to its picture.
+
 ## [0.65.0] - 2026-10-16
 
 ### Added
