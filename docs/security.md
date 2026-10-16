@@ -78,6 +78,14 @@ only in your shell environment are not available.
   restricted bot cannot read other profiles.
 - If macOS denies Noodle access to a sign-in kept in the Keychain, the bot fails
   to start with a Keychain-access error; its access is not widened.
+- When a Claude Code bot renews its sign-in, Noodle writes the renewed sign-in
+  into your Claude Code Keychain item, because the renewal used up the one your
+  own Claude Code holds there. Only the Claude.ai sign-in in the item is
+  replaced, and only while the item still holds the sign-in the bot started
+  from. This lets a bot change that sign-in: one that follows misleading
+  instructions could put a different account's sign-in there, and your own
+  Claude Code would then use that account. A Claude Code you run yourself can
+  already change the item in the same way.
 
 ## Unrestricted access
 
@@ -192,6 +200,10 @@ plans lend. Its bots are restricted bots, with the same limits and the same gaps
   account directly, outside the Hub, until you sign out of it at the provider.
   Lend only to people you would trust with that account, or lend a profile
   signed in to a separate account.
+- **A Hub never writes a renewed sign-in back to its Mac's Keychain**, so other
+  people's bots cannot change the sign-in of the Mac's owner. The bots keep the
+  renewed sign-in among themselves; Claude Code run by hand on the Hub's Mac may
+  ask you to sign in again after they renew it.
 - **A shared bot works for whoever talks with it.** Sharing a bot does not make
   a lesser copy: anyone you share it with talks with the same bot, with its
   memory, files, tools, sign-ins and plan, and can ask it to use any of them.

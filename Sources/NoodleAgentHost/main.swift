@@ -23,6 +23,15 @@ private enum HostPaths {
         return home == HarnessStorage.systemHome ? RestrictedHarnessStorage.readSecret : { _, _ in nil }
     }
 
+    /// Where a bot's refresh of that login goes back to, so the person's own harness
+    /// is not left holding the token the bot spent. A Hub runs bots for other people,
+    /// who must not be able to change the login of the Mac's owner.
+    static func loginWriter(_ profile: HarnessProfile?) -> ((String, String, Data) throws -> Void)? {
+        guard Bundle.main.object(forInfoDictionaryKey: "NoodleHostServesOtherPeople") as? Bool != true else { return nil }
+        if let profile { return profiles.loginWriter(profile) }
+        return home == HarnessStorage.systemHome ? RestrictedHarnessStorage.writeSecret : nil
+    }
+
     static func executable(_ path: String, provider: HarnessProvider) throws -> URL {
         // A harness Noodle installed is held to the same vendor signature, in Noodle's storage.
         if let managed = try managedHarnesses.trustedExecutable(at: path, provider: provider) { return managed }
@@ -195,7 +204,8 @@ if CommandLine.arguments.count == 11, CommandLine.arguments[1] == "--harness-chi
             let layout = AgentStorageLayout(workspace: workspace)
             let repository = layout.package.deletingLastPathComponent().deletingLastPathComponent()
             try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: loginHome,
-                                                 secret: HostPaths.loginSecret(harnessProfile))
+                                                 secret: HostPaths.loginSecret(harnessProfile),
+                                                 writeSecret: HostPaths.loginWriter(harnessProfile))
             let privateHome = RestrictedHarnessStorage.home(workspace: workspace)
             let codexHome = privateHome.appendingPathComponent(".codex", isDirectory: true)
             let temporary = workspace.appendingPathComponent(".noodle/tmp", isDirectory: true)
@@ -400,7 +410,8 @@ private final class HostSession: NSObject, AgentHostService {
                 }
                 try child.run()
                 SharedLogins.shared.add(self, provider: provider, workspace: workspace, loginHome: loginHome,
-                                        secret: HostPaths.loginSecret(profile), restricted: restricted, executable: executable)
+                                        secret: HostPaths.loginSecret(profile), writeSecret: HostPaths.loginWriter(profile),
+                                        restricted: restricted, executable: executable)
                 self.process = child
                 self.activity = HostActivity.shared.hold()
                 self.groupID = child.processIdentifier
@@ -821,6 +832,7 @@ private final class SharedLogins: @unchecked Sendable {
         let workspace: URL
         let loginHome: URL
         let secret: (String, String) throws -> Data?
+        let writeSecret: ((String, String, Data) throws -> Void)?
         let restricted: Bool
         let executable: URL
     }
@@ -833,10 +845,11 @@ private final class SharedLogins: @unchecked Sendable {
     private var failedRefreshes: [URL: Date] = [:]
 
     func add(_ owner: AnyObject, provider: HarnessProvider, workspace: URL, loginHome: URL,
-             secret: @escaping (String, String) throws -> Data?, restricted: Bool, executable: URL) {
+             secret: @escaping (String, String) throws -> Data?, writeSecret: ((String, String, Data) throws -> Void)?,
+             restricted: Bool, executable: URL) {
         queue.async { [self] in
             bots[ObjectIdentifier(owner)] = Bot(provider: provider, workspace: workspace, loginHome: loginHome,
-                                                secret: secret, restricted: restricted, executable: executable)
+                                                secret: secret, writeSecret: writeSecret, restricted: restricted, executable: executable)
             guard timer == nil else { return }
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(2))
@@ -865,13 +878,20 @@ private final class SharedLogins: @unchecked Sendable {
         // The first pass collects a refresh; the second passes it to the bots before it.
         for _ in 0..<2 {
             for bot in running where bot.restricted {
-                try? RestrictedHarnessStorage.exchange(provider: bot.provider, workspace: bot.workspace, loginHome: bot.loginHome) { service, account in
-                    let key = [bot.loginHome.path, service, account].joined(separator: "\n")
-                    if let item = items[key] { return item }
-                    let item = try? bot.secret(service, account)
-                    items[key] = item
-                    return item
-                }
+                let key = { (service: String, account: String) in [bot.loginHome.path, service, account].joined(separator: "\n") }
+                try? RestrictedHarnessStorage.exchange(provider: bot.provider, workspace: bot.workspace, loginHome: bot.loginHome,
+                    secret: { service, account in
+                        if let item = items[key(service, account)] { return item }
+                        let item = try? bot.secret(service, account)
+                        items[key(service, account)] = item
+                        return item
+                    },
+                    writeSecret: bot.writeSecret.map { write in
+                        { service, account, data in
+                            try write(service, account, data)
+                            items[key(service, account)] = data
+                        }
+                    })
             }
         }
     }

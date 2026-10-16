@@ -9,7 +9,8 @@ public enum RestrictedHarnessStorage {
     public static func home(workspace: URL) -> URL { workspace.appendingPathComponent(".noodle/home") }
 
     public static func prepare(provider: HarnessProvider, workspace: URL, loginHome: URL,
-                               secret: (String, String) throws -> Data? = readSecret) throws {
+                               secret: (String, String) throws -> Data? = readSecret,
+                               writeSecret: ((String, String, Data) throws -> Void)? = nil) throws {
         _ = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home", create: true)
         _ = try WorkspaceMailbox(workspace: workspace, path: ".noodle/tmp", create: true)
         guard provider != .apple else { return }
@@ -25,8 +26,9 @@ public enum RestrictedHarnessStorage {
             try destination.writeData(data, named: name)
             try runtime.writeData(fingerprint, named: stamp)
         }
-        func share(_ name: String, from origin: SharedLogin.Origin = .file) throws {
-            guard try shared.exchange(name, from: origin, destination: destination, runtime: runtime) else { throw missing(provider) }
+        func share(_ name: String, from origin: SharedLogin.Origin = .file, writeBack: ((Data) throws -> Data?)? = nil) throws {
+            guard try shared.exchange(name, from: origin, destination: destination, runtime: runtime, writeBack: writeBack)
+            else { throw missing(provider) }
         }
         func sourceData(_ name: String) throws -> Data? {
             let source = try WorkspaceMailbox(workspace: loginHome, path: accountPath)
@@ -38,7 +40,10 @@ public enum RestrictedHarnessStorage {
             // CLI prefers this exact Keychain item, with a file fallback.
             guard let data = try secret("Claude Code-credentials", NSUserName()) ?? sourceData(".credentials.json"),
                   let login = try claudeLogin(data) else { throw missing(provider) }
-            try share(".credentials.json", from: .item(login))
+            try withoutActuallyEscaping(secret) { secret in
+                try share(".credentials.json", from: .item(login),
+                          writeBack: writeSecret.map { claudeWriteBack(over: login, secret: secret, write: $0) })
+            }
         case .codex, .grokBuild:
             try share("auth.json")
             if provider == .codex {
@@ -97,8 +102,11 @@ public enum RestrictedHarnessStorage {
     /// Hands a login a running bot refreshed to the login it shares, and the
     /// shared login to the bot. A Keychain login the person's own harness
     /// refreshed meanwhile replaces both, since its refresh spent the bot's token.
+    /// Given `writeSecret`, a bot's refresh goes into the Keychain item too, since
+    /// it spent the token the person's own harness holds there.
     public static func exchange(provider: HarnessProvider, workspace: URL, loginHome: URL,
-                                secret: (String, String) throws -> Data? = { _, _ in nil }) throws {
+                                secret: (String, String) throws -> Data? = { _, _ in nil },
+                                writeSecret: ((String, String, Data) throws -> Void)? = nil) throws {
         guard let accountPath = accountPath(provider) else { return }
         let destination = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/" + accountPath)
         let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime")
@@ -108,8 +116,33 @@ public enum RestrictedHarnessStorage {
         case .antigravity: (try? secret("gemini", "antigravity")).flatMap(AntigravityProtocol.fileLogin)
         default: nil
         }
-        for name in loginNames(provider) where shared.holds(name, runtime: runtime) {
-            _ = try shared.exchange(name, from: item.map { .item($0) } ?? .unknown, destination: destination, runtime: runtime)
+        try withoutActuallyEscaping(secret) { secret in
+            let writeBack = provider == .claudeCode ? item.flatMap { login in
+                writeSecret.map { claudeWriteBack(over: login, secret: secret, write: $0) }
+            } : nil
+            for name in loginNames(provider) where shared.holds(name, runtime: runtime) {
+                _ = try shared.exchange(name, from: item.map { .item($0) } ?? .unknown, destination: destination, runtime: runtime,
+                                        writeBack: writeBack)
+            }
+        }
+    }
+
+    /// Replaces only the Claude.ai login in the item, and only while the item still
+    /// holds the login the bot refreshed from; a new sign-in there wins instead.
+    /// Returns the login now in the item.
+    private static func claudeWriteBack(over login: Data, secret: @escaping (String, String) throws -> Data?,
+                                        write: @escaping (String, String, Data) throws -> Void) -> (Data) throws -> Data? {
+        { copy in
+            func oauth(_ data: Data) throws -> [String: Any]? {
+                (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["claudeAiOauth"] as? [String: Any]
+            }
+            guard let refreshed = try claudeLogin(copy), let new = try oauth(refreshed), let old = try oauth(login),
+                  let token = new["refreshToken"] as? String, !token.isEmpty, token != old["refreshToken"] as? String,
+                  let current = try secret("Claude Code-credentials", NSUserName()), try claudeLogin(current) == login,
+                  var payload = try JSONSerialization.jsonObject(with: current) as? [String: Any] else { return nil }
+            payload["claudeAiOauth"] = new
+            try write("Claude Code-credentials", NSUserName(), JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
+            return refreshed
         }
     }
 
@@ -291,8 +324,10 @@ public enum RestrictedHarnessStorage {
             return String(decoding: stamp, as: UTF8.self).hasPrefix(key + ":")
         }
 
-        /// False when there is no login to share.
-        func exchange(_ name: String, from origin: Origin, destination: WorkspaceMailbox, runtime: WorkspaceMailbox) throws -> Bool {
+        /// False when there is no login to share. `writeBack` takes a bot's refresh
+        /// of a Keychain login to the item and returns what the item now holds.
+        func exchange(_ name: String, from origin: Origin, destination: WorkspaceMailbox, runtime: WorkspaceMailbox,
+                      writeBack: ((Data) throws -> Data?)? = nil) throws -> Bool {
             var result = false
             try copies.withLock(".lock", wait: true) {
                 let store: WorkspaceMailbox?
@@ -314,6 +349,9 @@ public enum RestrictedHarnessStorage {
                     // This bot refreshed the login since it last took it.
                     try store.writeData(copy, named: name)
                     try runtime.writeData(tag(copy), named: stamp(name))
+                    if case .item = origin, let written = try? writeBack?(copy) {
+                        try copies.writeData(tag(written), named: name + ".origin")
+                    }
                     result = true
                     return
                 }
@@ -369,6 +407,28 @@ public enum RestrictedHarnessStorage {
             return bytes
         }
         return Data(text.utf8)
+    }
+
+    /// Writes a Claude Code login item the way the CLI does, through the tool it
+    /// trusts. The command goes in on standard input, so the login never shows
+    /// in the process list.
+    public static func writeSecret(service: String, account: String, data: Data) throws {
+        guard service == "Claude Code-credentials" || service.hasPrefix("Claude Code-credentials-"),
+              !account.contains("\""), !account.contains("\n") else { throw HarnessSetupError("Unsupported harness login item.") }
+        let hex = data.map { String(format: "%02x", $0) }.joined()
+        let process = Process(), input = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["-i"]
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        input.fileHandleForWriting.write(Data("add-generic-password -U -a \"\(account)\" -s \"\(service)\" -X \"\(hex)\"\n".utf8))
+        try input.fileHandleForWriting.close()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw HarnessSetupError("macOS did not allow Noodle Agent Host to update the harness login (\(process.terminationStatus)).")
+        }
     }
 
     private static func securityTool(_ arguments: [String]) throws -> (status: Int32, output: Data) {

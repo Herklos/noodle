@@ -276,6 +276,55 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertEqual(try b.read(".credentials.json", limit: 4096), refreshed)
     }
 
+    func testABotsRefreshIsWrittenBackIntoTheKeychainItemOnlyWhenItIsSafe() throws {
+        func oauth(_ data: Data) throws -> [String: String] {
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return try XCTUnwrap(payload["claudeAiOauth"] as? [String: String])
+        }
+        let (home, workspace, _) = try fixture()
+        var item = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"one"},"mcpOAuth":{"kept":"yes"}}"#.utf8)
+        var writes: [(String, String, Data)] = []
+        let secret: (String, String) throws -> Data? = { _, _ in item }
+        let write: (String, String, Data) throws -> Void = { service, account, data in writes.append((service, account, data)); item = data }
+        func exchange(writeBack: Bool = true) throws {
+            try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret,
+                                                  writeSecret: writeBack ? write : nil)
+        }
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        let copy = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/.claude")
+
+        // Where nobody may write the Keychain, a bot's refresh stays among the bots.
+        try copy.writeData(Data(#"{"claudeAiOauth":{"accessToken":"hub","refreshToken":"hub"}}"#.utf8), named: ".credentials.json")
+        try exchange(writeBack: false)
+        XCTAssertTrue(writes.isEmpty)
+
+        try copy.writeData(Data(#"{"claudeAiOauth":{"accessToken":"second","refreshToken":"two"}}"#.utf8), named: ".credentials.json")
+        try exchange()
+        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(writes.first?.0, "Claude Code-credentials")
+        XCTAssertEqual(writes.first?.1, NSUserName())
+        XCTAssertEqual(try oauth(item), ["accessToken": "second", "refreshToken": "two"])
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: item) as? [String: Any])
+        XCTAssertEqual(payload["mcpOAuth"] as? [String: String], ["kept": "yes"], "Only the Claude.ai login is replaced")
+        try exchange()
+        XCTAssertEqual(writes.count, 1, "The written login is not mistaken for a new sign-in")
+        XCTAssertEqual(try oauth(copy.read(".credentials.json", limit: 4096)), ["accessToken": "second", "refreshToken": "two"])
+
+        // Nothing malformed, or that kept the old refresh token, is written.
+        for bad in [#"{"claudeAiOauth":{"accessToken":"third"}}"#, #"{"claudeAiOauth":{"accessToken":"third","refreshToken":"two"}}"#, "junk"] {
+            try copy.writeData(Data(bad.utf8), named: ".credentials.json")
+            try exchange()
+        }
+        XCTAssertEqual(writes.count, 1)
+
+        // A new sign-in in the Keychain wins over a bot's refresh made from the old login.
+        try copy.writeData(Data(#"{"claudeAiOauth":{"accessToken":"stale","refreshToken":"three"}}"#.utf8), named: ".credentials.json")
+        item = Data(#"{"claudeAiOauth":{"accessToken":"new-sign-in","refreshToken":"four"}}"#.utf8)
+        try exchange()
+        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(try oauth(copy.read(".credentials.json", limit: 4096))["accessToken"], "new-sign-in")
+    }
+
     func testEveryCopiedLoginIsHandedBackAndNotOnlyCodex() throws {
         // Muse, FX and Antigravity rotate refresh tokens in their copies too.
         let cases: [(HarnessProvider, String, String, (String, String) throws -> Data?)] = [

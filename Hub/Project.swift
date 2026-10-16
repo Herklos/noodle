@@ -189,6 +189,7 @@ let project = Project(
                 "NoodleSigningTeam": "$(DEVELOPMENT_TEAM)",
                 "NoodleApplicationIdentifier": "$(HUB_APP_BUNDLE_ID)",
                 "NoodleAgentHostService": "$(HUB_APP_BUNDLE_ID).agent-host",
+                "NoodleHostServesOtherPeople": true,
             ]),
             sources: ["../Sources/NoodleAgentHost/**"],
             dependencies: [.package(product: "NoodleCore"), .package(product: "NoodleAgentBridge")],

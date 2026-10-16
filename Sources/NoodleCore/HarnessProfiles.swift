@@ -133,11 +133,23 @@ public struct HarnessProfileStore: Sendable {
     public func loginSecret(_ profile: HarnessProfile,
                             read: @escaping (String, String) throws -> Data? = RestrictedHarnessStorage.readSecret)
         -> (String, String) throws -> Data? {
-        guard profile.provider == .claudeCode else { return { _, _ in nil } }
+        guard let item = loginItem(profile) else { return { _, _ in nil } }
+        return { service, account in service == "Claude Code-credentials" ? try read(item, account) : nil }
+    }
+
+    /// Where a bot's refresh of this profile's login goes back to.
+    public func loginWriter(_ profile: HarnessProfile,
+                            write: @escaping (String, String, Data) throws -> Void = RestrictedHarnessStorage.writeSecret)
+        -> ((String, String, Data) throws -> Void)? {
+        guard let item = loginItem(profile) else { return nil }
+        return { service, account, data in if service == "Claude Code-credentials" { try write(item, account, data) } }
+    }
+
+    private func loginItem(_ profile: HarnessProfile) -> String? {
+        guard profile.provider == .claudeCode else { return nil }
         let folder = accountHome(profile).path.precomposedStringWithCanonicalMapping
         let digest = SHA256.hash(data: Data(folder.utf8)).map { String(format: "%02x", $0) }.joined()
-        let item = "Claude Code-credentials-" + digest.prefix(8)
-        return { service, account in service == "Claude Code-credentials" ? try read(item, account) : nil }
+        return "Claude Code-credentials-" + digest.prefix(8)
     }
 
     /// Resolves the profile a bot selected in its agent.json. Nil means the
