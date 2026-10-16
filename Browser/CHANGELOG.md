@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-10-16
+
 ### Changed
 
 - Once a browser has 30 tabs, a bot that opens another is asked to close the ones it no longer needs.

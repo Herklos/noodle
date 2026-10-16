@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-16
+
 ### Added
 
 - Noodle is in the share sheet: send a screenshot, photo, video, file, link or text from any app to a bot or group, with a message.
