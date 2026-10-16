@@ -6,6 +6,11 @@
 
 - In a group, tapping a bot's picture beside its messages shows its profile from the bottom of the screen, with Reply, Message, Call and Edit, as on the Mac.
 
+### Changed
+
+- The bot editor has a Description field and a Backstory section, as on the Mac. Its picture opens the picture editor without a row arrow.
+- Image Generation is now listed under the bot's Tools, as on the Mac, and switches on or off as soon as you tap it.
+
 ### Fixed
 
 - The screen stays on while you dictate a voice message and it is transcribed, instead of dimming and locking.
@@ -18,6 +23,8 @@
 - Tap Reply; check the message field starts with the bot's name.
 - With a bot that can take calls, tap Call; check the call starts and its conversation opens with the call bar.
 - Tap Edit on your own bot; check its editor opens. For a bot someone shared with you, check there is no Edit.
+- Edit a bot; check its picture has no arrow beside it and tapping it opens the picture editor. Fill in Description and Backstory, tap Save, then reopen the bot and check both were kept.
+- Open the bot's Tools and tap Image Generation; check a tick appears straight away and the Hub's image model shows beneath it. Go back, tap Save and reopen the Tools; check the tick is still there. Tap it again to switch it off.
 
 ## [0.35.0] - 2026-10-16
 

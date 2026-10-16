@@ -125,6 +125,13 @@ extension HubChats {
         }
     }
 
+    /// Lets a bot make images with the Hub's image model, or stops it, on the bot as the Hub has it.
+    func setImageGeneration(_ on: Bool, for agent: LinkBot) async throws {
+        guard var bot = self.agent(agent.id) else { throw LinkError("The bot is no longer on the Hub.") }
+        bot.draft.imageGeneration = on
+        try await update(bot)
+    }
+
     /// Opens the live view of what a link in the bot's conversation points at.
     func openSurface(_ attachment: LinkAttachment, in conversation: some HubConversation) async throws -> LinkChannel {
         try await pairing.channel(.openSurface(conversationID: conversation.conversationID, attachmentID: attachment.id))
@@ -231,8 +238,11 @@ struct HubToolsScreen: View {
     let chats: HubChats
     let agent: LinkBot
     let kind: HubTool
+    /// Among the tools, as on the Mac: kept in the bot editor's copy too, so its Save does not undo it.
+    var imageGeneration: Binding<Bool>? = nil
     @State private var adding = false
     @State private var busy: UUID?
+    @State private var settingImageGeneration = false
     @State private var problem: String?
 
     private var title: String {
@@ -256,7 +266,9 @@ struct HubToolsScreen: View {
 
     var body: some View {
         List {
-            if rows.isEmpty {
+            if let imageGeneration {
+                imageGenerationRow(imageGeneration)
+            } else if rows.isEmpty {
                 Text("None on this Hub yet").foregroundStyle(.secondary)
             }
             ForEach(rows, id: \.id) { row in
@@ -297,6 +309,31 @@ struct HubToolsScreen: View {
             NewHubToolSheet(chats: chats, agent: agent, kind: kind)
         }
         .wordmarkRefreshable { try? await chats.loadTools() }
+    }
+
+    private func imageGenerationRow(_ on: Binding<Bool>) -> some View {
+        Button {
+            settingImageGeneration = true
+            problem = nil
+            Task {
+                defer { settingImageGeneration = false }
+                do {
+                    try await chats.setImageGeneration(!on.wrappedValue, for: agent)
+                    on.wrappedValue.toggle()
+                } catch { problem = error.localizedDescription }
+            }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Image Generation").foregroundStyle(.primary)
+                    Text(chats.pairing.status?.imageModel ?? "No model on the Hub yet").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if settingImageGeneration { ProgressView() }
+                else if on.wrappedValue { Image(systemName: "checkmark").foregroundStyle(.tint) }
+            }
+        }
+        .disabled(settingImageGeneration)
     }
 
     private func delete(_ id: UUID) async throws {

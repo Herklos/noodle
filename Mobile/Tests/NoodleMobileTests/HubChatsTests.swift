@@ -612,6 +612,25 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(await hub.bot.draft.name == "Scout II")
     }
 
+    /// Ticked among a bot's tools, Image Generation applies at once, as the other tools do, and leaves
+    /// the rest of the bot as the Hub has it.
+    @Test func imageGenerationIsTickedAmongTheToolsAtOnce() async throws {
+        let hub = FakeHub()
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        var scout = try #require(chats.agents.first)
+        scout.draft.name = "Unsaved"
+
+        try await chats.setImageGeneration(true, for: scout)
+
+        #expect(await hub.bot.draft.imageGeneration)
+        #expect(await hub.bot.draft.name == "Scout")
+        #expect(chats.agents.first?.draft.imageGeneration == true)
+        try await chats.setImageGeneration(false, for: scout)
+        #expect(await hub.bot.draft.imageGeneration == false)
+    }
+
     @Test func aRelaunchShowsWhatWasLastSyncedBeforeTheHubAnswers() async throws {
         let hub = FakeHub()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

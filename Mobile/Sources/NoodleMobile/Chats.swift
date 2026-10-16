@@ -2415,6 +2415,7 @@ struct AgentEditor: View {
     @State private var hubSharing: [LinkHubSharing] = []
     @State private var face = AutomaticFace()
     @State private var named = false
+    @State private var editingPicture = false
 
     init(chats: HubChats, agent: LinkBot?, hubs: [HubChats] = [], created: @escaping (HubChats, LinkBot) -> Void = { _, _ in }) {
         _chats = State(initialValue: chats)
@@ -2483,8 +2484,9 @@ struct AgentEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    NavigationLink {
-                        BotPictureEditor(draft: $draft)
+                    // A button rather than a link, so the picture gets no row chevron beside it.
+                    Button {
+                        editingPicture = true
                     } label: {
                         VStack(spacing: 8) {
                             AgentAvatar(draft: draft, size: 88)
@@ -2510,6 +2512,12 @@ struct AgentEditor: View {
                             .accessibilityLabel("Generate Another Name")
                         }
                     }
+                    TextField("Description", text: $draft.publicDescription, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+                Section("Backstory") {
+                    TextField("Who this bot is, its role, tone or priorities", text: $draft.backstory, axis: .vertical)
+                        .lineLimit(4...12)
                 }
                 Section {
                     if agent == nil, hubs.count > 1 {
@@ -2563,20 +2571,14 @@ struct AgentEditor: View {
                         }
                     }
                 }
-                Section {
-                    Toggle(isOn: $draft.imageGeneration) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Image Generation")
-                            Text(chats.pairing.status?.imageModel ?? "No model on the Hub yet").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
                 if let problem {
                     Section { Text(problem).foregroundStyle(.red) }
                 }
                 if let agent {
                     Section {
-                        NavigationLink("Tools") { HubToolsScreen(chats: chats, agent: agent, kind: .connection) }
+                        NavigationLink("Tools") {
+                            HubToolsScreen(chats: chats, agent: agent, kind: .connection, imageGeneration: $draft.imageGeneration)
+                        }
                         NavigationLink("Computers") { HubToolsScreen(chats: chats, agent: agent, kind: .computer) }
                         NavigationLink("Browsers") { HubToolsScreen(chats: chats, agent: agent, kind: .browser) }
                     }
@@ -2619,6 +2621,7 @@ struct AgentEditor: View {
                     }
                 }
             }
+            .navigationDestination(isPresented: $editingPicture) { BotPictureEditor(draft: $draft) }
             .confirmationDialog("Delete \(agent?.draft.name ?? "")?", isPresented: $confirmingDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive, action: delete)
             } message: {
