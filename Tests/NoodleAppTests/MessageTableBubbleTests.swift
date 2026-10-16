@@ -115,6 +115,16 @@ import HubLink
         XCTAssertEqual(card, plain, accuracy: 0.5)
     }
 
+    func testInlineCodeIsSmallerAndDimmerThanTheTextAroundIt() {
+        let rendered = MessageMarkdownCache.render("Run `swift test` now.")
+        let code = rendered.runs.first { $0.inlinePresentationIntent?.contains(.code) == true }
+        XCTAssertEqual(code?.font, .system(size: 11.5, design: .monospaced))
+        XCTAssertEqual(code?.foregroundColor, .primary.opacity(0.65))
+        let prose = rendered.runs.first { $0.inlinePresentationIntent == nil }
+        XCTAssertNil(prose?.font)
+        XCTAssertNil(prose?.foregroundColor)
+    }
+
     func testChangingTheLongMessageLayoutSplitsAnAlreadyRenderedMessage() throws {
         let f = try fixture()
         let message = ChatMessage(conversationID: f.directA.id, author: .agent(f.a.id),

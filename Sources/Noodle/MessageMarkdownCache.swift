@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import NoodleCore
 import HubLink
 
@@ -74,6 +75,14 @@ final class MessageMarkdownCache: @unchecked Sendable {
             return run.range
         }
         for range in unsafeLinkRanges { rendered[range].link = nil }
+        // Mono at the 12.5 pt body size looks larger and heavier than the prose around it.
+        let codeRanges = rendered.runs.compactMap { run in
+            run.inlinePresentationIntent?.contains(.code) == true ? run.range : nil
+        }
+        for range in codeRanges {
+            rendered[range].font = .system(size: 11.5, design: .monospaced)
+            rendered[range].foregroundColor = .primary.opacity(0.65)
+        }
         return rendered
     }
 }

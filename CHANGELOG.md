@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Inline code in messages is a little smaller and dimmer, so it sits more quietly in the text.
+
 ## [0.65.0] - 2026-10-16
 
 ### Added
