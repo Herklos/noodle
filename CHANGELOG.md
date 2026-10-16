@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Bots in several groups keep each group to what its description says it is for, reach people outside a group through a group they share, and stop acknowledging every message.
+
 ## [0.65.1] - 2026-10-16
 
 ### Changed

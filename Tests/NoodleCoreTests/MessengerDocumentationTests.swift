@@ -43,6 +43,16 @@ final class MessengerDocumentationTests: XCTestCase {
         XCTAssertTrue(guidance.contains("assignments.md"))
     }
 
+    /// Bots in several groups need a rule for where each message goes, or they post work where it does not belong.
+    func testMessagesSayWhichConversationToUse() {
+        let guidance = MessengerDeliveryKind.message.reference.guidance
+        XCTAssertTrue(guidance.contains("description"))
+        XCTAssertTrue(guidance.contains("where it was asked"))
+        XCTAssertTrue(guidance.contains("not a member"))
+        XCTAssertTrue(guidance.contains("For Noodle Media:"))
+        XCTAssertTrue(guidance.contains("only when you are addressed"))
+    }
+
     /// Organize moves recurring work out of preferences.md and tidies the rest without dropping anything owed.
     func testOrganizeTidiesTheBotsOwnFiles() {
         let guidance = AgentWakeReason.organize.reference.guidance
