@@ -136,6 +136,7 @@ public struct AppletToolProvider: ToolProvider {
         }
         var request = AppletRequest(operation, sessionID: try uuid("session"))
         request.owner = agent.uuidString.lowercased()
+        request.agentID = agent
         if let value = options["id"] as? String {
             request.noodletID = try UUID(uuidString: value) ?? URL(string: value).map { try NoodletLink.requireID(in: $0) }
             guard request.noodletID != nil else { throw AppletError("Invalid noodlet ID or URL.") }

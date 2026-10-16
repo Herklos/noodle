@@ -83,6 +83,39 @@ import NoodletRuntime
   }
 }
 
+/// Sessions a bot opened and then left running unused. Each is reported once per idle stretch
+/// to the app the bot works through, so the bot can be asked to close it. Sessions a person
+/// opens are never reported.
+struct AppletIdleWatch {
+  static let running: TimeInterval = 30 * 60, unused: TimeInterval = 15 * 60
+  struct Running { var name: String; var watched: Bool }
+  private struct Use { var caller: String; var agentID: UUID; var started: Date; var used: Date; var reported = false }
+  private var uses: [UUID: Use] = [:]
+
+  mutating func started(_ session: UUID, caller: String, agentID: UUID, at date: Date) {
+    uses[session] = Use(caller: caller, agentID: agentID, started: date, used: date)
+  }
+  /// Use by anyone counts, and starts a new stretch.
+  mutating func used(_ session: UUID, at date: Date) {
+    uses[session]?.used = date
+    uses[session]?.reported = false
+  }
+  /// `running` is nil for a session that is not running; seen so, it is forgotten.
+  mutating func due(for caller: String, at now: Date, running: (UUID) -> Running?) -> [AppletIdleNotice] {
+    var due: [AppletIdleNotice] = []
+    for (session, use) in uses.sorted(by: { $0.value.started < $1.value.started }) {
+      guard let state = running(session) else { uses[session] = nil; continue }
+      if state.watched { used(session, at: now); continue }
+      guard use.caller == caller, !use.reported, now.timeIntervalSince(use.started) >= Self.running,
+        now.timeIntervalSince(use.used) >= Self.unused else { continue }
+      uses[session]?.reported = true
+      let minutes = { (since: Date) in Int(now.timeIntervalSince(since) / 60) }
+      due.append(AppletIdleNotice(sessionID: session, agentID: use.agentID, note: "The noodlet \(state.name) (session \(session.uuidString)) has been running for \(minutes(use.started)) minutes and nothing has used it for \(minutes(use.used)). If you no longer need it, close it; its data stays."))
+    }
+    return due
+  }
+}
+
 @MainActor final class AppletRuntime: ObservableObject {
   let library: AppletLibrary
   @Published var sessions: [UUID: AppletSession] = [:]
@@ -91,6 +124,8 @@ import NoodletRuntime
   @Published private(set) var frontPackage: NoodletPackage?
   private var server: AppletConnectionServer?
   private var artifacts: [UUID: (owner: String, url: URL)] = [:]
+  private var idle = AppletIdleWatch()
+  var now: () -> Date = Date.init
   /// Archives still being written, by where they go, and the error of one that could not be.
   private var packing: [URL: Error?] = [:]
   /// Writes a noodlet's files as one archive at `destination`, off the main thread. Replaced in tests.
@@ -173,6 +208,12 @@ import NoodletRuntime
       }
       if let path = request.path, AppletBuildIdentity.document(URL(fileURLWithPath: path)) != .current {
         throw AppletError("Use a .\(AppletBuildIdentity.current.fileExtension) package in this environment.", code: "environment-mismatch")
+      }
+      if request.operation == .idle {
+        var response = AppletResponse()
+        let due = idleNotices(for: identity)
+        if !due.isEmpty { response.idle = due }
+        return response
       }
       // Noodle and Noodle Hub each pass a bot's request on for that bot; asking for nobody,
       // they act for their own person.
@@ -343,6 +384,7 @@ import NoodletRuntime
             throw AppletError("This package is already running for another caller.")
           }
           resolvedSession = existing
+          idle.used(existing.id, at: now())
           if request.operation == .open,
              (request.testClock ?? false) != existing.testClock
               || (request.mode == "headless") != (existing.dataRoot.lastPathComponent == "Testing") {
@@ -357,9 +399,9 @@ import NoodletRuntime
           }
           return response
         }
-        return try await launch(
+        return watched(try await launch(
           package, request: request,
-          owner: owner == "local" ? (library.owner(of: package.url) ?? owner) : owner)
+          owner: owner == "local" ? (library.owner(of: package.url) ?? owner) : owner), for: request, from: identity)
       }
       guard let session = find(request, owner: owner) else {
         if let id = request.sessionID,
@@ -391,6 +433,7 @@ import NoodletRuntime
         throw AppletError("Session not found. Use list, then --session UUID or --id.", code: "session-not-found")
       }
       resolvedSession = session
+      idle.used(session.id, at: now())
       switch request.operation {
       case .surfaceStream:
         guard let socket else { throw AppletError("A live view needs a connection of its own.") }
@@ -445,8 +488,8 @@ import NoodletRuntime
         defer { if place != nil { retire(); objectWillChange.send() } }
         start.width = request.width ?? Int(session.size.width)
         start.height = request.height ?? Int(session.size.height)
-        let restarted = try await launch(
-          NoodletPackage(url: session.package.url), request: start, owner: session.owner, in: place)
+        let restarted = watched(try await launch(
+          NoodletPackage(url: session.package.url), request: start, owner: session.owner, in: place), for: request, from: identity)
         restarted.sessionID.flatMap { sessions[$0] }?.annotation = session.annotation
         return restarted
       case .show:
@@ -521,6 +564,19 @@ import NoodletRuntime
       response.error = error.localizedDescription
       response.errorCode = (error as? AppletError)?.code
       return response
+    }
+  }
+  /// A session a bot started, watched so the bot is asked to close it once left unused.
+  private func watched(_ response: AppletResponse, for request: AppletRequest, from caller: String) -> AppletResponse {
+    if let agent = request.agentID, let id = response.sessionID { idle.started(id, caller: caller, agentID: agent, at: now()) }
+    return response
+  }
+  /// What the app at `caller` is told once: sessions its bots opened and then left unused.
+  private func idleNotices(for caller: String) -> [AppletIdleNotice] {
+    idle.due(for: caller, at: now()) { id in
+      guard let session = sessions[id], session.isActive else { return nil }
+      return .init(name: session.package.manifest.title,
+                   watched: session.place() != nil || session.streamer?.isWatched == true)
     }
   }
   private func savedRecord(_ id: UUID) -> SessionRecord? {

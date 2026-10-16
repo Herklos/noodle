@@ -15,9 +15,11 @@ public enum AppletOperation: String, Codable, CaseIterable, Sendable {
     case archive
     /// One call of a noodlet's page on another device on the data and secrets it keeps here.
     case store
+    /// The sessions the caller's bots opened and then left running unused, each told once.
+    case idle
     public var isSurface: Bool { self == .surfaceStream }
     /// Asked by Noodle and Noodle Hub for a person, never by a bot or the command.
-    public var isAppOnly: Bool { [.surfaceStream, .archive, .store].contains(self) }
+    public var isAppOnly: Bool { [.surfaceStream, .archive, .store, .idle].contains(self) }
     public var timeout: Int {
         switch self {
         case .build, .open, .restart, .archive: return 180
@@ -70,6 +72,9 @@ public struct AppletRequest: Codable, Sendable {
     public var includePreview: Bool?
     public var path: String?
     public var owner: String?
+    /// The bot whose own command this is, named by Noodle or Noodle Hub, never by the bot. Unlike
+    /// `owner`, it grants nothing: it is who is asked to close a session left running unused.
+    public var agentID: UUID?
     public var files: [String: Data]?
     public var text: String?
     public var target: String?
@@ -216,6 +221,8 @@ public struct AppletResponse: Codable, Sendable {
     /// Where a session's page and its window are while on screen, in screen coordinates.
     public var screenFrame: CGRect?
     public var windowFrame: CGRect?
+    /// On `idle`, sessions the caller's bots opened and then left running unused.
+    public var idle: [AppletIdleNotice]?
     public init(error: String? = nil, errorCode: String? = nil) {
         self.error = error
         self.errorCode = errorCode
@@ -223,6 +230,16 @@ public struct AppletResponse: Codable, Sendable {
     public func checked() throws -> Self {
         if let error { throw AppletError(error, code: errorCode) }
         return self
+    }
+}
+
+/// A session a bot opened and then left running unused, with the note the bot is given.
+public struct AppletIdleNotice: Codable, Equatable, Sendable {
+    public var sessionID: UUID
+    public var agentID: UUID
+    public var note: String
+    public init(sessionID: UUID, agentID: UUID, note: String) {
+        self.sessionID = sessionID; self.agentID = agentID; self.note = note
     }
 }
 

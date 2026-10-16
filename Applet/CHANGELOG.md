@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Tells Noodle and Noodle Hub about noodlets their bots opened and then left unused for 15 minutes, so each bot is asked to close its own. Noodlets you open are never reported.
+
 ## [0.32.1] - 2026-10-16
 
 ### Changed

@@ -77,7 +77,7 @@ public enum AppletGuidance {
         case .restart: "Stop the old session and reload the package at the same location; returns a new sessionID."
         case .present: "Capture the running noodlet as its preview and attach its noodlet:// URL to --conversation UUID. Nothing else sets the preview: present once the noodlet shows something worth seeing, past any loading screen. Shares the live package by reference; inspect content before sharing."
         // Never a bot's command: Noodle and Noodle Hub show noodlets to people and read captures with these.
-        case .show, .artifact, .surfaceStream, .archive, .store: ""
+        case .show, .artifact, .surfaceStream, .archive, .store, .idle: ""
         }
     }
     /// What a bot reads before using the applet tool.

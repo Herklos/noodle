@@ -72,6 +72,9 @@ import NoodleRuntime
             bots?.synchronizeToolSkills()
         }
         try? tools.register(AppletToolProvider { [applets] in try await applets.tool($0) })
+        applets.onIdle = { [runtime = self.runtime, repository = self.repository] notices in
+            for notice in notices { runtime.wake(notice.agentID, note: notice.note, repository: repository) }
+        }
         // The models are the Hub's, for every person's bots; each bot is granted the tool on its own.
         imageGeneration = ImageGenerationController(repository: repository)
         imageGeneration.onAssignmentsChange = { [weak bots] granted in

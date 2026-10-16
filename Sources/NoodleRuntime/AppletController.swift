@@ -17,6 +17,8 @@ import Observation
     @ObservationIgnored private let surface: (@Sendable (AppletRequest) async throws -> SurfaceSocket)?
     /// The bots granted the applet tool: every one of them while Noodle Applet is installed.
     @ObservationIgnored public var onGrantsChange: (([UUID: Set<String>]) -> Void)?
+    /// Hands on noodlets bots opened and then left running unused, so each bot is asked to close its own.
+    @ObservationIgnored public var onIdle: (([AppletIdleNotice]) -> Void)?
     /// `connection` and `surface` reach Noodle Applet on this Mac unless given.
     public init(
         connection: (@Sendable (AppletRequest) async throws -> AppletResponse)? = nil,
@@ -32,9 +34,12 @@ import Observation
         refreshSkills(force: true)
         if monitor == nil, !agents.isEmpty {
             monitor = Task { [weak self] in
+                var round = 0
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(5))
                     self?.refreshSkills()
+                    round += 1
+                    if round.isMultiple(of: 12) { await self?.checkIdle() }
                 }
             }
         }
@@ -47,6 +52,15 @@ import Observation
         guard force || now != installed else { return }
         installed = now
         onGrantsChange?(now ? Dictionary(uniqueKeysWithValues: agents.map { ($0, [AppletToolGrant.id]) }) : [:])
+    }
+    /// Never launches Noodle Applet: a noodlet only runs while it is open.
+    public func checkIdle() async {
+        let request = AppletRequest(.idle)
+        let response = if let connection { try? await connection(request) } else {
+            try? await AppletConnection.call(request, socket: AppletConnection.socketURL(), team: AppletConnection.signingTeam())
+        }
+        guard let idle = try? response?.checked().idle, !idle.isEmpty else { return }
+        onIdle?(idle)
     }
     public func openLibrary() async throws {
         guard

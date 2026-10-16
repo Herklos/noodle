@@ -8,6 +8,7 @@ All notable changes to Noodle are documented here, following
 
 ### Changed
 
+- A bot that opens a noodlet and then leaves it unused for 15 minutes is asked to close it, as it already is for a computer it leaves running.
 - Bots in several groups keep each group to what its description, or else its name, says it is for, reach people outside a group through a group they share, and stop acknowledging every message.
 
 ## [0.65.1] - 2026-10-16

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A bot that opens a noodlet and then leaves it unused for 15 minutes is asked to close it, as it already is for a computer it leaves running.
+
 ## [0.35.1] - 2026-10-16
 
 ### Fixed

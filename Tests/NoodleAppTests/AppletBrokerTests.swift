@@ -175,6 +175,25 @@ import XCTest
         let sent = await recorder.requests
         XCTAssertTrue(sent.isEmpty)
     }
+
+    /// What Applet says bots left running unused is handed on, so each bot is asked to close its own.
+    func testNoodletsBotsLeftRunningAreHandedOn() async throws {
+        let recorder = AppletRequestRecorder()
+        let notice = AppletIdleNotice(sessionID: UUID(), agentID: UUID(), note: "Close it.")
+        let controller = AppletController(connection: { request in
+            _ = await recorder.respond(request)
+            var response = AppletResponse()
+            response.idle = [notice]
+            return response
+        })
+        var handed: [[AppletIdleNotice]] = []
+        controller.onIdle = { handed.append($0) }
+        await controller.checkIdle()
+        XCTAssertEqual(handed, [[notice]])
+        let sent = await recorder.requests
+        XCTAssertEqual(sent.map(\.operation), [.idle])
+        XCTAssertNil(sent.first?.owner, "Asked for the app, not for a bot")
+    }
 }
 private actor ConcurrencyTracker {
     private var current = 0

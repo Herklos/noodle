@@ -84,6 +84,7 @@ final class AppletToolProviderTests: XCTestCase {
         XCTAssertEqual(sent.first?.path, canonical(own))
         // The bot is the one the broker identified, whatever the arguments say.
         XCTAssertEqual(sent.first?.owner, kai.id.uuidString.lowercased())
+        XCTAssertEqual(sent.first?.agentID, kai.id, "Applet asks this bot to close what it leaves running")
         XCTAssertEqual(sent.first?.mode, nil)
     }
 

@@ -287,6 +287,9 @@ final class NoodleStore {
             tools.synchronizeSkills()
         }
         try? toolProviders.register(AppletToolProvider { [applets] in try await applets.tool($0) })
+        applets.onIdle = { [runtime = self.runtime, repository = self.repository] notices in
+            for notice in notices { runtime.wake(notice.agentID, note: notice.note, repository: repository) }
+        }
         noodletAnnotations = NoodletAnnotations(applets: applets)
         harnessProfiles = HarnessProfilesController(store: self.repository.harnessProfiles)
         thisMac = ThisMacHub(repository: self.repository, runtime: self.runtime, applets: applets, profiles: harnessProfiles,
