@@ -10,14 +10,9 @@ on:
       - '!website/**'
       - '!Scenarios/**'
       - '!.github/workflows/website.yml'
+  # Every pull request runs, so the required CI passed check always reports; the changes job
+  # below skips the app tests when only the paths ignored on push changed.
   pull_request:
-    paths:
-      - '**'
-      - '!**.md'
-      - '!docs/**'
-      - '!website/**'
-      - '!Scenarios/**'
-      - '!.github/workflows/website.yml'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +24,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+      - id: changes
+        name: Look for changes outside the paths ignored on push
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] || ! git rev-parse --verify --quiet HEAD^1 > /dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^1 HEAD | grep -qvE '\.md$|^docs/|^website/|^Scenarios/|^\.github/workflows/website\.yml$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   workflow-lint:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +76,8 @@ jobs:
         run: test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = false
 
   checks:
-    needs: [workflow-lint, versions]
+    needs: [workflow-lint, versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -77,7 +93,8 @@ jobs:
         run: zsh scripts/verify-icons.sh
 
   test-noodle:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -108,7 +125,8 @@ jobs:
           retention-days: 30
 
   test-shared:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -131,7 +149,8 @@ jobs:
         run: swift test --disable-sandbox --package-path Shared/ExternalTools --scratch-path .build/external-tools
 
   test-noodle-macos27:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     # The image releases use: macOS 27 with Xcode 27, so the Apple harness is compiled in and runs.
     runs-on: xcode-27
     timeout-minutes: 30
@@ -160,7 +179,8 @@ jobs:
           print 'macOS 27 harness build, Metal shaders, and regression tests passed. Live inference remains an explicit local opt-in.' >> "$GITHUB_STEP_SUMMARY"
 
   test-computer:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     # Windows computers use macOS 27's custom Virtio devices, which only Xcode 27's SDK has.
     runs-on: xcode-27
     timeout-minutes: 30
@@ -176,7 +196,8 @@ jobs:
         run: swift test --disable-sandbox --package-path Computer/LocalMac --scratch-path .build/localmac
 
   test-applet:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -250,7 +271,8 @@ jobs:
         run: zsh Applet/scripts/test-rendering.sh ".build/Noodle Applet.app"
 
   test-bridge:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 10
     steps:
@@ -259,7 +281,8 @@ jobs:
         run: swift test --disable-sandbox --package-path Computer/Bridge
 
   test-browser:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -270,7 +293,8 @@ jobs:
         run: swift test --disable-sandbox --package-path Browser --scratch-path .build/browser
 
   test-hub:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -283,7 +307,8 @@ jobs:
         run: swift test --disable-sandbox --filter HubCoreTests --scratch-path .build/hub-core
 
   test-mobile:
-    needs: [versions]
+    needs: [versions, changes]
+    if: needs.changes.outputs.code == 'true'
     # The phone app uses iOS 27 APIs, which only Xcode 27's SDK has.
     runs-on: xcode-27
     timeout-minutes: 30
@@ -293,6 +318,17 @@ jobs:
           lfs: true
       - name: Test Mobile on an iPhone simulator
         run: zsh scripts/mobile.sh test
+
+  # The one check the main branch ruleset requires: every check above passed or was skipped.
+  ci-passed:
+    name: CI passed
+    needs: [changes, workflow-lint, versions, checks, test-noodle, test-shared, test-noodle-macos27, test-computer, test-applet, test-bridge, test-browser, test-hub, test-mobile]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every check to pass or be skipped
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
 
   # Preparation signs and notarizes alongside the tests; nothing is tagged or published until
   # the tag job below has every selected test.
