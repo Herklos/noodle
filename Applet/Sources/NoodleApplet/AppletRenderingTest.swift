@@ -182,12 +182,24 @@ import WebKit
     guard let recordedWeb = runtime.sessions[recorded.sessionID!]?.web else { throw AppletError("Recorded session missing") }
     let recordedTarget = watchedTarget + ["--session", recorded.sessionID!.uuidString]
     _ = try await call(["record", "start", "--duration", "5"] + recordedTarget)
-    try await Task.sleep(for: .milliseconds(300))
-    let recordedTicks = Int(try await recordedWeb.evaluate("return ticks")) ?? 0
+    // Filmed, the page moves on only as its frames are taken, so measure once filming has begun.
+    let recordedStart = Int(try await recordedWeb.evaluate("return ticks")) ?? 0
+    var recordedTicks = recordedStart, recordedWait = 0
+    while recordedTicks == recordedStart && recordedWait < 3000 {
+      try await Task.sleep(for: .milliseconds(100))
+      recordedWait += 100
+      recordedTicks = Int(try await recordedWeb.evaluate("return ticks")) ?? 0
+    }
     try await Task.sleep(for: .milliseconds(500))
     let recordedMoved = (Int(try await recordedWeb.evaluate("return ticks")) ?? 0) - recordedTicks
     let recordedVisibility = try await recordedWeb.evaluate("return document.visibilityState")
-    print("INFO recorded background: \(recordedMoved) frames in 500 ms, visibility \(recordedVisibility)")
+    print("INFO recorded background: \(recordedMoved) frames in 500 ms after \(recordedWait) ms, visibility \(recordedVisibility)")
+    if recordedMoved < 5, let (data, _) = try? recordedWeb.log.read(offset: 0) {
+      // How the recording went, from the session's log: filmed or not, and how it drew.
+      for line in String(decoding: data, as: UTF8.self).split(separator: "\n") where line.contains("\"recording\"") {
+        print("INFO \(line)")
+      }
+    }
     try require(recordedMoved >= 5 && recordedVisibility == "\"visible\"", "A background noodlet does not animate while recorded")
     try require(recordedWeb.window.alphaValue == 0, "A recorded background noodlet became visible on this Mac")
     _ = try await call(["record", "stop", "--output", root.appendingPathComponent("recorded.mp4").path] + recordedTarget)
