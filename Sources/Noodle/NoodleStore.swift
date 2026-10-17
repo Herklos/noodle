@@ -1252,9 +1252,13 @@ final class NoodleStore {
     }
 
     /// The bots a group kept on `hub` may have, or on this Mac when nil. Groups never mix the two.
+    /// A group is made in a space, so the shown space's bots come first.
     func groupCandidates(on hub: HubMirror?) -> [AgentRecord] {
-        if let hub { return agents.filter { hub.localAgentIDs.contains($0.id) && hub.owner(ofAgent: $0.id) == nil } }
-        return agents.filter { !runtime.remoteAgentIDs.contains($0.id) }
+        let candidates = hub.map { hub in agents.filter { hub.localAgentIDs.contains($0.id) && hub.owner(ofAgent: $0.id) == nil } }
+            ?? agents.filter { !runtime.remoteAgentIDs.contains($0.id) }
+        guard let space = shownSpaceConversationIDs else { return candidates }
+        let inSpace = Set(conversations.filter { $0.kind == .direct && space.contains($0.id) }.flatMap(\.participantIDs))
+        return candidates.filter { inSpace.contains($0.id) } + candidates.filter { !inSpace.contains($0.id) }
     }
 
     /// A group's folders reach its bots' sandbox only when they launch.

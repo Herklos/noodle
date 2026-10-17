@@ -90,6 +90,25 @@ final class HubHarnessChoiceTests: XCTestCase {
 
 /// A space the person makes gathers bots and groups from any Hub and this Mac, with pins of its own.
 @MainActor final class CustomSpaceStoreTests: XCTestCase {
+    /// A group is made or filled in a space, so that space's bots are offered before the others.
+    func testGroupCandidatesOfferTheShownSpacesBotsFirst() throws {
+        let f = try StoreFixture()
+        defer { f.cleanUp() }
+        UserDefaults.standard.removeObject(forKey: NoodleStore.spaceKey)
+        addTeardownBlock { UserDefaults.standard.removeObject(forKey: NoodleStore.spaceKey) }
+        let store = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
+        let all = store.groupCandidates(on: nil).map(\.id)
+        let last = try XCTUnwrap(all.last)
+        XCTAssertEqual(Set(all), [f.a.id, f.b.id])
+
+        let space = try XCTUnwrap(store.addSpace(named: "Work"))
+        store.setMember(true, of: space.id, conversationID: last == f.a.id ? f.directA.id : f.directB.id)
+        XCTAssertEqual(store.groupCandidates(on: nil).map(\.id), all.reversed())
+
+        store.showSpace(nil)
+        XCTAssertEqual(store.groupCandidates(on: nil).map(\.id), all)
+    }
+
     func testACustomSpaceGathersBotsFromAnywhereWithItsOwnPins() throws {
         let f = try StoreFixture()
         defer { f.cleanUp() }
