@@ -5,6 +5,9 @@ import NoodleCore
 /// intentionally ignored: Noodle agents communicate through the Messenger CLI.
 @MainActor
 public final class ClaudeAgentProcess: AgentRuntimeProcess {
+    /// How long an urgent message may wait for the running turn to read it.
+    private static let steeringGracePeriod: Duration = .seconds(30)
+
     public let configuration: AgentRecord
     private let executableURL: URL
     private let workspaceURL: URL
@@ -33,6 +36,9 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
     private var backgroundTaskCount = 0
     private var interruptRequested = false
     private var interruptRequestID: String?
+    /// An urgent message written into the running turn that the turn has not read yet.
+    private var steeringNotificationID: UUID?
+    private var steeringTimeout: Task<Void, Never>?
     private var startupTimeout: Task<Void, Never>?
     private var interruptTimeout: Task<Void, Never>?
     private var intentionallyStopped = false
@@ -159,6 +165,7 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         interruptTimeout?.cancel()
         interruptRequestID = nil
         interruptRequested = false
+        endSteering()
         terminationReported = true
         running = false
         turnIsActive = false
@@ -214,26 +221,79 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
     private func sendPendingNotificationIfPossible() {
         guard notificationPending, running, interruptRequestID == nil else { return }
         if turnIsActive {
-            guard notifications.isImmediate, !interruptRequested, snapshot.phase == .working, let connection else { return }
-            let id = UUID().uuidString
-            interruptRequestID = id
-            interruptRequested = true
-            do {
-                let request: [String: Any] = ["type": "control_request", "request_id": id,
-                                             "request": ["subtype": "interrupt"]]
-                connection.write(try JSONSerialization.data(withJSONObject: request) + Data([10]))
-                trace.record(.turnInterruptRequested)
-                interruptTimeout = Task { [weak self] in
-                    do { try await self?.sleep(.seconds(10)) } catch { return }
-                    guard let self, self.interruptRequested || self.interruptRequestID != nil else { return }
-                    self.reportUnexpectedTermination("Claude Code did not finish interrupting its turn.")
-                }
-            } catch { reportUnexpectedTermination(error.localizedDescription) }
+            guard notifications.isImmediate, !interruptRequested, steeringNotificationID == nil,
+                  snapshot.phase == .working else { return }
+            steer()
             return
         }
         guard snapshot.phase == .ready || backgroundTaskCount > 0 else { return }
         notifications.take()
         startTurn(reason: .inboxChanged)
+    }
+
+    /// An interrupt ends the turn like Esc and also cancels the background tasks it
+    /// started, so an urgent message joins the running turn instead. Claude Code
+    /// hands input written mid-turn to the model at its next tool round, and the
+    /// bot decides itself whether to stop what it has running.
+    private func steer() {
+        guard let connection, let notificationID = notifications.take() else { return }
+        do { connection.write(try Self.userMessage(AgentWakeReason.inboxChanged.eventText)) }
+        catch {
+            notifications.restore(notificationID)
+            reportUnexpectedTermination(error.localizedDescription)
+            return
+        }
+        steeringNotificationID = notificationID
+        trace.record(.inboxSteerSubmitted)
+        steeringTimeout = Task { [weak self] in
+            do { try await self?.sleep(Self.steeringGracePeriod) } catch { return }
+            guard let self, self.steeringNotificationID == notificationID else { return }
+            self.endSteering()
+            // A turn stuck in one long step never reads the message. Interrupting it
+            // is harmless only while nothing runs in the background; the message then
+            // gets a turn of its own. Otherwise it waits in Claude Code for the bot.
+            if self.backgroundTaskCount == 0 {
+                self.notifications.restore(notificationID)
+                self.requestInterrupt()
+            } else {
+                self.sendPendingNotificationIfPossible()
+            }
+        }
+    }
+
+    private func endSteering() {
+        steeringTimeout?.cancel()
+        steeringTimeout = nil
+        steeringNotificationID = nil
+    }
+
+    private func requestInterrupt() {
+        guard running, turnIsActive, !interruptRequested, interruptRequestID == nil, let connection else { return }
+        let id = UUID().uuidString
+        interruptRequestID = id
+        interruptRequested = true
+        do {
+            let request: [String: Any] = ["type": "control_request", "request_id": id,
+                                         "request": ["subtype": "interrupt"]]
+            connection.write(try JSONSerialization.data(withJSONObject: request) + Data([10]))
+            trace.record(.turnInterruptRequested)
+            interruptTimeout = Task { [weak self] in
+                do { try await self?.sleep(.seconds(10)) } catch { return }
+                guard let self, self.interruptRequested || self.interruptRequestID != nil else { return }
+                self.reportUnexpectedTermination("Claude Code did not finish interrupting its turn.")
+            }
+        } catch { reportUnexpectedTermination(error.localizedDescription) }
+    }
+
+    private static func userMessage(_ text: String) throws -> Data {
+        let object: [String: Any] = [
+            "type": "user",
+            "message": [
+                "role": "user",
+                "content": [["type": "text", "text": text]]
+            ]
+        ]
+        return try JSONSerialization.data(withJSONObject: object) + Data([0x0A])
     }
 
     private func startTurn(reason: AgentWakeReason) {
@@ -242,15 +302,8 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             return
         }
         trace.begin(reason: reason)
-        let object: [String: Any] = [
-            "type": "user",
-            "message": [
-                "role": "user",
-                "content": [["type": "text", "text": reason.eventText]]
-            ]
-        ]
         do {
-            let data = try JSONSerialization.data(withJSONObject: object) + Data([0x0A])
+            let data = try Self.userMessage(reason.eventText)
             try turnRecovery.begin()
             connection.write(data)
             trace.record(.wakeSubmitted)
@@ -272,6 +325,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         }
         if ownSession, turnIsActive || backgroundTaskCount > 0 {
             onActivity(message)
+        }
+        // Tool results going back to the model carry the steered message with them.
+        if ownSession, type == "user", steeringNotificationID != nil, message["parent_tool_use_id"] as? String == nil {
+            endSteering()
+            sendPendingNotificationIfPossible()
         }
         if ownSession, type == "system", message["subtype"] as? String == "background_tasks_changed" {
             backgroundTaskCount = (message["tasks"] as? [Any])?.count ?? 0
@@ -319,6 +377,9 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             return
         }
         guard turnIsActive else { return }
+        // A steered message the turn did not read stays with Claude Code, which
+        // answers it in a turn of its own that beginSelfStartedTurn follows.
+        endSteering()
         let failed = message["is_error"] as? Bool == true
         let detail = failed ? (message["result"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
         if let detail, ClaudeProtocol.isAuthenticationFailure(detail) {
@@ -400,6 +461,7 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         connectionID = nil
         startupTimeout?.cancel()
         interruptTimeout?.cancel()
+        endSteering()
         terminationReported = true
         running = false
         turnIsActive = false
