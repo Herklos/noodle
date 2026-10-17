@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-10-17
+
 ### Fixed
 
 - Closed sheets and Settings windows are freed, so the app no longer slows down the longer it runs.

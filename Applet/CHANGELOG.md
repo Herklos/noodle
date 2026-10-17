@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-17
+
 ### Changed
 
 - Recordings of noodlets play smoothly, even when the noodlet is out of sight or the Mac is busy. Each frame is now filmed one at a time, so moving things no longer stutter, jump or show the same frame twice. A noodlet that is slow to draw takes a little longer to record instead of losing frames.
