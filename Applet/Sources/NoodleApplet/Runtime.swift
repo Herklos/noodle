@@ -52,6 +52,40 @@ import NoodletRuntime
     if let web { return try await web.snapshot() }
     throw AppletError("The noodlet has no running view.")
   }
+  /// A recording's frame, `width` pixels wide.
+  func frame(width: CGFloat) async throws -> NSImage {
+    guard state == "running" else {
+      throw AppletError("Session \(id) (\(mode)) is \(state).", code: "session-not-running")
+    }
+    if let web { return try await web.frame(width: width) }
+    throw AppletError("The noodlet has no running view.")
+  }
+  /// How a recording films this noodlet frame by frame on a clock of its own. A test clock
+  /// belongs to step, so a noodlet on one is recorded as it runs, as is a page the film cannot
+  /// take over.
+  func film() -> AppletRecording.Film? {
+    guard !testClock else {
+      log.append("recording", "Recording in real time: the noodlet runs on a test clock.")
+      return nil
+    }
+    return AppletRecording.Film(
+      begin: { [weak self] in
+        guard let self, let web = self.web else { return false }
+        do {
+          try await web.beginFilm(framesPerSecond: AppletRecording.framesPerSecond)
+          self.log.append("recording", "Filming frame by frame on the noodlet's own clock.")
+          return true
+        } catch {
+          self.log.append("recording", "Recording in real time: \(error.localizedDescription)")
+          return false
+        }
+      },
+      advance: { [weak self] in
+        guard let web = self?.web else { throw AppletError("Session ended.") }
+        try await web.advanceFilm()
+      },
+      end: { [weak self] in await self?.web?.endFilm() })
+  }
   /// Hands the noodlet's sound to the recording. A noodlet that cannot be heard
   /// still records a video; the log says why it has no sound.
   func listen(_ recording: AppletRecording) async {
@@ -518,12 +552,13 @@ struct AppletIdleWatch {
           at: directory, withIntermediateDirectories: true)
         let recording = try AppletRecording(
           url: directory.appendingPathComponent("\(UUID().uuidString).mp4"),
-          size: session.size)
+          size: session.size, film: session.film())
         session.recording = recording
+        let width = recording.size.width
         recording.start(
           snapshot: { [weak session] in
             guard let session else { throw AppletError("Session ended.") }
-            return try await session.snapshot()
+            return try await session.frame(width: width)
           }, duration: request.duration ?? 30)
         await session.listen(recording)
         session.log.append("recording", "Started capture (MP4, 30 fps, with the noodlet's sound).")
