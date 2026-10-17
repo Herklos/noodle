@@ -238,6 +238,48 @@ enum PickedFiles {
     }
 }
 
+/// A group's picture as iOS shows it, cut to a circle in the share sheet: the bots sit wholly inside
+/// that circle on a disc of their own, instead of reaching past it as in `GroupAvatar` and being cut off.
+struct SuggestedGroupAvatar: View {
+    /// The ring around each bot, as a fraction of the picture, so overlapping bots stay apart.
+    static let border: CGFloat = 0.03
+    let faces: [BotFace]
+    let size: CGFloat
+
+    var body: some View {
+        let shown = Array(faces.prefix(3))
+        ZStack {
+            Circle().fill(Color(.systemGray5))
+            ForEach(Array(shown.enumerated()), id: \.offset) { index, face in
+                AgentAvatar(face: face, size: size * Self.scale(shown.count))
+                    .overlay { Circle().stroke(Color(.systemGray5), lineWidth: size * Self.border) }
+                    .offset(Self.offset(index, of: shown.count, size: size))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    static func scale(_ count: Int) -> CGFloat {
+        switch count {
+        case 1: 0.8
+        case 2: 0.56
+        default: 0.5
+        }
+    }
+
+    /// Each picture's farthest edge, ring included, stays within 0.485 of the centre, inside the 0.5 that iOS keeps.
+    static func offset(_ index: Int, of count: Int, size: CGFloat) -> CGSize {
+        switch (count, index) {
+        case (1, _): .zero
+        case (2, 0): CGSize(width: -size * 0.19, height: 0)
+        case (2, _): CGSize(width: size * 0.19, height: 0)
+        case (_, 0): CGSize(width: -size * 0.17, height: -size * 0.12)
+        case (_, 1): CGSize(width: size * 0.17, height: -size * 0.12)
+        default: CGSize(width: 0, height: size * 0.2)
+        }
+    }
+}
+
 /// A bot's picture, or a group's.
 struct ConversationAvatar: View {
     let target: ShareTarget
@@ -271,7 +313,7 @@ struct ConversationAvatar: View {
                                          speakableGroupName: target.isGroup ? INSpeakableString(spokenPhrase: target.name) : nil,
                                          conversationIdentifier: target.key.identifier, serviceName: nil, sender: sender,
                                          attachments: nil)
-        if target.isGroup, let image = image(ConversationAvatar(target: target, size: 64)) {
+        if target.isGroup, let image = image(SuggestedGroupAvatar(faces: target.faces, size: 64)) {
             intent.setImage(image, forParameterNamed: \.speakableGroupName)
         }
         return intent

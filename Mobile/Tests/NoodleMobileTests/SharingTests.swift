@@ -65,4 +65,16 @@ import UniformTypeIdentifiers
         #expect(reply.content == "Done")
         #expect(reply.conversationIdentifier == group.key.identifier)
     }
+
+    /// iOS cuts a suggested group's picture to a circle, so every bot, ring included, stays inside it.
+    @Test func aSuggestedGroupKeepsItsBotsInsideTheCircle() {
+        for count in 1...3 {
+            for index in 0..<count {
+                let offset = SuggestedGroupAvatar.offset(index, of: count, size: 1)
+                let reach = (offset.width * offset.width + offset.height * offset.height).squareRoot()
+                    + SuggestedGroupAvatar.scale(count) / 2 + SuggestedGroupAvatar.border / 2
+                #expect(reach <= 0.5, "bot \(index + 1) of \(count) reaches \(reach)")
+            }
+        }
+    }
 }

@@ -2209,12 +2209,15 @@ struct AgentProfile: View {
                     .padding(.vertical, 6)
                     .background(.quaternary, in: Capsule())
             }
-            ScrollView {
-                let about = bot.draft.publicDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-                Text(about.isEmpty ? "No description yet." : about)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+            let about = bot.draft.publicDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            let description = Text(about.isEmpty ? "No description yet." : about)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+            // A short description takes only its own height, so the buttons sit beneath it; a long one scrolls.
+            ViewThatFits(in: .vertical) {
+                description
+                ScrollView { description }
             }
             .frame(maxHeight: 120)
             HStack(spacing: 12) {
@@ -2228,7 +2231,8 @@ struct AgentProfile: View {
                     Button { choose(action) } label: {
                         VStack(spacing: 6) {
                             Image(systemName: symbol).font(.system(size: 18)).frame(height: 20)
-                            Text(title).font(.caption)
+                            // One line each, so no title breaks into "Mes-sage" and every button is the same height.
+                            Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.7)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -2236,6 +2240,7 @@ struct AgentProfile: View {
                 }
             }
             .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 16))
             .controlSize(.large)
         }
         .padding(24)

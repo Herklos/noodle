@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A bot's profile in a group shows Reply, Message, Call and Edit as matching rounded buttons on one line, instead of uneven ovals with Message split over two lines, and they sit right under a short description.
+- Groups suggested in the share sheet show their bots whole inside the round picture, instead of with their edges cut off.
+
+### What to Test
+
+- In a group, tap a bot's picture with no description, then one with a long description: the four buttons are the same size with one-line titles, sit just below a short description, and a long description scrolls.
+- Send a message in a group with two bots and one with three, then share a photo from Photos: both groups' suggestions show every bot whole inside the circle. Suggestions update after the next message in each group.
+
 ## [0.36.0] - 2026-10-17
 
 ### Added
