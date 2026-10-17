@@ -37,9 +37,18 @@ struct NoodleMobileApp: App {
             // Only a phone with no other Hub is welcomed; the welcome makes the team only for someone with no bots there.
             .onChange(of: hubs.hubs.count) { before, after in
                 if before == 0, after == 1 { welcoming = hubs.hubs.first }
+                // With the last Hub left the list is gone, and with it what the widgets show.
+                if after == 0 { BotWidgetPublisher.shared.publish(.init()) }
             }
-            // An invitation link opened from Messages, Mail or a QR code in the Camera app.
-            .onOpenURL { url in hubs.offer(url.absoluteString) }
+            // A bot tapped in a widget opens like a tapped notification. Any other link is an invitation, opened
+            // from Messages, Mail or a QR code in the Camera app.
+            .onOpenURL { url in
+                if let link = WidgetLink(url: url) {
+                    if let route = CurrentHub.route(to: link, in: hubs.hubs) { delegate.opening = route }
+                } else {
+                    hubs.offer(url.absoluteString)
+                }
+            }
             // A conversation iOS suggested, as in Spotlight, opens like a tapped notification.
             .onContinueUserActivity(NSStringFromClass(INSendMessageIntent.self)) { activity in
                 guard let key = ((activity.interaction?.intent as? INSendMessageIntent)?.conversationIdentifier)
@@ -77,4 +86,10 @@ private struct NotificationKey: Equatable {
 
     /// Its space, by the Hub's key, so the choice is kept when the Hub is left and joined again.
     static func space(of pairing: HubPairing) -> String { pairing.hub?.key.x963.base64EncodedString() ?? name(of: pairing) }
+
+    /// A widget's bot on a Hub this phone is in; nil once the Hub is left.
+    static func route(to link: WidgetLink, in pairings: [HubPairing]) -> NotificationRoute? {
+        pairings.first { space(of: $0) == link.hub }
+            .map { NotificationRoute(topic: PushTopic.topic(for: $0), conversation: link.conversationID) }
+    }
 }

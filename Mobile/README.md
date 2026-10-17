@@ -18,6 +18,11 @@ To send something from another app, such as a screenshot, a photo or a page, tap
 and choose Noodle, then a bot or group. The ones you talk to most also show at the top
 of the share sheet.
 
+Noodle's widgets open a chat in one tap. Bot shows one bot on the Home Screen or the
+Lock Screen; Bots shows the bots of All, a Hub or a space you made. Touch and hold a
+widget and choose Edit Widget to pick the bot or space. Widgets follow your bots each
+time you open Noodle.
+
 A game noodlet plays on a TV while Screen Mirroring is on, or while a TV is connected by
 cable, and the phone becomes its controller. Show on iPhone brings it back to the phone.
 

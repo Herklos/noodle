@@ -570,6 +570,36 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(!chats.isPinned(scout))
     }
 
+    /// The widgets offer each space's bots as the list orders them, with the Hub's pins in its space and a space's own
+    /// in one the person made. Groups are left out. A widget's bot opens on its Hub, named by its key.
+    @Test func widgetsListTheBotsOfEachSpace() async throws {
+        let hub = FakeHub()
+        _ = await hub.addGroup(named: "House", saying: "Hi all")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let atlas = try await chats.create(LinkBotDraft(name: "Atlas", provider: "codex"))
+        try await chats.apply(.pinChanged(conversationID: scout.conversationID, pinnedAt: Date()))
+        let work = CustomSpace(name: "Work", members: [chats.spaceMember(of: scout), chats.spaceMember(of: atlas)],
+                               pins: [chats.spaceMember(of: atlas)])
+
+        let source = BotWidgetPublisher.source(chats: [chats], spaces: [work])
+
+        let key = CurrentHub.space(of: chats.pairing)
+        let id = { (bot: LinkBot) in WidgetBot.id(hub: key, conversationID: bot.conversationID) }
+        // In All the Hub's pins are not this phone's, so the newest comes first.
+        #expect(source.bots.map(\.id) == [id(atlas), id(scout)])
+        #expect(source.bots.map(\.face.name) == ["Atlas", "Scout"])
+        #expect(source.bots.allSatisfy { $0.hubName == "Studio" })
+        #expect(source.spaces == [WidgetSpace(id: key, name: "Studio", bots: [id(scout), id(atlas)]),
+                                  WidgetSpace(id: work.id.uuidString, name: "Work", bots: [id(atlas), id(scout)])])
+
+        let route = CurrentHub.route(to: WidgetLink(hub: key, conversationID: atlas.conversationID), in: [chats.pairing])
+        #expect(route == NotificationRoute(topic: PushTopic.topic(for: chats.pairing), conversation: atlas.conversationID))
+        #expect(CurrentHub.route(to: WidgetLink(hub: "left", conversationID: atlas.conversationID), in: [chats.pairing]) == nil)
+    }
+
     /// The title menu ticks All once the chosen space is gone: deleted on another device, or its Hub left.
     @Test func aSpaceGoneLeavesAllTicked() {
         let work = CustomSpace(name: "Work")

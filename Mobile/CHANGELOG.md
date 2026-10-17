@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Home Screen widgets for your bots. Bot shows the one you choose, with its picture and name, also on the Lock Screen. Bots shows the bots of All or of a space you choose. Tap a bot to open your chat with it.
+
+### Changed
+
+- Tapping a notification opens its conversation even when another space is shown.
+
 ### Fixed
 
 - A bot's profile in a group shows Reply, Message, Call and Edit as matching rounded buttons on one line, instead of uneven ovals with Message split over two lines, and they sit right under a short description.
@@ -11,6 +19,10 @@
 
 - In a group, tap a bot's picture with no description, then one with a long description: the four buttons are the same size with one-line titles, sit just below a short description, and a long description scrolls.
 - Send a message in a group with two bots and one with three, then share a photo from Photos: both groups' suggestions show every bot whole inside the circle. Suggestions update after the next message in each group.
+- Open Noodle, then add the small Bot widget to the Home Screen; check it shows your first bot. Touch and hold it, choose Edit Widget, pick another bot, and check its picture and name show. Tap it; check Noodle opens that bot's chat.
+- Add Bot to the Lock Screen and choose a bot; check its picture shows and tapping it opens its chat.
+- Add the medium and large Bots widgets; check they show the bots of All, pinned ones first, and the large one says All above them. Edit one, choose a Hub and then a space you made, and check only that space's bots show. Tap a few bots; check each opens its own chat, also when a different space is shown in Noodle.
+- In Noodle, rename a bot, change its picture, pin one in a space and archive another; check the widgets follow within a few seconds. Delete the space a widget shows; check it asks you to choose another.
 
 ## [0.36.0] - 2026-10-17
 

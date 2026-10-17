@@ -54,7 +54,7 @@ let project = Project(
                 "NSMicrophoneUsageDescription": "Record voice messages you choose to send, transcribed on this device, talk with bots on calls you start, and let noodlets you open listen when they ask.",
                 // A call keeps going with the screen locked or another app in front; CallKit refuses calls without voip.
                 "UIBackgroundModes": ["audio", "voip"],
-                // Shared with the notification and share extensions, which reach the Hubs kept there.
+                // Shared with the notification and share extensions, which reach the Hubs kept there, and the widgets.
                 "NoodleAppGroup": "group.$(MOBILE_APP_BUNDLE_ID)",
                 // Conversations told to iOS, which the share sheet suggests and reply notifications show as messages.
                 "NSUserActivityTypes": ["INSendMessageIntent"],
@@ -65,7 +65,8 @@ let project = Project(
             entitlements: .file(path: "Support/NoodleMobile.entitlements"),
             dependencies: [.package(product: "HubLink"), .package(product: "NoodleWallpaperCore"), .package(product: "NoodleBrand"),
                            .package(product: "NoodletRuntime"),
-                           .target(name: "NoodleMobileNotifications"), .target(name: "NoodleMobileShare")],
+                           .target(name: "NoodleMobileNotifications"), .target(name: "NoodleMobileShare"),
+                           .target(name: "NoodleMobileWidgets")],
             settings: .settings(base: [
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(MOBILE_APP_BUNDLE_ID)",
                 "CODE_SIGN_STYLE": "Automatic",
@@ -133,6 +134,30 @@ let project = Project(
             dependencies: [.package(product: "HubLink")],
             settings: .settings(base: [
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(MOBILE_APP_BUNDLE_ID).share",
+                "CODE_SIGN_STYLE": "Automatic",
+            ])
+        ),
+        // Bots on the Home Screen and Lock Screen, as the app last left them in its group; a tap opens the bot's chat.
+        // It reads only that shelf, so it needs neither the Hubs nor HubLink.
+        .target(
+            name: "NoodleMobileWidgets",
+            destinations: .iOS,
+            product: .appExtension,
+            productName: "NoodleMobileWidgets",
+            bundleId: "com.pdparchitect.noodle.mobile.widgets",
+            deploymentTargets: .iOS("26.0"),
+            infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": "$(MOBILE_APP_NAME)",
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+                "NoodleAppGroup": "group.$(MOBILE_APP_BUNDLE_ID)",
+                "NSExtension": ["NSExtensionPointIdentifier": "com.apple.widgetkit-extension"],
+            ]),
+            sources: ["Sources/NoodleMobileWidgets/**", "Sources/Shared/BotWidgets.swift"],
+            entitlements: .file(path: "Support/NoodleMobileWidgets.entitlements"),
+            dependencies: [.sdk(name: "WidgetKit", type: .framework), .sdk(name: "AppIntents", type: .framework)],
+            settings: .settings(base: [
+                "PRODUCT_BUNDLE_IDENTIFIER": "$(MOBILE_APP_BUNDLE_ID).widgets",
                 "CODE_SIGN_STYLE": "Automatic",
             ])
         ),
