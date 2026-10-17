@@ -79,6 +79,35 @@ final class VoiceCallChannelFake: VoiceCallChannel, @unchecked Sendable {
     func cancel() { lock.withLock { _cancelled += 1 }; continuation.finish(throwing: CancellationError()) }
 }
 
+/// Starts of a call's audio, with voice processing or apart, failing with the given errors first.
+private final class CallAudioStarts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var processedFailures: [Error], apartFailures: [Error]
+    private var processedCount = 0, apartCount = 0
+    var counts: [Int] { lock.withLock { [processedCount, apartCount] } }
+
+    init(processed: [Error], apart: [Error]) {
+        processedFailures = processed
+        apartFailures = apart
+    }
+
+    func processed() throws -> String {
+        try lock.withLock {
+            processedCount += 1
+            if !processedFailures.isEmpty { throw processedFailures.removeFirst() }
+            return "processed"
+        }
+    }
+
+    func apart() throws -> String {
+        try lock.withLock {
+            apartCount += 1
+            if !apartFailures.isEmpty { throw apartFailures.removeFirst() }
+            return "apart"
+        }
+    }
+}
+
 private struct FixtureError: LocalizedError {
     let errorDescription: String?
     init(_ text: String) { errorDescription = text }
@@ -192,6 +221,58 @@ private struct FixtureError: LocalizedError {
         XCTAssertEqual(reports, ["Microphone access is off."])
         XCTAssertEqual(media.first?.closed, 1)
     }
+
+    /// Refusing voice processing can switch a Bluetooth headset into its call mode, and starting
+    /// apart fails until that settles: it is tried again instead of ending the call.
+    func testCallAudioStartsApartAgainWhileAHeadsetSettles() async throws {
+        let starts = CallAudioStarts(processed: [Self.formatNotSupported], apart: [Self.formatNotSupported])
+        var waits = 0
+        let started = try await VoiceCallAudioStart.run(audio: VoiceAudioQueue(), processed: { try starts.processed() },
+                                                        apart: { try starts.apart() }, wait: { waits += 1 })
+        XCTAssertEqual(started, "apart")
+        XCTAssertEqual(starts.counts, [1, 2])
+        XCTAssertEqual(waits, 1)
+    }
+
+    func testCallAudioUsesVoiceProcessingWhenItStarts() async throws {
+        let starts = CallAudioStarts(processed: [], apart: [])
+        var waits = 0
+        let started = try await VoiceCallAudioStart.run(audio: VoiceAudioQueue(), processed: { try starts.processed() },
+                                                        apart: { try starts.apart() }, wait: { waits += 1 })
+        XCTAssertEqual(started, "processed")
+        XCTAssertEqual(starts.counts, [1, 0])
+        XCTAssertEqual(waits, 0)
+    }
+
+    /// Core Audio's own error never reaches the person; a microphone's message, which says what to do, does.
+    func testCallAudioThatNeverStartsIsReportedReadably() async throws {
+        let failures = Array(repeating: Self.formatNotSupported as Error, count: VoiceCallAudioStart.attempts)
+        let starts = CallAudioStarts(processed: [Self.formatNotSupported], apart: failures)
+        var waits = 0
+        do {
+            _ = try await VoiceCallAudioStart.run(audio: VoiceAudioQueue(), processed: { try starts.processed() },
+                                                  apart: { try starts.apart() }, wait: { waits += 1 })
+            XCTFail("Call audio started")
+        } catch {
+            XCTAssertTrue(error is VoiceCallAudioStart.StartFailure)
+            XCTAssertFalse(error.localizedDescription.contains("10868"))
+        }
+        XCTAssertEqual(starts.counts, [1, VoiceCallAudioStart.attempts])
+        XCTAssertEqual(waits, VoiceCallAudioStart.attempts - 1)
+
+        let disconnected = VoiceFailure("The selected microphone is disconnected. Choose another in Settings → Chat.")
+        let unplugged = CallAudioStarts(processed: [disconnected],
+                                        apart: Array(repeating: disconnected, count: VoiceCallAudioStart.attempts))
+        do {
+            _ = try await VoiceCallAudioStart.run(audio: VoiceAudioQueue(), processed: { try unplugged.processed() },
+                                                  apart: { try unplugged.apart() }, wait: {})
+            XCTFail("Call audio started")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, disconnected.message)
+        }
+    }
+
+    private static let formatNotSupported = NSError(domain: "com.apple.coreaudio.avfaudio", code: -10868)
 
     func testANewCallReplacesTheCurrentOne() async throws {
         let calls = controller(), first = UUID(), second = UUID()

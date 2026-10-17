@@ -11,6 +11,7 @@ All notable changes to Noodle are documented here, following
 - Closed sheets and Settings windows are freed, so the app no longer slows down the longer it runs.
 - A closed Usage window no longer keeps reading usage history, which slowed scrolling and typing.
 - Noodle no longer quits at launch when a bot's folder cannot be read; it shows what is wrong instead. A bot folder missing its workspace or runtime folder, as a crash or a full disk can leave it, gets them back and the bot loads.
+- Voice calls start with Bluetooth headphones connected instead of failing with a Core Audio error. A call that still cannot use the microphone or speakers says so in plain words, and the bot's voice keeps playing when the headphones switch modes during a call.
 
 ## [0.66.0] - 2026-10-17
 
