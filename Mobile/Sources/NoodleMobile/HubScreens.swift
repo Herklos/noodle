@@ -1054,6 +1054,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AttachmentLayout.key) private var attachmentLayout = AttachmentLayout.standard.rawValue
     @AppStorage(MessageTextLayout.key) private var textLayout = MessageTextLayout.standard.rawValue
+    @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
     @AppStorage(WebLinkPreview.key) private var previewsLinks = true
     @AppStorage(ScreenControlHaptics.key) private var haptics = false
     @State private var noodlets = NoodletGrants().all
@@ -1062,6 +1063,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("Sort Conversations", selection: $conversationOrder) {
+                        ForEach(ConversationOrder.allCases) { Text($0.name).tag($0.rawValue) }
+                    }
+                } footer: {
+                    Text((ConversationOrder(rawValue: conversationOrder) ?? .standard).explanation)
+                }
                 Section {
                     Picker("Attachments", selection: $attachmentLayout) {
                         ForEach(AttachmentLayout.allCases) { Text($0.name).tag($0.rawValue) }

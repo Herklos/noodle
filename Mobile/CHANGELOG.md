@@ -5,6 +5,7 @@
 ### Added
 
 - In a group, tapping a bot's picture beside its messages shows its profile from the bottom of the screen, with Reply, Message, Call and Edit, as on the Mac.
+- Settings › Sort Conversations, as on the Mac: newest first, unread first, or unread bots and groups in an Unread section at the top. Pinned ones stay in their circles.
 
 ### Changed
 
@@ -24,6 +25,8 @@
 - Tap Reply; check the message field starts with the bot's name.
 - With a bot that can take calls, tap Call; check the call starts and its conversation opens with the call bar.
 - Tap Edit on your own bot; check its editor opens. For a bot someone shared with you, check there is no Edit.
+- In Settings, set Sort Conversations to Unread First; have a bot that is lower in the list reply, and check it moves to the top, then stays in its usual place once you have read it.
+- Set it to Unread Section; check unread bots and groups appear under Unread, the rest under Others, and that the Unread section goes away once everything is read.
 - Edit a bot; check its picture has no arrow beside it and tapping it opens the picture editor. Fill in Description and Backstory, tap Save, then reopen the bot and check both were kept.
 - Open the bot's Tools and tap Image Generation; check a tick appears straight away and the Hub's image model shows beneath it. Go back, tap Save and reopen the Tools; check the tick is still there. Tap it again to switch it off.
 - Choose a space you made, open a group's Group Info and check its members are at the top, then the space's other bots, then the rest, each by name.

@@ -109,6 +109,7 @@ struct NoodleSettingsView: View {
 struct GeneralSettingsView: View {
     @Environment(NoodleStore.self) private var store
     @AppStorage(BotNameStyle.defaultsKey) private var botNameStyle = BotNameStyle.real.rawValue
+    @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
 
     var body: some View {
         Form {
@@ -119,6 +120,15 @@ struct GeneralSettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+            }
+            Section {
+                Picker("Sort conversations", selection: $conversationOrder) {
+                    ForEach(ConversationOrder.allCases) { order in
+                        Text(order.name).tag(order.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help((ConversationOrder(rawValue: conversationOrder) ?? .standard).explanation)
             }
             Section {
                 Toggle("Keep Mac awake while agents work", isOn: Binding(

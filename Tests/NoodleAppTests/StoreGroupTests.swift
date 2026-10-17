@@ -128,6 +128,48 @@ import XCTest
         XCTAssertEqual(try f.repository.loadPinnedConversationIDs(), [f.directB.id])
     }
 
+    func testSectionsOrderByLastMessageNotByOtherChanges() throws {
+        let f = try fixture(), now = Date()
+        try f.repository.append(ChatMessage(conversationID: f.directA.id, author: .user, body: "Latest",
+                                            createdAt: now.addingTimeInterval(60), delivery: .delivered))
+        var edited = try XCTUnwrap(f.store.conversations.first { $0.id == f.directB.id })
+        edited.updatedAt = now.addingTimeInterval(120)
+        try f.repository.updateConversation(edited)
+        f.store.refreshTranscripts()
+        XCTAssertEqual(f.store.directConversations.map(\.id), [f.directA.id, f.directB.id])
+    }
+
+    func testConversationOrderMovesUnreadButNeverPins() throws {
+        let f = try fixture(), third = try f.runtime.agent("Linus")
+        f.store.reload()
+        let directC = try XCTUnwrap(f.store.conversations.first { $0.participantIDs == [third.id] })
+        let group = try f.group(), now = Date()
+        f.store.setPinned(true, conversationID: f.directA.id)
+        f.store.setPinned(true, conversationID: group.id)
+        func append(_ conversation: BotConversation, _ author: MessageAuthor, after seconds: TimeInterval) throws {
+            try f.repository.append(ChatMessage(conversationID: conversation.id, author: author, body: "Hello",
+                                                createdAt: now.addingTimeInterval(seconds), delivery: .delivered))
+        }
+        try append(f.directB, .agent(f.b.id), after: 10)
+        try append(directC, .user, after: 20)
+        try append(group, .agent(f.a.id), after: 30)
+        f.store.refreshTranscripts()
+        XCTAssertEqual(f.store.unreadConversationIDs, [f.directB.id, group.id])
+
+        let newest = f.store.sidebarSections(.newestFirst)
+        XCTAssertEqual(newest.unread.map(\.id), [])
+        XCTAssertEqual(newest.pinned.map(\.id), [f.directA.id, group.id])
+        XCTAssertEqual(newest.bots.map(\.id), [directC.id, f.directB.id])
+        let unreadFirst = f.store.sidebarSections(.unreadFirst)
+        XCTAssertEqual(unreadFirst.pinned.map(\.id), [f.directA.id, group.id], "Pins keep their order")
+        XCTAssertEqual(unreadFirst.bots.map(\.id), [f.directB.id, directC.id])
+        let section = f.store.sidebarSections(.unreadSection)
+        XCTAssertEqual(section.unread.map(\.id), [f.directB.id], "Pins stay pinned")
+        XCTAssertEqual(section.pinned.map(\.id), [f.directA.id, group.id])
+        XCTAssertEqual(section.bots.map(\.id), [directC.id])
+        XCTAssertEqual(section.groups.map(\.id), [])
+    }
+
     func testSearchFindsTitlesDescriptionsParticipantsAndMessageContent() throws {
         let f = try fixture(), group = try f.group(name: "Launch team", description: "Quarterly planning")
         _ = try f.repository.sendUserMessage(conversationID: f.directB.id, body: "A **violet** notebook")

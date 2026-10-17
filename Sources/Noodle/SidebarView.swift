@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HubLink
 import NoodleCore
 import NoodleRuntime
 import NoodleRuntimeSettings
@@ -10,6 +11,7 @@ struct SidebarView: View {
     @Environment(NoodleStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
     @FocusState private var searchIsFocused: Bool
     @State private var kickRequest: AgentKickRequest?
     @State private var newSessionAgent: AgentRecord?
@@ -17,10 +19,12 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var store = store
 
+        let sections = store.sidebarSections(ConversationOrder(rawValue: conversationOrder) ?? .standard)
         List(selection: $store.selectedConversationID) {
-            section("Pinned", store.pinnedConversations)
-            section("Bots", store.directConversations)
-            section("Groups", store.groupConversations)
+            section("Pinned", sections.pinned)
+            section("Unread", sections.unread)
+            section("Bots", sections.bots)
+            section("Groups", sections.groups)
         }
         .listStyle(.sidebar)
         .modifier(AgentKickConfirmation(store: store, request: $kickRequest))

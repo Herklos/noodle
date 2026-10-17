@@ -535,21 +535,35 @@ final class NoodleStore {
         }
     }
 
-    /// Pinned bots and groups sit above the rest, in the order they were pinned.
-    var pinnedConversations: [BotConversation] {
+    struct SidebarSections {
+        var unread: [BotConversation], pinned: [BotConversation], bots: [BotConversation], groups: [BotConversation]
+    }
+
+    /// Pinned bots and groups always sit on top, in the order they were pinned, whatever the order; the rest come
+    /// newest message first. An Unread section takes the unread ones out of the others until they are read.
+    func sidebarSections(_ order: ConversationOrder) -> SidebarSections {
+        let pinnedIDs = Set(shownPinnedIDs)
+        let unpinned = filteredConversations.filter { !pinnedIDs.contains($0.id) }
+        let newest = unpinned.sorted { lastMessageDate(of: $0) > lastMessageDate(of: $1) }
+        let unread = order.unread(newest, isUnread: hasUnreadMessages), unreadIDs = Set(unread.map(\.id))
+        let rest = order.arranged(newest.filter { !unreadIDs.contains($0.id) }, isUnread: hasUnreadMessages)
         let visible = Dictionary(uniqueKeysWithValues: filteredConversations.map { ($0.id, $0) })
-        return shownPinnedIDs.compactMap { visible[$0] }
+        return SidebarSections(
+            unread: unread,
+            pinned: shownPinnedIDs.compactMap { visible[$0] },
+            bots: rest.filter { $0.kind == .direct },
+            groups: rest.filter { $0.kind == .group }
+        )
     }
 
-    var directConversations: [BotConversation] {
-        let pinned = shownPinnedIDs
-        return filteredConversations.filter { $0.kind == .direct && !pinned.contains($0.id) }
+    /// When anything was last said, by anyone; renaming or editing does not count.
+    private func lastMessageDate(of conversation: BotConversation) -> Date {
+        messagesByConversation[conversation.id]?.last?.createdAt ?? conversation.createdAt
     }
 
-    var groupConversations: [BotConversation] {
-        let pinned = shownPinnedIDs
-        return filteredConversations.filter { $0.kind == .group && !pinned.contains($0.id) }
-    }
+    var pinnedConversations: [BotConversation] { sidebarSections(.standard).pinned }
+    var directConversations: [BotConversation] { sidebarSections(.standard).bots }
+    var groupConversations: [BotConversation] { sidebarSections(.standard).groups }
 
     func isPinned(_ conversationID: UUID) -> Bool {
         shownPinnedIDs.contains(conversationID)

@@ -1093,6 +1093,7 @@ struct AgentsView: View {
     @State private var chats: [HubChats] = []
     /// The space shown: a Hub's by `CurrentHub.space`, or one the person made by its ID; empty for All.
     @AppStorage("space") private var space = ""
+    @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
     /// The spaces the person made, kept on this phone.
     @State private var spaceList = SpaceList(file: URL.applicationSupportDirectory.appendingPathComponent("spaces.json"))
     /// Carries them to the person's other devices through iCloud.
@@ -1145,6 +1146,10 @@ struct AgentsView: View {
             let found = rows.filter { $0.chats.matches($0.thread, search: search) }
             let pinned = searching ? [] : found.filter(isPinned)
             let others = searching ? found : found.filter { !isPinned($0) }
+            let order = searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
+            let isUnread = { (row: Row) in row.chats.isUnread(row.thread) }
+            let unread = order.unread(others, isUnread: isUnread)
+            let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
             List {
                 if !pinned.isEmpty {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
@@ -1163,21 +1168,11 @@ struct AgentsView: View {
                     .padding(.top, pinned.prefix(3).contains { $0.chats.note(for: $0.thread) != nil } ? 8 : 0)
                     .listRowSeparator(.hidden)
                 }
-                ForEach(others) { row in
-                    NavigationLink(value: row.id) {
-                        AgentRow(chats: row.chats, thread: row.thread, latest: row.chats.latestMessage(of: row.thread),
-                                 unread: row.chats.isUnread(row.thread),
-                                 hub: chats.count > 1 && spaceChats == nil ? row.chats.pairing.hubName : nil)
-                    }
-                    // As in Messages: dividers between rows, none above the first.
-                    .listRowSeparator(row.id == others.first?.id ? .hidden : .visible, edges: .top)
-                    // Room for the unread dot, as far from the edge as from the picture.
-                    .listRowInsets(.leading, AgentRow.dotGap * 2 + AgentRow.dotSize)
-                    .swipeActions(edge: .leading) {
-                        Button { togglePin(row) } label: { Label("Pin", systemImage: "pin.fill") }
-                            .tint(.orange)
-                    }
-                    .contextMenu { menu(for: row) }
+                if unread.isEmpty {
+                    agentRows(rest)
+                } else {
+                    Section("Unread") { agentRows(unread) }
+                    if !rest.isEmpty { Section("Others") { agentRows(rest) } }
                 }
             }
             .listStyle(.plain)
@@ -1329,6 +1324,25 @@ struct AgentsView: View {
         do { return try change() } catch {
             chats.first?.error = error.localizedDescription
             return nil
+        }
+    }
+
+    private func agentRows(_ rows: [Row]) -> some View {
+        ForEach(rows) { row in
+            NavigationLink(value: row.id) {
+                AgentRow(chats: row.chats, thread: row.thread, latest: row.chats.latestMessage(of: row.thread),
+                         unread: row.chats.isUnread(row.thread),
+                         hub: chats.count > 1 && spaceChats == nil ? row.chats.pairing.hubName : nil)
+            }
+            // As in Messages: dividers between rows, none above the first.
+            .listRowSeparator(row.id == rows.first?.id ? .hidden : .visible, edges: .top)
+            // Room for the unread dot, as far from the edge as from the picture.
+            .listRowInsets(.leading, AgentRow.dotGap * 2 + AgentRow.dotSize)
+            .swipeActions(edge: .leading) {
+                Button { togglePin(row) } label: { Label("Pin", systemImage: "pin.fill") }
+                    .tint(.orange)
+            }
+            .contextMenu { menu(for: row) }
         }
     }
 
