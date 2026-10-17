@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.35.3] - 2026-10-17
+
 ### Fixed
 
 - A Hub reached through your router comes back within minutes, not half an hour, when the router forgets the port it opened, restarts or gets a new internet address, and right away when this Mac joins another network.

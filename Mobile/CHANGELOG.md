@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-17
+
 ### Added
 
 - Home Screen widgets for your bots. Bot shows the one you choose, with its picture and name, also on the Lock Screen. Bots shows the bots of All or of a space you choose. Tap a bot to open your chat with it.

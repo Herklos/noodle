@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-10-17
+
 ### Changed
 
 - A message you send a Claude Code bot while it is busy reaches it without cancelling the work it has running in the background; the bot decides whether to stop. A bot stuck in one long step with nothing running in the background is still interrupted to read it.
