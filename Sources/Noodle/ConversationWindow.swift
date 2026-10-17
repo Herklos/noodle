@@ -151,9 +151,11 @@ struct ConversationWindowView: View {
     private var alert: NSAlert?
     private var keyObserver: NSObjectProtocol?
 
-    /// The window in front, even while Noodle is in the background.
+    /// The window in front, even while Noodle is in the background. None yet while the app
+    /// itself is being made: NSApp is still nil then, and an error from the first load waits.
     init(store: NoodleStore, window: @escaping () -> NSWindow? = {
-        NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.orderedWindows.first { $0.isVisible && $0.canBecomeMain }
+        guard let app = NSApp else { return nil }
+        return app.keyWindow ?? app.mainWindow ?? app.orderedWindows.first { $0.isVisible && $0.canBecomeMain }
     }) {
         self.store = store
         self.window = window
