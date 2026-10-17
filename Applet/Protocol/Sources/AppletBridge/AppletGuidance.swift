@@ -46,7 +46,8 @@ public enum AppletGuidance {
         For explicit synthetic testing, open with --mode headless --test-clock,
         then step --frames 60 (1–600; default 1). Advances main-page RAF and performance.now
         at 60 Hz and overrides page visibility to visible. Date, timers, CSS animations,
-        workers and media retain native timing. Captures do not advance this clock.
+        workers and media retain native timing. Captures do not advance this clock, and
+        a recording of a test-clock session runs in real time.
         This is not real-time gameplay or performance evidence. Close before switching
         between normal/test data or clocks; restart retains test-clock in headless mode.
         Web input events are synthetic. No screen permission is used.
@@ -68,7 +69,7 @@ public enum AppletGuidance {
         case .scroll: "Scroll a target or the window by --to-x/--to-y points."
         case .drag: "Drag within the noodlet from --x/--y to --to-x/--to-y. Events are synthetic."
         case .screenshot: "Capture the current view as PNG into a new --output FILE. Works without activating the desktop."
-        case .recordStart: "Start video capture with the noodlet's sound, even while it is muted out of sight; --duration defaults to 30 seconds, maximum 60."
+        case .recordStart: "Start video capture with the noodlet's sound, even while it is muted out of sight; --duration defaults to 30 seconds, maximum 60. The noodlet is filmed frame by frame on its own clock (animation frames, performance.now, Date, timers and CSS animations), so motion is smooth. A noodlet that draws slowly is filmed slower than real time: capture can take longer than --duration, and record stop after --duration waits up to 10 more seconds for the remaining frames. Media, Web Audio and workers keep real time, so their sound can drift from a picture filmed slowly. Input sent while recording works as usual."
         case .recordStop: "Finalize active capture and save the MP4 to a new --output FILE."
         case .hide: "Hide the noodlet window; animation or game simulation may pause."
         case .step: "Advance --frames COUNT animation frames in a session opened with --mode headless --test-clock. Returns synthetic timing and rendering diagnostics in value."

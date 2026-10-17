@@ -111,7 +111,7 @@ final class WebRunner: NSObject, NoodletPageHost, NSWindowDelegate {
     if testClock {
       log.append("rendering", "Synthetic test clock: step advances main-page RAF and performance.now at 60 Hz; visibility is overridden. Timers, Date, media, workers and CSS animations retain native timing.")
     } else {
-      log.append("rendering", "Native WebKit timing. Hidden pages may suspend animation frames or pause their own simulation; a capture does not establish visual readiness.")
+      log.append("rendering", "Native WebKit timing, except while recorded: a recording moves animation frames, performance.now, Date, timers and CSS animations on one frame at a time. Hidden pages may suspend animation frames or pause their own simulation; a capture does not establish visual readiness.")
     }
     web.configuration.userContentController.addUserScript(WKUserScript(
       source: (try? String(contentsOf: resources.appendingPathComponent("Sound.js"), encoding: .utf8)) ?? "",
@@ -331,6 +331,34 @@ final class WebRunner: NSObject, NoodletPageHost, NSWindowDelegate {
     return try await evaluate("return await window.__noodletControl(\(json));")
   }
   func snapshot() async throws -> NSImage { try await page.snapshot() }
+  /// Whether WebKit draws the page's latest changes for a recording's frame on request. One that
+  /// does not, such as while the Mac's display sleeps, is recorded from what it last drew.
+  private var drawsOnRequest = true
+  /// A recording's frame, `width` pixels wide, with everything the page has changed drawn.
+  func frame(width: CGFloat) async throws -> NSImage {
+    if drawsOnRequest {
+      do {
+        return try await page.snapshot(width: width, afterScreenUpdates: true, patience: .seconds(2))
+      } catch {
+        drawsOnRequest = false
+        log.append("recording", "Recording what the noodlet last drew: \(error.localizedDescription)")
+      }
+    }
+    return try await page.snapshot(width: width)
+  }
+  /// Puts the page on a recording's clock, which moves only as the recording films its frames.
+  func beginFilm(framesPerSecond: Int32) async throws {
+    _ = try await evaluate("return await window.__noodletAnimation.film.begin(\(framesPerSecond))")
+  }
+  /// Moves the page's clock on by one frame of the film, running what falls due in it.
+  func advanceFilm() async throws {
+    _ = try await evaluate("return await window.__noodletAnimation.film.frame()")
+  }
+  func endFilm() async {
+    do { _ = try await evaluate("return window.__noodletAnimation.film.end()") } catch {
+      log.append("recording", "The noodlet may not have its own clock back: \(error.localizedDescription)")
+    }
+  }
 }
 
 extension AppletAnnotation.Shortcut {

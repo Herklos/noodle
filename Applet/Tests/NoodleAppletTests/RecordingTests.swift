@@ -72,6 +72,45 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(Set(times.map(\.seconds)).count, times.count, "A frame time repeats.")
     }
 
+    /// Filmed, every frame goes in at its own time and shows the page at that time, even when a
+    /// capture takes longer than a frame lasts: recorded as the page ran, such a capture lost
+    /// every other slot, and what moved jumped. The picture also stays the right way up.
+    @MainActor func testAFilmKeepsEveryFrameHoweverSlowTheCapture() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).mp4")
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        let size = CGSize(width: 320, height: 200)
+        var position = 0, began = 0, ended = 0
+        let film = AppletRecording.Film(
+            begin: { began += 1; return true }, advance: { position += 1 }, end: { ended += 1 })
+        let recording = try AppletRecording(url: url, size: size, film: film)
+        recording.start(
+            snapshot: {
+                try await Task.sleep(for: .milliseconds(45))
+                return Self.bar(at: position * 6, in: size)
+            }, duration: 1.0)
+        await recording.captured()
+        try await recording.finish()
+        XCTAssertEqual(began, 1)
+        XCTAssertEqual(ended, 1, "The page did not get its own clock back.")
+        // The bar is in the top half of the page only.
+        let frames = try await RecordingSmoothnessTests.frames(url, rows: [50, 150])
+        XCTAssertEqual(frames.count, 30)
+        for (index, frame) in frames.enumerated() {
+            XCTAssertEqual(frame.time, CMTime(value: CMTimeValue(index), timescale: AppletRecording.framesPerSecond))
+            XCTAssertEqual(Double(frame.positions[0]), Double(index * 6), accuracy: 1, "Frame \(index) shows another time.")
+            XCTAssertEqual(frame.positions[1], -1, "Frame \(index) is upside down.")
+        }
+    }
+
+    /// A film never runs the page ahead of real time, so its sound stays with its picture, and a
+    /// film that fell behind goes straight on to its next frame.
+    func testAFilmWaitsForRealTimeButNeverForAFrameThatIsLate() {
+        XCTAssertEqual(AppletRecording.wait(before: 0, elapsed: 0), 0)
+        XCTAssertEqual(AppletRecording.wait(before: 30, elapsed: 0.25), 0.75, accuracy: 0.0001)
+        XCTAssertEqual(AppletRecording.wait(before: 3, elapsed: 0.5), 0)
+    }
+
     /// Sound goes where it was heard: a noodlet that starts playing half a second into the
     /// recording must not have its sound pulled back to the start of the video.
     @MainActor func testSoundLandsInTheVideoWhereItWasHeard() async throws {
@@ -131,6 +170,18 @@ final class RecordingTests: XCTestCase {
         NSBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
         image.unlockFocus()
         return image
+    }
+
+    /// A black page with a white bar 20 pixels wide `x` pixels from the left, in its top half.
+    private static func bar(at x: Int, in size: CGSize) -> NSImage {
+        let context = CGContext(
+            data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        context.setFillColor(.black)
+        context.fill(CGRect(origin: .zero, size: size))
+        context.setFillColor(.white)
+        context.fill(CGRect(x: CGFloat(x), y: size.height / 2, width: 20, height: size.height / 2))
+        return NSImage(cgImage: context.makeImage()!, size: size)
     }
 
     /// The root mean square of the recording's first channel between two times, in full scale.

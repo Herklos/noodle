@@ -499,11 +499,26 @@ public typealias NoodletColor = UIColor
         return text
     }
 
-    public func snapshot() async throws -> NoodletImage {
+    /// What the page shows. `width` is the picture's width in pixels; by default it is the view's
+    /// at the screen's scale, and a smaller one costs the page less to draw. `afterScreenUpdates`
+    /// waits for the page to draw its latest changes first, which a display that is off may never
+    /// do, so that wait gives up after `patience`.
+    public func snapshot(
+        width: CGFloat? = nil, afterScreenUpdates: Bool = false, patience: Duration = .seconds(20)
+    ) async throws -> NoodletImage {
         let configuration = WKSnapshotConfiguration()
         configuration.rect = web.bounds
-        configuration.afterScreenUpdates = false
-        return try await bounded { finish in
+        configuration.afterScreenUpdates = afterScreenUpdates
+        if let width {
+            #if canImport(AppKit)
+            let scale = web.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+            #else
+            let scale = web.traitCollection.displayScale
+            #endif
+            // WebKit takes the width in points and draws it at the screen's scale.
+            configuration.snapshotWidth = NSNumber(value: Double(width / max(scale, 1)))
+        }
+        return try await bounded(patience: patience) { finish in
             web.takeSnapshot(with: configuration) { image, error in
                 if let image { finish(.success(image)) } else {
                     finish(.failure(error ?? AppletError("WebKit returned no screenshot.")))
@@ -512,14 +527,16 @@ public typealias NoodletColor = UIColor
         }
     }
 
-    private func bounded<T>(_ begin: (@escaping @MainActor @Sendable (Result<T, Error>) -> Void) -> Void) async throws -> T {
+    private func bounded<T>(
+        patience: Duration = .seconds(20), _ begin: (@escaping @MainActor @Sendable (Result<T, Error>) -> Void) -> Void
+    ) async throws -> T {
         guard !stopped else { throw AppletError("Noodlet stopped.") }
         let id = UUID()
         return try await withCheckedThrowingContinuation { continuation in
             let result = OperationResult(continuation)
             cancellations[id] = { result.finish(.failure(AppletError("Noodlet stopped."))) }
             let timer = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(20))
+                try? await Task.sleep(for: patience)
                 guard !Task.isCancelled else { return }
                 self?.cancellations.removeValue(forKey: id)
                 result.finish(.failure(AppletError("Web operation timed out. Inspect logs, terminate, or restart the noodlet.")))
