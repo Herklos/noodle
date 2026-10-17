@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-10-17
+
 ### Added
 
 - Settings › General › Sort conversations: keep the sidebar newest first, put unread bots and groups first in their section, or gather them in an Unread section below the pinned ones. Pinned bots and groups always stay on top, in the order you pinned them.
@@ -14,7 +16,6 @@ All notable changes to Noodle are documented here, following
 
 - The sidebar orders bots and groups by their latest message; renaming or editing one no longer moves it up.
 - Add Bots in a group lists the bots in the space you are viewing first.
-
 - A bot that opens a noodlet and then leaves it unused for 15 minutes is asked to close it, as it already is for a computer it leaves running.
 - Bots in several groups keep each group to what its description, or else its name, says it is for, reach people outside a group through a group they share, and stop acknowledging every message.
 
