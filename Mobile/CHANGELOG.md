@@ -16,6 +16,7 @@
 ### Fixed
 
 - The screen stays on while you dictate a voice message and it is transcribed, instead of dimming and locking.
+- Sending a message or voice message keeps the conversation at its end, instead of leaving a gap below it or scrolling past it to a blank screen.
 
 ### What to Test
 
@@ -32,6 +33,7 @@
 - Choose a space you made, open a group's Group Info and check its members are at the top, then the space's other bots, then the rest, each by name.
 - Tick and untick a few bots; check no row moves until you close and reopen Group Info.
 - In All, check members come first and every other bot follows by name.
+- In a long conversation, send a few messages and voice messages, with the keyboard up and down; check each time the conversation ends just above the message field, with no gap and no blank screen.
 
 ## [0.35.0] - 2026-10-16
 

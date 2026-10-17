@@ -1615,7 +1615,14 @@ struct ConversationScrolling: ViewModifier {
             // Read before the new row is laid out, so atBottom still says where the person was.
             .onChange(of: latest?.id) { _, _ in
                 guard let latest, let anchor = ConversationScroll.target(for: latest, wasAtBottom: atBottom) else { return }
-                withAnimation { position.scrollTo(id: latest.id, anchor: anchor) }
+                // A new row's height is a guess until it is laid out, so going to its bottom lands short or
+                // past the end; the end itself is where your own message is.
+                if #available(iOS 27, *), anchor == .bottom {
+                    atBottom = true
+                    withAnimation { position.scrollTo(edge: .bottom) }
+                } else {
+                    withAnimation { position.scrollTo(id: latest.id, anchor: anchor) }
+                }
             }
     }
 }

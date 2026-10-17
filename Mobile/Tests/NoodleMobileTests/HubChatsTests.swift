@@ -1627,6 +1627,41 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(conversation.contentOffset.y == offset)
     }
 
+    /// Sending and dictating bring the keyboard up and down; the conversation stays at its end, with no gap after it.
+    @Test func theKeyboardComingAndGoingKeepsTheConversationAtItsEnd() async throws {
+        let hub = FakeHub()
+        for index in 1..<40 { await hub.botSays(String(repeating: "Message \(index) says something. ", count: 1 + index % 4)) }
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let scene = try #require(UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: NavigationStack { ChatView(chats: chats, threadID: scout.id) })
+        window.isHidden = false
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .seconds(1))
+        let conversation = try #require(Self.view(UIScrollView.self, in: window) { !($0 is UITextView) && $0.contentSize.height > window.bounds.height })
+        let field = try #require(Self.view(PastingTextView.self, in: window) { _ in true })
+        func pastEnd() -> CGFloat {
+            conversation.contentOffset.y - (conversation.contentSize.height + conversation.adjustedContentInset.bottom - conversation.bounds.height)
+        }
+        var steps: [(String, CGFloat)] = [("opened", pastEnd())]
+
+        field.becomeFirstResponder()
+        try await Task.sleep(for: .seconds(1))
+        steps.append(("keyboard up", pastEnd()))
+        try await chats.send("Hi there", to: scout)
+        try await Task.sleep(for: .seconds(1))
+        steps.append(("sent", pastEnd()))
+        field.resignFirstResponder()
+        try await Task.sleep(for: .seconds(1))
+        steps.append(("keyboard down", pastEnd()))
+
+        for (step, past) in steps { #expect(abs(past) < 1, "\(step): \(past) points past the end") }
+    }
+
     /// The message field sits as low as the bots list's search field, and the conversation still ends
     /// 16 points above it.
     @Test func theComposerSitsAsLowAsSearch() async throws {
