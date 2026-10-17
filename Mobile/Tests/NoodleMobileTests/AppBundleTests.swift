@@ -52,6 +52,19 @@ import UserNotifications
         #expect((Bundle.main.object(forInfoDictionaryKey: "NSUserActivityTypes") as? [String])?.contains("INSendMessageIntent") == true)
     }
 
+    /// The widgets ship inside the app and share its group, where the app leaves the bots they show.
+    @Test func theWidgetExtensionSharesTheAppsGroup() throws {
+        let app = try #require(Bundle.main.bundleIdentifier)
+        let plugIn = try #require(Bundle.main.builtInPlugInsURL?.appendingPathComponent("NoodleMobileWidgets.appex"))
+        let bundle = try #require(Bundle(url: plugIn))
+        #expect(bundle.bundleIdentifier == "\(app).widgets")
+        #expect(bundle.object(forInfoDictionaryKey: "NoodleAppGroup") as? String == AppGroup.identifier)
+        let point = (bundle.object(forInfoDictionaryKey: "NSExtension") as? [String: Any])?["NSExtensionPointIdentifier"] as? String
+        #expect(point == "com.apple.widgetkit-extension")
+        let container = try #require(AppGroup.identifier.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) })
+        #expect(BotWidgetShelf.configured(bundle: bundle)?.fileURL.path.hasPrefix(container.path) == true)
+    }
+
     /// iOS finds the app's answers to a tapped notification and one arriving while open. In Swift 6 a
     /// callback in the wrong form still builds but is never called, so this asks as iOS does.
     @Test @MainActor func notificationCallbacksReachTheApp() {

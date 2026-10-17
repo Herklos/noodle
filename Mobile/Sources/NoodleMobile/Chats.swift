@@ -1248,7 +1248,10 @@ struct AgentsView: View {
             }
             if phase == .active { await spaceSync?.fetch() }
         }
-        .onChange(of: rows.map(\.id)) { open() }
+        .onChange(of: chats.flatMap { $0.listedThreads.map(\.conversationID) }) { open() }
+        .onChange(of: widgetSource, initial: true) { _, source in
+            if let source { BotWidgetPublisher.shared.publish(source) }
+        }
         // Not while the phone is away, so the Hub knows at once to notify it instead.
         .task(id: FollowKey(hubs: pairings.map(CurrentHub.name), away: phase == .background)) {
             chats = pairings.map { pairing in chats.first { $0.pairing === pairing } ?? HubChats(pairing: pairing) }
@@ -1400,13 +1403,19 @@ struct AgentsView: View {
         }
     }
 
-    /// Opens a tapped notification's conversation once its Hub's bots have loaded.
+    /// Opens a tapped notification's or widget's conversation once its Hub's bots have loaded, whichever space is shown.
     private func open() {
         guard let route = opening,
-              let row = rows.first(where: { $0.thread.conversationID == route.conversation
-                  && PushTopic.topic(for: $0.chats.pairing) == route.topic }) else { return }
-        path = [row.id]
+              let hub = chats.first(where: { PushTopic.topic(for: $0.pairing) == route.topic }),
+              let thread = hub.listedThreads.first(where: { $0.conversationID == route.conversation }) else { return }
+        path = [ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread.id)]
         opening = nil
+    }
+
+    /// What the widgets show, once every Hub's list is known or could not be, so they never show a Hub's bots gone.
+    private var widgetSource: BotWidgetPublisher.Source? {
+        guard chats.count == pairings.count, chats.allSatisfy({ $0.isLoaded || $0.error != nil }) else { return nil }
+        return BotWidgetPublisher.source(chats: chats, spaces: spaceList.spaces)
     }
 
     private func openChosen() {
