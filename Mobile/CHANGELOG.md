@@ -10,6 +10,7 @@
 
 - The bot editor has a Description field and a Backstory section, as on the Mac. Its picture opens the picture editor without a row arrow.
 - Image Generation is now listed under the bot's Tools, as on the Mac, and switches on or off as soon as you tap it.
+- Group Info lists the group's bots first, so you can remove one without hunting, then the bots in the space you are viewing, then the rest. Rows stay put as you tick and untick them.
 
 ### Fixed
 
@@ -25,6 +26,9 @@
 - Tap Edit on your own bot; check its editor opens. For a bot someone shared with you, check there is no Edit.
 - Edit a bot; check its picture has no arrow beside it and tapping it opens the picture editor. Fill in Description and Backstory, tap Save, then reopen the bot and check both were kept.
 - Open the bot's Tools and tap Image Generation; check a tick appears straight away and the Hub's image model shows beneath it. Go back, tap Save and reopen the Tools; check the tick is still there. Tap it again to switch it off.
+- Choose a space you made, open a group's Group Info and check its members are at the top, then the space's other bots, then the rest, each by name.
+- Tick and untick a few bots; check no row moves until you close and reopen Group Info.
+- In All, check members come first and every other bot follows by name.
 
 ## [0.35.0] - 2026-10-16
 

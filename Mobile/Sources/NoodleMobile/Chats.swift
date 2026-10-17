@@ -2776,6 +2776,11 @@ struct GroupEditor: View {
     @State private var saving = false
     @State private var confirmingDelete = false
     @State private var problem: String?
+    /// The group's bots as the sheet opened, listed first; ticking one leaves every row where it is.
+    @State private var listedFirst: Set<UUID>
+    /// The space shown in the title menu, whose bots come next.
+    @AppStorage("space") private var space = ""
+    @State private var spaceList = SpaceList(file: URL.applicationSupportDirectory.appendingPathComponent("spaces.json"))
 
     init(chats: HubChats, group: LinkGroup?, hubs: [HubChats] = [], created: @escaping (HubChats, LinkGroup) -> Void = { _, _ in }) {
         _chats = State(initialValue: chats)
@@ -2783,6 +2788,7 @@ struct GroupEditor: View {
         self.hubs = hubs
         self.created = created
         _draft = State(initialValue: group?.draft ?? LinkGroupDraft(name: "", botIDs: []))
+        _listedFirst = State(initialValue: Set(group?.draft.botIDs ?? []))
     }
 
     /// A group is all one Hub's bots, so choosing another Hub clears the choice.
@@ -2798,8 +2804,28 @@ struct GroupEditor: View {
 
     /// Archived bots stay members until removed, but are never added.
     private var bots: [LinkBot] {
-        chats.agents.filter { $0.owner == nil && ($0.archivedAt == nil || draft.botIDs.contains($0.id)) }
-            .sorted { $0.draft.name.localizedStandardCompare($1.draft.name) == .orderedAscending }
+        let bots = chats.agents.filter { $0.owner == nil && ($0.archivedAt == nil || draft.botIDs.contains($0.id)) }
+        return Self.ordered(bots, members: listedFirst,
+                            inSpace: Self.inSpace(space, hub: CurrentHub.space(of: chats.pairing), spaces: spaceList.spaces))
+    }
+
+    /// The group's bots first, so one is removed without hunting, then those in the space shown, then the rest, each by name.
+    static func ordered(_ bots: [LinkBot], members: Set<UUID>, inSpace: (LinkBot) -> Bool) -> [LinkBot] {
+        func tier(_ bot: LinkBot) -> Int { members.contains(bot.id) ? 0 : inSpace(bot) ? 1 : 2 }
+        return bots.sorted { lhs, rhs in
+            tier(lhs) != tier(rhs) ? tier(lhs) < tier(rhs)
+                : lhs.draft.name.localizedStandardCompare(rhs.draft.name) == .orderedAscending
+        }
+    }
+
+    /// Whether the space shown holds a bot on the Hub keyed `hub`: All, and that Hub's own space, hold them all.
+    static func inSpace(_ space: String, hub: String, spaces: [CustomSpace]) -> (LinkBot) -> Bool {
+        if let custom = spaces.first(where: { $0.id.uuidString == space }) {
+            let members = Set(custom.members)
+            return { members.contains(CustomSpace.Member(hub: hub, conversation: $0.conversationID)) }
+        }
+        let holdsAll = space.isEmpty || space == hub
+        return { _ in holdsAll }
     }
 
     var body: some View {

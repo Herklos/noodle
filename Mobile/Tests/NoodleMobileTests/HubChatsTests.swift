@@ -579,6 +579,29 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(AgentsView.tickedSpace("left", hubs: ["studio"], spaces: [work]) == "")
     }
 
+    /// Group Info lists the group's bots first, so one can be removed without hunting, then those in the space shown,
+    /// then the rest, each by name; All, or the group's own Hub's space, holds every bot and adds no tier.
+    @Test func groupMembersListMembersThenSpaceThenTheRest() {
+        func bot(_ name: String) -> LinkBot {
+            LinkBot(id: UUID(), conversationID: UUID(), draft: LinkBotDraft(name: name, provider: "claude"),
+                    createdAt: Date(timeIntervalSince1970: 0))
+        }
+        let (atlas, nova, scout, zed) = (bot("Atlas"), bot("Nova"), bot("Scout"), bot("Zed"))
+        let bots = [zed, scout, nova, atlas]
+        let work = CustomSpace(name: "Work", members: [CustomSpace.Member(hub: "studio", conversation: scout.conversationID),
+                                                      CustomSpace.Member(hub: "other", conversation: nova.conversationID)])
+        func order(_ space: String, members: [LinkBot]) -> [String] {
+            let inSpace = GroupEditor.inSpace(space, hub: "studio", spaces: [work])
+            return GroupEditor.ordered(bots, members: Set(members.map(\.id)), inSpace: inSpace).map(\.draft.name)
+        }
+
+        #expect(order(work.id.uuidString, members: [zed]) == ["Zed", "Scout", "Atlas", "Nova"])
+        #expect(order(work.id.uuidString, members: [scout, zed]) == ["Scout", "Zed", "Atlas", "Nova"])
+        #expect(order("", members: [zed]) == ["Zed", "Atlas", "Nova", "Scout"])
+        #expect(order("studio", members: [nova]) == ["Nova", "Atlas", "Scout", "Zed"])
+        #expect(order("other", members: []) == ["Atlas", "Nova", "Scout", "Zed"])
+    }
+
     /// As in the Mac sidebar: by name, description or what was said, ignoring case and accents.
     @Test func searchFindsAgentsByNameDescriptionAndMessages() async throws {
         let hub = FakeHub()
