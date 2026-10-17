@@ -18,6 +18,8 @@ public struct RouterMapping: Equatable, Sendable {
     /// Where a UPnP router takes the request that closes the port again.
     var upnpControl: URL?
     var upnpService: String?
+    /// This Mac's address on the network, which the UPnP router forwards the port to.
+    var upnpClient: String?
 
     public init(endpoint: LinkEndpoint, method: Method, lifetime: Int, internalPort: UInt16? = nil) {
         self.endpoint = endpoint
@@ -52,7 +54,46 @@ public struct RouterMappingError: LocalizedError, Equatable, Sendable {
 /// Asks the router to forward the Hub's UDP port, so devices away from home can reach it.
 public protocol RouterPortMapper: Sendable {
     func map(port: UInt16) async throws -> RouterMapping
+    /// Makes sure the router still forwards a port it opened, opening it again if the router
+    /// forgot it and extending its lease, and returns it with the router's outside address now.
+    /// Throws when that router cannot be asked again; the Hub then maps the port afresh.
+    func renew(_ mapping: RouterMapping) async throws -> RouterMapping
     func unmap(_ mapping: RouterMapping) async
+}
+
+/// How often the Hub makes sure the router still forwards its port. A router that restarts,
+/// cuts a lease short or gets a new outside address would otherwise leave devices away from
+/// home without the Hub until the lease was next renewed.
+public struct RouterChecks: Sendable {
+    /// Between checks of a port the router opened.
+    public var interval: Duration
+    /// The wait after the router first refuses or does not answer; each failure in a row doubles
+    /// it, up to `longestRetry`.
+    public var firstRetry: Duration
+    public var longestRetry: Duration
+    /// How long a changed network gets to settle on its router and addresses before the port is opened again.
+    public var settle: Duration
+
+    public init(interval: Duration, firstRetry: Duration, longestRetry: Duration, settle: Duration) {
+        self.interval = interval
+        self.firstRetry = firstRetry
+        self.longestRetry = longestRetry
+        self.settle = settle
+    }
+
+    public static let standard = RouterChecks(interval: .seconds(180), firstRetry: .seconds(30),
+                                              longestRetry: .seconds(300), settle: .seconds(2))
+
+    /// When to check a port again: after the interval, or halfway through a shorter lease.
+    func delay(keeping mapping: RouterMapping) -> Duration {
+        guard mapping.lifetime > 0 else { return interval }
+        return min(interval, .seconds(max(10, mapping.lifetime / 2)))
+    }
+
+    /// When to ask again after this many failures in a row.
+    func retry(after failures: Int) -> Duration {
+        min(longestRetry, firstRetry * (1 << min(max(failures - 1, 0), 16)))
+    }
 }
 
 /// NAT-PMP (RFC 6886), which Apple routers and most MiniUPnPd ones answer.
@@ -156,6 +197,15 @@ enum UPnP {
         value("errorCode", in: reply).flatMap(Int.init)
     }
 
+    /// The address a GetSpecificPortMappingEntry reply forwards to, if it forwards to `port` there and is on.
+    static func forwardedClient(in reply: Data, port: UInt16) -> String? {
+        let elements = XMLElements.parse(reply)
+        func value(_ name: String) -> String? { elements.first { $0.name == name }?.text }
+        guard value("NewInternalPort") == String(port), !["0", "false"].contains(value("NewEnabled")?.lowercased() ?? "1"),
+              let client = value("NewInternalClient"), !client.isEmpty else { return nil }
+        return client
+    }
+
     private static func escaped(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
@@ -210,6 +260,17 @@ public struct SystemRouterPortMapper: RouterPortMapper {
         }
     }
 
+    public func renew(_ mapping: RouterMapping) async throws -> RouterMapping {
+        guard let gateway = Self.gateway() else { throw RouterMappingError("This Mac is not connected to a router.") }
+        switch mapping.method {
+        case .natPMP:
+            // Asking again for the port it holds is how NAT-PMP renews, and opens it again if the router forgot.
+            return try await natPMP(gateway: gateway, port: mapping.internalPort, externalPort: mapping.endpoint.port)
+        case .upnp:
+            return try await renewUPnP(mapping, gateway: gateway)
+        }
+    }
+
     public func unmap(_ mapping: RouterMapping) async {
         switch mapping.method {
         case .natPMP:
@@ -224,10 +285,10 @@ public struct SystemRouterPortMapper: RouterPortMapper {
         }
     }
 
-    private func natPMP(gateway: String, port: UInt16) async throws -> RouterMapping {
+    private func natPMP(gateway: String, port: UInt16, externalPort: UInt16? = nil) async throws -> RouterMapping {
         let address = try NATPMP.externalAddress(from: try await Self.exchange(NATPMP.externalAddressRequest, with: gateway))
         try Self.requirePublic(address)
-        let request = NATPMP.mapRequest(internalPort: port, externalPort: port, lifetime: Self.requestedLifetime)
+        let request = NATPMP.mapRequest(internalPort: port, externalPort: externalPort ?? port, lifetime: Self.requestedLifetime)
         let grant = try NATPMP.mapping(from: try await Self.exchange(request, with: gateway))
         return RouterMapping(endpoint: LinkEndpoint(host: address, port: grant.externalPort), method: .natPMP,
                              lifetime: Int(grant.lifetime), internalPort: port)
@@ -235,9 +296,7 @@ public struct SystemRouterPortMapper: RouterPortMapper {
 
     private func upnp(gateway: String, port: UInt16) async throws -> RouterMapping {
         let (locations, internalAddress) = try await Task.detached { () throws -> ([URL], String) in
-            let socket = try UDPSocket(connectedTo: gateway, port: NATPMP.port)
-            defer { socket.close() }
-            guard let address = socket.localAddress else { throw RouterMappingError.unanswered }
+            let address = try Self.internalAddress(toward: gateway)
             return (try Self.search(), address)
         }.value
         // The router this Mac goes through first; others on the network cannot forward to it.
@@ -257,10 +316,41 @@ public struct SystemRouterPortMapper: RouterPortMapper {
                 var mapping = RouterMapping(endpoint: LinkEndpoint(host: address, port: port), method: .upnp, lifetime: lifetime)
                 mapping.upnpControl = service.control
                 mapping.upnpService = service.type
+                mapping.upnpClient = internalAddress
                 return mapping
             }
         }
         throw RouterMappingError.unanswered
+    }
+
+    /// Asks the router that opened the port, without searching the network for it again.
+    private func renewUPnP(_ mapping: RouterMapping, gateway: String) async throws -> RouterMapping {
+        guard let control = mapping.upnpControl, let type = mapping.upnpService else { throw RouterMappingError.unanswered }
+        let service = (type: type, control: control), port = mapping.endpoint.port
+        let internalAddress = try Self.internalAddress(toward: gateway)
+        guard let reply = try? await Self.soap("GetExternalIPAddress", service: type, control: control, arguments: []),
+              let address = UPnP.value("NewExternalIPAddress", in: reply), !address.isEmpty else { throw RouterMappingError.unanswered }
+        try Self.requirePublic(address)
+        let entry = try? await Self.soap("GetSpecificPortMappingEntry", service: type, control: control, arguments: [
+            ("NewRemoteHost", ""), ("NewExternalPort", String(port)), ("NewProtocol", "UDP"),
+        ])
+        let client = entry.flatMap { UPnP.forwardedClient(in: $0, port: mapping.internalPort) }
+        if client != internalAddress {
+            // Forwarded to this Mac's old address on the network: the Hub's own entry, in the way of the new one.
+            if let client, client == mapping.upnpClient {
+                _ = try? await Self.soap("DeletePortMapping", service: type, control: control, arguments: [
+                    ("NewRemoteHost", ""), ("NewExternalPort", String(port)), ("NewProtocol", "UDP"),
+                ])
+            }
+            try await addMapping(port: port, internalAddress: internalAddress, lifetime: mapping.lifetime, service: service)
+        } else if mapping.lifetime > 0 {
+            // A router that will not overwrite its own entry to extend the lease still forwards the port for now.
+            try? await addMapping(port: port, internalAddress: internalAddress, lifetime: mapping.lifetime, service: service)
+        }
+        var renewed = mapping
+        renewed.endpoint.host = address
+        renewed.upnpClient = internalAddress
+        return renewed
     }
 
     private func addMapping(port: UInt16, internalAddress: String, lifetime: Int, service: (type: String, control: URL)) async throws {
@@ -302,6 +392,14 @@ public struct SystemRouterPortMapper: RouterPortMapper {
         guard RouterMapping.isPublic(address) else {
             throw RouterMappingError("The router’s outside address, \(address), is not public, so devices away from home cannot reach it.")
         }
+    }
+
+    /// The address this Mac has on the router's network. Connecting a UDP socket sends nothing.
+    private static func internalAddress(toward gateway: String) throws -> String {
+        let socket = try UDPSocket(connectedTo: gateway, port: NATPMP.port)
+        defer { socket.close() }
+        guard let address = socket.localAddress else { throw RouterMappingError.unanswered }
+        return address
     }
 
     /// The IPv4 router of the default route.

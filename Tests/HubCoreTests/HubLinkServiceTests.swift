@@ -9,13 +9,15 @@ import XCTest
 @MainActor final class HubLinkServiceTests: XCTestCase {
     private var clock = Date()
 
-    private func fixture(router: (any RouterPortMapper)? = nil) async throws -> (Hub, HubLinkService, URL) {
+    private func fixture(router: (any RouterPortMapper)? = nil,
+                         routerChecks: RouterChecks = .standard) async throws -> (Hub, HubLinkService, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-link-\(UUID())")
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil)
         // Loopback stands in for the Mac's own addresses, which a CI runner may not have.
         let link = HubLinkService(hubName: "Mac mini", directory: root.appendingPathComponent("Hub/Link"),
                                   access: hub.access, profiles: hub.harnessProfiles, port: 0, router: router,
+                                  routerChecks: routerChecks,
                                   localEndpoints: { [LinkEndpoint(host: "::1", port: $0)] }, now: { [unowned self] in clock })
         await link.start()
         addTeardownBlock { await MainActor.run { link.stop() } }
@@ -492,18 +494,120 @@ import XCTest
         XCTAssertEqual(link.router, .failed("The router has no public address."))
         XCTAssertEqual(link.endpoints, [LinkEndpoint(host: "::1", port: link.endpoints[0].port)])
     }
+
+    /// Checks every few milliseconds instead of every few minutes.
+    private static let quickChecks = RouterChecks(interval: .milliseconds(50), firstRetry: .milliseconds(20),
+                                                  longestRetry: .milliseconds(80), settle: .milliseconds(10))
+
+    func testTheLeaseIsRenewedLongBeforeItEnds() async throws {
+        let mapping = RouterMapping(endpoint: LinkEndpoint(host: "203.0.113.9", port: 38_415), method: .natPMP, lifetime: 3600)
+        let router = StandInRouter(.success(mapping))
+        let (_, link, _) = try await fixture(router: router, routerChecks: Self.quickChecks)
+
+        await waitForRouter { await router.renewals >= 3 }
+        let renewals = await router.renewals, maps = await router.maps
+        XCTAssertGreaterThanOrEqual(renewals, 3)
+        XCTAssertEqual(maps, 1, "A port the router still forwards is renewed, not mapped again")
+        XCTAssertEqual(link.router, .open(mapping))
+    }
+
+    func testAPortTheRouterForgotIsOpenedAgainAtTheNextCheck() async throws {
+        let outside = LinkEndpoint(host: "203.0.113.9", port: 38_415)
+        let mapping = RouterMapping(endpoint: outside, method: .upnp, lifetime: 0)
+        let router = StandInRouter(.success(mapping))
+        let (_, link, _) = try await fixture(router: router, routerChecks: Self.quickChecks)
+
+        // The router restarted and lost its port table, and its control address with it.
+        await router.answer(.success(mapping), renewing: .failure(RouterMappingError("The router did not answer.")))
+        await waitForRouter { await router.maps >= 3 }
+        let maps = await router.maps
+        XCTAssertGreaterThanOrEqual(maps, 3)
+        XCTAssertEqual(link.router, .open(mapping))
+        XCTAssertTrue(link.endpoints.contains(outside))
+    }
+
+    func testANewOutsideAddressReachesPairedDevicesAtTheirNextCheckIn() async throws {
+        let before = LinkEndpoint(host: "203.0.113.9", port: 38_415), after = LinkEndpoint(host: "198.51.100.7", port: 38_415)
+        let router = StandInRouter(.success(RouterMapping(endpoint: before, method: .natPMP, lifetime: 3600)))
+        let (hub, link, device) = try await fixture(router: router, routerChecks: Self.quickChecks)
+        let pairing = HubPairing(directory: device, deviceName: "Phone")
+        await pairing.join(link.invite(try hub.access.addUser(named: "Ada")).url().absoluteString)
+        XCTAssertEqual(pairing.hub?.endpoints.contains(before), true)
+
+        await router.answer(.success(RouterMapping(endpoint: after, method: .natPMP, lifetime: 3600)))
+        await waitUntil { link.endpoints.contains(after) }
+        XCTAssertTrue(link.endpoints.contains(after))
+        XCTAssertFalse(link.endpoints.contains(before))
+
+        await pairing.refresh()
+        XCTAssertEqual(pairing.hub?.endpoints.contains(after), true)
+        XCTAssertEqual(pairing.hub?.endpoints.contains(before), false)
+    }
+
+    func testARefusingRouterIsAskedAgainWithGrowingWaitsUntilItOpensThePort() async throws {
+        let refusal = RouterMappingError("The router refused to open a port.")
+        let router = StandInRouter(.failure(refusal))
+        let (_, link, _) = try await fixture(router: router, routerChecks: Self.quickChecks)
+        XCTAssertEqual(link.router, .failed(refusal.message))
+
+        await waitForRouter { await router.maps >= 4 }
+        XCTAssertEqual(link.router, .failed(refusal.message))
+
+        let mapping = RouterMapping(endpoint: LinkEndpoint(host: "203.0.113.9", port: 38_415), method: .natPMP, lifetime: 3600)
+        await router.answer(.success(mapping))
+        await waitUntil { link.router == .open(mapping) }
+        XCTAssertEqual(link.router, .open(mapping))
+    }
+
+    func testANewNetworkGetsThePortOpenedAgainRightAway() async throws {
+        let mapping = RouterMapping(endpoint: LinkEndpoint(host: "203.0.113.9", port: 38_415), method: .natPMP, lifetime: 3600)
+        let router = StandInRouter(.success(mapping))
+        let hourly = RouterChecks(interval: .seconds(3600), firstRetry: .seconds(3600), longestRetry: .seconds(3600),
+                                  settle: .milliseconds(10))
+        let (_, link, _) = try await fixture(router: router, routerChecks: hourly)
+
+        link.networkChanged(to: "satisfied en0 [192.168.1.1]")
+        link.networkChanged(to: "satisfied en1 [10.0.0.1]")
+        await waitForRouter { await router.maps >= 2 }
+        let maps = await router.maps, renewals = await router.renewals
+        XCTAssertGreaterThanOrEqual(maps, 2)
+        XCTAssertEqual(renewals, 0, "A new router does not hold the old one's port to renew")
+        XCTAssertEqual(link.router, .open(mapping))
+    }
+
+    /// Waits a little for the Hub's next checks of the router.
+    private func waitForRouter(_ condition: () async -> Bool) async {
+        for _ in 0..<100 { if await condition() { return }; try? await Task.sleep(for: .milliseconds(20)) }
+    }
 }
 
 /// A router that answers from a script, so no test touches the real one.
 private actor StandInRouter: RouterPortMapper {
-    private let result: Result<RouterMapping, Error>
+    private var result: Result<RouterMapping, Error>
+    /// What checking an open port finds, when not what mapping it afresh gives.
+    private var renewal: Result<RouterMapping, Error>?
     private var unmapped: (@Sendable () -> Void)?
+    private(set) var maps = 0
+    private(set) var renewals = 0
 
     init(_ result: Result<RouterMapping, Error>) { self.result = result }
 
+    func answer(_ result: Result<RouterMapping, Error>, renewing renewal: Result<RouterMapping, Error>? = nil) {
+        self.result = result
+        self.renewal = renewal
+    }
+
     func onUnmap(_ action: @escaping @Sendable () -> Void) { unmapped = action }
 
-    func map(port: UInt16) async throws -> RouterMapping { try result.get() }
+    func map(port: UInt16) async throws -> RouterMapping {
+        maps += 1
+        return try result.get()
+    }
+
+    func renew(_ mapping: RouterMapping) async throws -> RouterMapping {
+        renewals += 1
+        return try (renewal ?? result).get()
+    }
 
     func unmap(_ mapping: RouterMapping) async { unmapped?() }
 }

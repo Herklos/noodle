@@ -83,9 +83,14 @@ import os
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var server: LinkServer?
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
+    /// The interfaces and routers the network last had, to tell a new network from the same one again.
+    @ObservationIgnored private var networkPath: String?
     @ObservationIgnored private let routerMapper: (any RouterPortMapper)?
+    @ObservationIgnored private let routerChecks: RouterChecks
     /// Keeps the router's port open until cancelled.
     @ObservationIgnored private var routerRenewal: Task<Void, Never>?
+    /// Times in a row the router refused or did not answer.
+    @ObservationIgnored private var routerFailures = 0
     /// Unused invitations by their key. Kept in memory: an invitation outlives no relaunch.
     @ObservationIgnored private var invitations: [LinkPublicKey: (user: UUID, expires: Date, issuer: String)] = [:]
     @ObservationIgnored private let gate = LinkGate()
@@ -110,6 +115,7 @@ import os
                 bots: HubBots? = nil, connections: HubConnections? = nil, computers: HubComputers? = nil,
                 browsers: HubBrowsers? = nil,
                 port: UInt16 = LinkEndpoint.defaultPort, router: (any RouterPortMapper)? = nil,
+                routerChecks: RouterChecks = .standard,
                 localEndpoints: @escaping (UInt16) -> [LinkEndpoint] = LinkEndpoint.local(port:),
                 now: @escaping () -> Date = Date.init, pushes: (any HubPushPublisher)? = nil, pushDelay: Duration = .seconds(2)) {
         macName = hubName
@@ -125,6 +131,7 @@ import os
         }
         self.port = port
         routerMapper = router
+        self.routerChecks = routerChecks
         self.localEndpoints = localEndpoints
         self.now = now
         self.pushes = pushes
@@ -184,6 +191,7 @@ import os
         server = nil
         pathMonitor?.cancel()
         pathMonitor = nil
+        networkPath = nil
         state = .stopped
     }
 
@@ -355,18 +363,26 @@ import os
         return .response(LinkProtocol.encode(response))
     }
 
-    /// Keeps the gate in step with the devices however they change, including from Settings.
+    /// Redraws the endpoints whenever the network changes, and opens the router's port again on a new one.
     private func watchNetwork() {
         let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] _ in
-            Task { @MainActor in self?.networkChanged() }
+        monitor.pathUpdateHandler = { [weak self] path in
+            let network = "\(path.status) \(path.availableInterfaces.first?.name ?? "") \(path.gateways)"
+            Task { @MainActor in self?.networkChanged(to: network) }
         }
         monitor.start(queue: .global(qos: .utility))
         pathMonitor = monitor
     }
 
-    func networkChanged() {
+    /// `network` names the interface and routers in use, when they are known.
+    func networkChanged(to network: String? = nil) {
         networkChanges += 1
+        guard let network, network != networkPath else { return }
+        let isNew = networkPath != nil
+        networkPath = network
+        // A new router, or a new address from this one, does not forward the port the old one did.
+        guard isNew, let routerMapper, opensRouterPort, routerRenewal != nil, case .listening(let port) = state else { return }
+        keepRouterPortOpen(port, with: routerMapper, after: routerChecks.settle, afresh: true)
     }
 
     /// What admins see of the users, without the check-ins that change it every minute.
@@ -998,43 +1014,64 @@ import os
                           userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel)
     }
 
-    /// Opens the port on the router, then renews it halfway through each lease, or every
-    /// few minutes while the router refuses, so a router that restarts gets it back.
+    /// Opens the port on the router, then keeps it open.
     private func openRouterPort() async {
         guard let routerMapper, opensRouterPort, case .listening(let port) = state, router == .off else { return }
         router = .opening
-        var delay = await mapRouterPort(port, with: routerMapper)
+        let delay = await mapRouterPort(port, with: routerMapper)
         // Turned off, or off and on again, while the router was answering.
         guard opensRouterPort, case .listening = state, routerRenewal == nil else { return }
+        keepRouterPortOpen(port, with: routerMapper, after: delay)
+    }
+
+    /// Makes sure every few minutes that the router still forwards the port, renewing its lease,
+    /// and opens it again at once when the router forgot it or has a new outside address, so a
+    /// router that restarts loses devices away from home for minutes, not half an hour. While the
+    /// router refuses, asks again with growing waits. `afresh` maps the port from scratch first.
+    private func keepRouterPortOpen(_ port: UInt16, with mapper: any RouterPortMapper, after delay: Duration, afresh: Bool = false) {
+        routerRenewal?.cancel()
         routerRenewal = Task { [weak self] in
+            var delay = delay, afresh = afresh
             while !Task.isCancelled {
                 try? await Task.sleep(for: delay)
                 guard !Task.isCancelled, let self else { return }
-                delay = await self.mapRouterPort(port, with: routerMapper)
+                delay = await self.mapRouterPort(port, with: mapper, afresh: afresh)
+                afresh = false
             }
         }
     }
 
-    /// Returns when to ask again.
-    private func mapRouterPort(_ port: UInt16, with mapper: any RouterPortMapper) async -> Duration {
+    /// Renews the open port, or maps it afresh when that fails or there is none. Returns when to ask again.
+    private func mapRouterPort(_ port: UInt16, with mapper: any RouterPortMapper, afresh: Bool = false) async -> Duration {
         do {
-            let mapping = try await mapper.map(port: port)
+            let mapping: RouterMapping
+            if !afresh, case .open(let open) = router, let renewed = try? await mapper.renew(open) {
+                mapping = renewed
+            } else {
+                mapping = try await mapper.map(port: port)
+            }
             guard opensRouterPort, case .listening = state else {
                 await mapper.unmap(mapping)
                 return .zero
             }
-            router = .open(mapping)
-            return .seconds(mapping.lifetime > 0 ? max(60, mapping.lifetime / 2) : 1800)
+            // A network change started a newer check while the router was answering.
+            guard !Task.isCancelled else { return .zero }
+            routerFailures = 0
+            // Unchanged, it leaves views and the endpoints devices are told alone.
+            if router != .open(mapping) { router = .open(mapping) }
+            return routerChecks.delay(keeping: mapping)
         } catch {
-            guard opensRouterPort else { return .zero }
+            guard opensRouterPort, !Task.isCancelled else { return .zero }
             router = .failed(error.localizedDescription)
-            return .seconds(300)
+            routerFailures += 1
+            return routerChecks.retry(after: routerFailures)
         }
     }
 
     private func closeRouterPort() {
         routerRenewal?.cancel()
         routerRenewal = nil
+        routerFailures = 0
         if case .open(let mapping) = router, let routerMapper { Task { await routerMapper.unmap(mapping) } }
         router = .off
     }
