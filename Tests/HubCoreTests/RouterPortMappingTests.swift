@@ -103,4 +103,36 @@ final class RouterPortMappingTests: XCTestCase {
             """.utf8)
         XCTAssertEqual(UPnP.faultCode(in: fault), 725)
     }
+
+    func testAPortMappingEntryNamesWhereItForwards() {
+        func entry(client: String, port: String = "38415", enabled: String = "1") -> Data {
+            Data("""
+                <?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>
+                <u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+                <NewInternalPort>\(port)</NewInternalPort><NewInternalClient>\(client)</NewInternalClient>
+                <NewEnabled>\(enabled)</NewEnabled><NewPortMappingDescription>Noodle Hub</NewPortMappingDescription>
+                <NewLeaseDuration>1790</NewLeaseDuration></u:GetSpecificPortMappingEntryResponse></s:Body></s:Envelope>
+                """.utf8)
+        }
+        XCTAssertEqual(UPnP.forwardedClient(in: entry(client: "192.168.1.20"), port: 38_415), "192.168.1.20")
+        XCTAssertNil(UPnP.forwardedClient(in: entry(client: "192.168.1.20", port: "38416"), port: 38_415))
+        XCTAssertNil(UPnP.forwardedClient(in: entry(client: "192.168.1.20", enabled: "0"), port: 38_415))
+        XCTAssertNil(UPnP.forwardedClient(in: Data("<errorCode>714</errorCode>".utf8), port: 38_415))
+    }
+
+    func testAnOpenPortIsCheckedEveryFewMinutesAndBeforeHalfItsLease() {
+        let checks = RouterChecks.standard
+        func mapping(lifetime: Int) -> RouterMapping {
+            RouterMapping(endpoint: LinkEndpoint(host: "203.0.113.9", port: 38_415), method: .natPMP, lifetime: lifetime)
+        }
+        XCTAssertEqual(checks.delay(keeping: mapping(lifetime: 3600)), .seconds(180))
+        XCTAssertEqual(checks.delay(keeping: mapping(lifetime: 0)), .seconds(180))
+        XCTAssertEqual(checks.delay(keeping: mapping(lifetime: 120)), .seconds(60))
+    }
+
+    func testARefusingRouterIsAskedAgainWithGrowingWaits() {
+        XCTAssertEqual((1...7).map(RouterChecks.standard.retry(after:)),
+                       [30, 60, 120, 240, 300, 300, 300].map { Duration.seconds($0) })
+        XCTAssertEqual(RouterChecks.standard.retry(after: 1_000), .seconds(300))
+    }
 }

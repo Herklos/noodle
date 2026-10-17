@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- A Hub reached through your router comes back within minutes, not half an hour, when the router forgets the port it opened, restarts or gets a new internet address, and right away when this Mac joins another network.
 - Closed sheets and Settings windows are freed, so the app no longer slows down the longer it runs.
 - A closed Usage window no longer keeps reading usage history, which slowed scrolling and typing.
 
