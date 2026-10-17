@@ -174,6 +174,11 @@ private final class Once<T>: @unchecked Sendable {
     private var closed = true
     private var connectedOnce = false
     private var streamRequested = false
+    /// Capture pauses while the main desktop's displays are unknown, as when the
+    /// Mac is locked. Terminals and files keep running; capture resumes once the
+    /// displays return, after the helper has confirmed the stop.
+    private var captureStop: Task<Void, Never>?
+    private var captureResume: Task<Void, Never>?
     private var disconnectExpected = false
     var isConnected: Bool { !closed && input != nil && output != nil }
     private var mainDisplays: Set<CGDirectDisplayID> = []
@@ -188,8 +193,9 @@ private final class Once<T>: @unchecked Sendable {
         return Set(ids.prefix(Int(count)))
     }
     func start(id: UUID) async throws {
+        // Empty while the Mac is locked. Only capture needs these displays, so
+        // the computer starts without it and captures once they are known.
         mainDisplays = displayIDs()
-        guard !mainDisplays.isEmpty else { throw ComputerError("Cannot verify the main desktop's displays before startup.") }
         try await LocalMacSetup.prepare(id)
         let connection = try LocalMacSetup.connection(); defer { connection.invalidate() }
         let handles: (FileHandle, FileHandle) = try await withCheckedThrowingContinuation { continuation in
@@ -207,7 +213,9 @@ private final class Once<T>: @unchecked Sendable {
     /// GUI login, service registration, or a privileged test process.
     func connect(input: FileHandle, output: FileHandle, protectedDisplays: Set<UInt32>) async throws {
         guard !connectedOnce else { throw ComputerError("Reconnect with a new desktop connection.") }
-        try LocalMacCapturePolicy.validateProtectedDisplays(Array(protectedDisplays))
+        // An empty set means the displays are unknown, not that none need
+        // protecting: the helper refuses to capture without them.
+        if !protectedDisplays.isEmpty { try LocalMacCapturePolicy.validateProtectedDisplays(Array(protectedDisplays)) }
         connectedOnce = true; mainDisplays = protectedDisplays
         self.input = input; self.output = output; closed = false
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -229,14 +237,49 @@ private final class Once<T>: @unchecked Sendable {
     private func startCaptureIfPermitted() async throws {
         // Keep the connection (and Stop/Delete) usable while consent is missing.
         // Entering ScreenCaptureKit here can wait on an unseen background prompt.
-        guard !streamRequested, let status, status.screenCapture, status.canControl else { return }
+        // The helper handles requests concurrently: never start while a stop is
+        // still in flight, or the stop could end the new stream.
+        guard !streamRequested, captureStop == nil, let status, status.screenCapture, status.canControl else { return }
         let current = displayIDs()
-        guard !current.isEmpty else { throw ComputerError("Cannot verify the main desktop's displays before capture.") }
+        guard !current.isEmpty else { resumeCaptureWhenDisplaysReturn(); return }
+        captureResume?.cancel(); captureResume = nil
         mainDisplays.formUnion(current)
         var stream = LocalMacRequest(.stream); stream.enabled = true
         stream.protectedDisplayIDs = Array(mainDisplays).sorted()
         streamRequested = true
         _ = try await call(stream)
+    }
+    private func pauseCapture() {
+        image = nil; latestFrame = nil
+        if !windowPreviews.isEmpty { windowPreviews.removeAll(); windowPresenter.dismissAll() }
+        streamRequested = false
+        // Already stopped and waiting for the displays: status updates while
+        // locked need no further stop.
+        guard captureStop == nil, captureResume == nil else { return }
+        // Stopping the stream also ends the helper's window captures.
+        captureStop = Task { [weak self] in
+            var stop = LocalMacRequest(.stream); stop.enabled = false
+            _ = try? await self?.call(stop)
+            guard let self, !Task.isCancelled else { return }
+            self.captureStop = nil
+            self.resumeCaptureWhenDisplaysReturn()
+        }
+    }
+    /// The desktop view polls too, but only while it is shown; bots and
+    /// terminal-only use also need capture back after the Mac is unlocked.
+    private func resumeCaptureWhenDisplaysReturn() {
+        guard captureResume == nil else { return }
+        captureResume = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.isConnected else { return }
+                if !self.displayIDs().isEmpty {
+                    self.captureResume = nil
+                    await self.refreshStatus()
+                    return
+                }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
     }
     private func receive(_ reply: LocalMacReply) {
         guard !closed else { return }
@@ -249,11 +292,12 @@ private final class Once<T>: @unchecked Sendable {
         if reply.id == nil, let error = reply.error { disconnect(error); return }
         if let status = reply.status {
             self.status = status
-            if !verifyCaptureDisplay() { return }
-            if status.canControl, inputFailure == LocalMacStatus.inputPermissionError { clearInputFailure() }
+            // A paused capture still answers the request below; only a
+            // disconnect has already failed every pending request.
+            if verifyCaptureDisplay(), status.canControl, inputFailure == LocalMacStatus.inputPermissionError { clearInputFailure() }
+            guard !closed else { return }
         }
-        if reply.frame, let data = reply.data, status?.displayID != nil {
-            guard verifyCaptureDisplay() else { return }
+        if reply.frame, let data = reply.data, status?.displayID != nil, verifyCaptureDisplay() {
             if let geometry = reply.windowFrame {
                 if windowPreviews[geometry.previewID] != nil, let image = NSImage(data: data) {
                     windowPreviews[geometry.previewID]?.image = image
@@ -268,14 +312,18 @@ private final class Once<T>: @unchecked Sendable {
             else { continuation.resume(returning: reply) }
         }
     }
+    /// Frames are shown only while the main desktop's displays are known and
+    /// none of them is the one captured. Unknown displays (a locked Mac) pause
+    /// capture; a captured main-desktop display ends the connection.
     private func verifyCaptureDisplay() -> Bool {
         guard let id = status?.displayID else { return true }
         let current = displayIDs()
-        guard !current.isEmpty, !mainDisplays.contains(id), !current.contains(id) else {
+        if mainDisplays.contains(id) || current.contains(id) {
             image = nil; latestFrame = nil
             disconnect("Desktop capture stopped because its display could not be kept separate from the main desktop.")
             return false
         }
+        guard !current.isEmpty else { pauseCapture(); return false }
         return true
     }
     func call(_ request: LocalMacRequest) async throws -> LocalMacReply {
@@ -399,6 +447,7 @@ private final class Once<T>: @unchecked Sendable {
         let notify = !closed && !disconnectExpected; closed = true
         windowPreviews.removeAll(); windowPresenter.dismissAll()
         inputPump?.cancel(); inputPump = nil; inputQueue.removeAll()
+        captureStop?.cancel(); captureStop = nil; captureResume?.cancel(); captureResume = nil
         try? output?.close(); output = nil; try? input?.close(); input = nil
         for continuation in pending.values { continuation.resume(throwing: ComputerError(message)) }; pending.removeAll()
         for task in timeouts.values { task.cancel() }; timeouts.removeAll()
