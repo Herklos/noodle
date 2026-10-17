@@ -1,8 +1,10 @@
 #!/bin/zsh
 # Tests, packages and uploads the phone app, from the Xcode project Tuist generates from Mobile/Project.swift.
-#   run                        builds Noodle Dev and opens it on an iPhone simulator
-#   test [ARGUMENT ...]        runs its tests on an iPhone simulator; arguments go to xcodebuild, as
-#                              -only-testing:NoodleMobileTests/HubChatsTests
+#   run                        builds Noodle Dev and opens it on this Mac as an iPad app
+#   test [ARGUMENT ...]        runs its tests on this Mac as an iPad app, and on CI on an iPhone simulator;
+#                              arguments go to xcodebuild, as -only-testing:NoodleMobileTests/HubChatsTests
+# Locally nothing boots a simulator: one is a whole iOS system at full priority, which on top of everything
+# else open has run this Mac out of memory. Set MOBILE_SIMULATOR=1 to use one anyway.
 #   package VERSION BUILD DIR  archives a release, exports Noodle-Mobile.ipa and its checksum into DIR and
 #                              has App Store Connect validate it
 #   upload IPA                 sends a packaged app to App Store Connect, where TestFlight picks it up
@@ -40,6 +42,9 @@ require_key() {
 
 build() { zsh "$project_root/scripts/build-priority.sh" xcodebuild "$@"; }
 
+on_mac=(-destination 'platform=macOS,arch=arm64,variant=Designed for iPad' -allowProvisioningUpdates)
+use_simulator() { [[ -n "${CI:-}${MOBILE_SIMULATOR:-}" ]]; }
+
 # An iPhone simulator on the newest iOS, preferring one already running.
 choose_simulator() {
     simulator="$(xcrun simctl list devices available --json | python3 -c '
@@ -53,8 +58,14 @@ print(next((d["udid"] for d in phones if d["state"] == "Booted"), phones[0]["udi
 
 case "$command" in
     run)
-        choose_simulator
         generate
+        if ! use_simulator; then
+            build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
+                -derivedDataPath "$folder/Derived" "${on_mac[@]}" build
+            open "$folder/Derived/Build/Products/Debug-iphoneos/NoodleMobile.app"
+            exit
+        fi
+        choose_simulator
         build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
             -derivedDataPath "$folder/Derived" -destination "id=$simulator" build
         xcrun simctl boot "$simulator" 2>/dev/null || true
@@ -66,8 +77,14 @@ case "$command" in
         xcrun simctl launch --terminate-running-process "$simulator" com.pdparchitect.noodle.mobile.local
         ;;
     test)
-        choose_simulator
         generate
+        if ! use_simulator; then
+            build -workspace "$folder/NoodleMobile.xcworkspace" -scheme NoodleMobile -configuration Debug \
+                -derivedDataPath "$folder/Derived" "${on_mac[@]}" -parallel-testing-enabled NO \
+                -collect-test-diagnostics never "$@" test
+            exit
+        fi
+        choose_simulator
         # One simulator rather than clones of it, except on CI.
         parallel=()
         [[ -n "${CI:-}" ]] || parallel=(-parallel-testing-enabled NO)
