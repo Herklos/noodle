@@ -45,6 +45,11 @@ import XCTest
                 try wire.reply("turn/start", result: ["turn": ["id": "turn-one"]]); await f.drain()
             }
             p.notify(immediately: true)
+            if provider == .claudeCode {
+                // Claude Code is interrupted only when its turn does not read the message.
+                try await f.clock.next(.seconds(30)).resolve(.success(()))
+                try await f.wait { wire.count("control_request") == 1 }
+            }
             let timer = try await f.clock.next(.seconds(10)); timer.resolve(.success(()))
             try await f.wait { p.snapshot.phase == .failed }
             XCTAssertEqual(f.failures.count, 1)

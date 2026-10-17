@@ -144,17 +144,70 @@ import XCTest
         XCTAssertFalse(f.recovery(.claudeCode).hasUnfinishedTurn)
     }
 
-    func testInterruptWaitsForBothAcknowledgementAndCompletionInEitherOrder() async throws {
+    private func toolRound(_ wire: HarnessWire) throws {
+        wire.emit(["type": "user", "session_id": try XCTUnwrap(wire.launches.last?.2).uuidString, "parent_tool_use_id": NSNull(),
+                   "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "fixture-tool", "content": "done"]]]])
+    }
+    private func backgroundTasks(_ wire: HarnessWire, _ count: Int) throws {
+        wire.emit(["type": "system", "subtype": "background_tasks_changed", "session_id": try XCTUnwrap(wire.launches.last?.2).uuidString,
+                   "tasks": (0..<count).map { ["task_id": "fixture-task-\($0)", "task_type": "local_agent"] }])
+    }
+    private func text(_ write: [String: Any]) -> String? {
+        ((write["message"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String
+    }
+
+    /// An interrupt also cancels the background tasks the turn started, so an urgent
+    /// message joins the running turn and the bot decides itself what to stop.
+    func testUrgentMessageJoinsTheRunningTurnWithoutInterruptingIt() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
+        try await ready(f, wire, p); p.notify()
+        let id = p.notify(); p.promoteNotification(id)
+        try await f.wait { wire.count("user") == 2 }
+        XCTAssertEqual(text(try wire.last("user")), AgentWakeReason.inboxChanged.eventText)
+        XCTAssertEqual(wire.count("control_request"), 0)
+        XCTAssertFalse(p.canReceiveHeartbeat)
+        try toolRound(wire); try complete(wire); try await f.wait { p.canReceiveHeartbeat }
+        try await f.clock.next(.seconds(30)).resolve(.success(())); await f.drain()
+        XCTAssertEqual(wire.count("user"), 2, "The turn read the message, so no second turn starts")
+        XCTAssertEqual(wire.count("control_request"), 0)
+        XCTAssertFalse(f.recovery(.claudeCode).hasUnfinishedTurn)
+        XCTAssertTrue(f.failures.isEmpty)
+    }
+
+    /// A turn that ends before reading the message leaves it with Claude Code, which
+    /// answers it in a turn of its own. Noodle follows that turn and adds no wake.
+    func testMessageLeftForClaudesNextTurnStartsNoSecondWake() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
+        try await ready(f, wire, p); p.notify(); p.notify(immediately: true)
+        try await f.wait { wire.count("user") == 2 }
+        try complete(wire); try await f.wait { p.canReceiveHeartbeat }
+        wire.emit(["type": "assistant", "session_id": try XCTUnwrap(wire.launches.last?.2).uuidString,
+                   "parent_tool_use_id": NSNull(), "message": ["content": [["type": "text", "text": "Reading messages"]]]])
+        try await f.wait { p.snapshot.phase == .working }
+        try complete(wire); try await f.wait { p.canReceiveHeartbeat }
+        try await f.clock.next(.seconds(30)).resolve(.success(())); await f.drain()
+        XCTAssertEqual(wire.count("user"), 2)
+        XCTAssertEqual(wire.count("control_request"), 0)
+        XCTAssertFalse(f.recovery(.claudeCode).hasUnfinishedTurn)
+    }
+
+    /// A turn stuck in one long step never reads the message. With nothing running in
+    /// the background it is interrupted, and the message then gets a turn of its own.
+    func testUnreadMessageInterruptsAndWaitsForAcknowledgementAndCompletionInEitherOrder() async throws {
         for acknowledgementFirst in [false, true] {
             let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
             try await ready(f, wire, p); p.notify()
             let id = p.notify(); p.promoteNotification(id)
+            XCTAssertEqual(wire.count("user"), 2)
+            XCTAssertEqual(wire.count("control_request"), 0)
+            try await f.clock.next(.seconds(30)).resolve(.success(()))
+            try await f.wait { wire.count("control_request") == 1 }
             let requestID = try XCTUnwrap(wire.last("control_request")["request_id"] as? String)
             let ack: [String: Any] = ["type": "control_response", "response": ["request_id": requestID, "subtype": "success"]]
             if acknowledgementFirst { wire.emit(ack) } else { try complete(wire) }
-            await f.drain(); XCTAssertEqual(wire.count("user"), 1)
+            await f.drain(); XCTAssertEqual(wire.count("user"), 2)
             if acknowledgementFirst { try complete(wire) } else { wire.emit(ack) }
-            try await f.wait { wire.count("user") == 2 }
+            try await f.wait { wire.count("user") == 3 }
             XCTAssertEqual(wire.count("control_request"), 1)
         }
     }
@@ -162,10 +215,33 @@ import XCTest
     func testRejectedInterruptDefersWithoutRepeatedRequests() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
         try await ready(f, wire, p); p.notify(); p.notify(immediately: true)
+        try await f.clock.next(.seconds(30)).resolve(.success(()))
+        try await f.wait { wire.count("control_request") == 1 }
         let id = try XCTUnwrap(wire.last("control_request")["request_id"] as? String)
         wire.emit(["type": "control_response", "response": ["request_id": id, "subtype": "error"]])
         await f.drain(); XCTAssertEqual(wire.count("control_request"), 1)
-        try complete(wire); try await f.wait { wire.count("user") == 2 }
+        try complete(wire); try await f.wait { wire.count("user") == 3 }
+    }
+
+    /// The bot stops its own background tasks when asked; Noodle never interrupts a
+    /// turn while they run, however long it takes to read the message.
+    func testUrgentMessageNeverInterruptsWhileBackgroundTasksRun() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
+        try await ready(f, wire, p); p.notify(); try backgroundTasks(wire, 1); await f.drain()
+        p.notify(immediately: true)
+        try await f.clock.next(.seconds(30)).resolve(.success(())); await f.drain()
+        XCTAssertEqual(wire.count("user"), 2)
+        XCTAssertEqual(wire.count("control_request"), 0)
+        let waits = f.clock.waits.count
+        p.notify(immediately: true)
+        XCTAssertEqual(wire.count("user"), 3, "A later message joins the turn too")
+        try await f.clock.next(.seconds(30), after: waits).resolve(.success(())); await f.drain()
+        XCTAssertEqual(wire.count("control_request"), 0)
+        try complete(wire); await f.drain()
+        XCTAssertEqual(p.snapshot.phase, .working)
+        try backgroundTasks(wire, 0); try await f.wait { p.canReceiveHeartbeat }
+        XCTAssertEqual(wire.count("user"), 3)
+        XCTAssertEqual(wire.count("control_request"), 0)
     }
 
     func testExplicitMissingSessionClearsOnlyPointerAndPreservesRecovery() async throws {
