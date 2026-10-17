@@ -6,6 +6,7 @@ import NoodleAudioCapture
 import NoodleCore
 import NoodleRuntime
 import NoodleVoicePeer
+import os
 
 @MainActor protocol VoiceCallRuntime: AnyObject {
     func startVoiceCall(agentID: UUID, _ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws
@@ -298,6 +299,47 @@ final class SpokenAudio: @unchecked Sendable {
     func hear(_ samples: [Int16]) { lock.withLock { send }?(samples) }
 }
 
+/// How a call's audio starts: one engine with voice processing when the devices allow it, else
+/// the microphone and speakers apart. Some pairs of microphone and speakers refuse voice
+/// processing, or one engine for both, as a headset's microphone with the display's speakers;
+/// headphones need no echo cancellation. Trying voice processing can also switch a Bluetooth
+/// headset into its call mode, and until that settles its formats are stale and starting fails,
+/// so starting apart is tried a few times.
+@MainActor enum VoiceCallAudioStart {
+    static let attempts = 5
+
+    static func run<Started>(audio: VoiceAudioQueue, processed: @escaping @Sendable () throws -> Started,
+                             apart: @escaping @Sendable () throws -> Started,
+                             wait: () async throws -> Void = { try await Task.sleep(for: .milliseconds(300)) })
+        async throws -> Started {
+        let refusal: Error
+        do { return try await audio.run(processed) } catch let error as VoiceAudioQueue.Unresponsive {
+            throw error
+        } catch { refusal = error }
+        var failure = refusal
+        for attempt in 0..<attempts {
+            if attempt > 0 { try await wait() }
+            do { return try await audio.run(apart) } catch let error as VoiceAudioQueue.Unresponsive {
+                throw error
+            } catch { failure = error }
+        }
+        // Core Audio's own errors mean nothing to the person; the log keeps them, the first included.
+        let first = String(describing: refusal), last = String(describing: failure)
+        log.error("Call audio did not start. With voice processing: \(first, privacy: .public); apart: \(last, privacy: .public)")
+        // The microphone's own messages, as a disconnected one, already say what to do.
+        if failure is VoiceFailure { throw failure }
+        throw StartFailure()
+    }
+
+    private static let log = Logger(subsystem: "com.pdparchitect.noodle", category: "VoiceCall")
+
+    struct StartFailure: LocalizedError {
+        var errorDescription: String? {
+            "The call could not use the microphone or speakers. Reconnect your headphones or choose another microphone in Settings → Chat, then call again."
+        }
+    }
+}
+
 /// The microphone chosen for dictation, with the Mac's own voice processing cancelling the bot's
 /// voice from it, as on a FaceTime call, and the bot's voice on the speakers.
 @MainActor final class EngineVoiceCallMedia: VoiceCallMedia {
@@ -309,41 +351,67 @@ final class SpokenAudio: @unchecked Sendable {
     private var engine: AVAudioEngine?
     /// Plays the bot's voice when the microphone has an engine of its own.
     private var speakerEngine: AVAudioEngine?
-    private var configurationObserver: NSObjectProtocol?
+    private var configurationObservers: [NSObjectProtocol] = []
+    private var isClosed = false
 
     func start(hear: @escaping @Sendable ([Int16]) -> Void) async throws {
         try await Self.requestMicrophone()
         microphone.hear = hear
         let microphone = microphone, playout = playout
-        let (engine, capture, speakerEngine) = try await audio.run { () throws -> (AVAudioEngine, NoodleAudioCapture, AVAudioEngine?) in
+        let (engine, capture, speakerEngine) = try await VoiceCallAudioStart.run(audio: audio, processed: {
+            let (engine, capture) = try Self.makeEngine(microphone: microphone, playout: playout)
+            return (engine, capture, AVAudioEngine?.none)
+        }, apart: {
+            let speaker = try Self.makeSpeaker(playout: playout)
+            let engine = AVAudioEngine()
+            let capture = NoodleAudioCapture(engine: engine)
             do {
-                let (engine, capture) = try Self.makeEngine(microphone: microphone, playout: playout)
-                return (engine, capture, nil)
-            } catch {
-                // Some pairs of microphone and speakers refuse voice processing, or one engine for
-                // both, as a headset's microphone with the display's speakers: listen as dictation
-                // does, and play the voice apart. Headphones need no echo cancellation.
-                let speaker = try Self.makeSpeaker(playout: playout)
-                let engine = AVAudioEngine()
                 _ = try VoiceInputDevice.configure(engine)
-                let capture = NoodleAudioCapture(engine: engine)
-                do {
-                    try capture.start(withBufferSize: 960) { buffer, _ in microphone.deliver(buffer) }
-                } catch {
-                    speaker.stop()
-                    throw error
-                }
-                return (engine, capture, speaker)
+                try capture.start(withBufferSize: 960) { buffer, _ in microphone.deliver(buffer) }
+            } catch {
+                speaker.stop()
+                throw error
             }
+            return (engine, capture, AVAudioEngine?.some(speaker))
+        })
+        // Starting can take a while as a headset settles; a call hung up meanwhile stays closed.
+        guard !isClosed else {
+            audio.post {
+                capture.stop()
+                speakerEngine?.stop()
+            }
+            throw CancellationError()
         }
         self.engine = engine
         self.capture = capture
         self.speakerEngine = speakerEngine
         // A device change stops the engine, and voice processing reports one as it settles: start
-        // listening again, in the new format.
-        configurationObserver = NotificationCenter.default.addObserver(
+        // listening again, in the new format. The speakers' own engine stops the same way.
+        configurationObservers = [NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.restart() }
+        }]
+        if let speakerEngine {
+            configurationObservers.append(NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange, object: speakerEngine, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.restartSpeaker() }
+            })
+        }
+    }
+
+    private func restartSpeaker() {
+        guard let speakerEngine else { return }
+        Task { [weak self, audio] in
+            do {
+                try await audio.run {
+                    guard !speakerEngine.isRunning else { return }
+                    speakerEngine.prepare()
+                    try speakerEngine.start()
+                }
+            } catch {
+                guard let self, self.speakerEngine === speakerEngine else { return }
+                self.onFailure?("The microphone or speakers changed and the call could not go on.")
+            }
         }
     }
 
@@ -365,6 +433,10 @@ final class SpokenAudio: @unchecked Sendable {
     nonisolated private static func makeEngine(microphone: MicrophoneTap,
                                                playout: LinkCallPlayout) throws -> (AVAudioEngine, NoodleAudioCapture) {
         let engine = AVAudioEngine()
+        // The chosen microphone before voice processing, which is set up for the devices in place
+        // when it is enabled. Enabling it can bring back the system input; configuring again then
+        // restores the chosen one, and does nothing when it stayed.
+        _ = try VoiceInputDevice.configure(engine)
         try engine.inputNode.setVoiceProcessingEnabled(true)
         // Other apps' sound stays as it was.
         engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration =
@@ -405,8 +477,9 @@ final class SpokenAudio: @unchecked Sendable {
     func announceConnected() { playout.append(Self.chime) }
 
     func close() {
-        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
-        configurationObserver = nil
+        isClosed = true
+        for observer in configurationObservers { NotificationCenter.default.removeObserver(observer) }
+        configurationObservers = []
         microphone.hear = nil
         let capture = capture, speakerEngine = speakerEngine
         audio.post {
