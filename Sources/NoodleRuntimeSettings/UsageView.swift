@@ -1,3 +1,4 @@
+import AppKit
 import Charts
 import NoodleCore
 import NoodleRuntime
@@ -129,6 +130,9 @@ public struct UsageView: View {
     @State private var grouping = UsageReport.Grouping.agent
     @State private var metric = UsageReport.Metric.tokens
     @State private var selectedBucket: Date?
+    /// Read only while the window is on screen: SwiftUI keeps a closed window alive to reopen it.
+    @State private var days: [UsageDay]?
+    @State private var visible = false
 
     /// Categorical hues in fixed order, stepped for the dark surface; anything past them folds into Other.
     private static let hues: [Color] = ([0x3987e5, 0xd95926, 0x199e70, 0xc98500, 0xd55181, 0x008300, 0x9085e9] as [Int]).map(color)
@@ -147,13 +151,13 @@ public struct UsageView: View {
     }
 
     public var body: some View {
-        let _ = history.revision
         let now = Date()
         let range = UsageReport.range(span, now: now)
-        let days = history.days(from: range.lowerBound, to: range.upperBound, agentID: history.agentFilter)
-        let report = UsageReport(days: days, span: span, grouping: grouping, metric: metric, now: now)
+        let report = UsageReport(days: days ?? [], span: span, grouping: grouping, metric: metric, now: now)
         Group {
-            if days.isEmpty {
+            if days == nil {
+                Color.clear
+            } else if days?.isEmpty == true {
                 ContentUnavailableView("No Usage", systemImage: "chart.bar.xaxis",
                                        description: Text("No tokens were used in this period."))
             } else {
@@ -170,6 +174,12 @@ public struct UsageView: View {
             }
         }
         .frame(minWidth: 840, minHeight: 560)
+        .background(WindowVisibilityObserver { visible = $0 })
+        .task(id: LedgerQuery(revision: history.revision, span: span, agentID: history.agentFilter, visible: visible)) {
+            guard visible else { return }
+            let range = UsageReport.range(span, now: Date())
+            days = history.days(from: range.lowerBound, to: range.upperBound, agentID: history.agentFilter)
+        }
         .navigationSubtitle(rangeText(range))
         .toolbar { toolbar() }
     }
@@ -360,5 +370,40 @@ public struct UsageView: View {
 
     private static func costText(_ value: Double) -> String {
         value.formatted(.currency(code: "USD").precision(.fractionLength(value < 1 && value > 0 ? 3 : 2)))
+    }
+}
+
+private struct LedgerQuery: Equatable {
+    let revision: Int
+    let span: UsageReport.Span
+    let agentID: UUID?
+    let visible: Bool
+}
+
+/// Reports whether the hosting window is on screen; closing a window only orders it out.
+private struct WindowVisibilityObserver: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class ObserverView: NSView {
+        var onChange: ((Bool) -> Void)?
+        private var observation: NSKeyValueObservation?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observation = window?.observe(\.isVisible, options: [.initial, .new]) { [weak self] window, _ in
+                // KVO can fire inside SwiftUI layout; defer the state change.
+                let visible = window.isVisible
+                DispatchQueue.main.async { self?.onChange?(visible) }
+            }
+            if window == nil { DispatchQueue.main.async { [weak self] in self?.onChange?(false) } }
+        }
     }
 }

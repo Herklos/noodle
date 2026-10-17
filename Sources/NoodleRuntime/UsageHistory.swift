@@ -10,6 +10,7 @@ public final class UsageHistory {
     /// Set before opening the window to show one bot.
     public var agentFilter: UUID?
     @ObservationIgnored private let ledger: UsageLedger?
+    @ObservationIgnored private(set) var queries = 0
 
     public init(url: URL) {
         ledger = try? UsageLedger(url: url)
@@ -25,6 +26,7 @@ public final class UsageHistory {
     }
 
     public func days(from start: Date, to end: Date, agentID: UUID?) -> [UsageDay] {
-        (try? ledger?.days(from: start, to: end, agentID: agentID)) ?? []
+        queries += 1
+        return (try? ledger?.days(from: start, to: end, agentID: agentID)) ?? []
     }
 }

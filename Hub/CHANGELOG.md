@@ -5,6 +5,7 @@
 ### Fixed
 
 - Closed sheets and Settings windows are freed, so the app no longer slows down the longer it runs.
+- A closed Usage window no longer keeps reading usage history, which slowed scrolling and typing.
 
 ## [0.35.2] - 2026-10-17
 
