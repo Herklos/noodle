@@ -60,6 +60,22 @@ public struct AgentStorageLayout: Sendable {
         try Self.requireDirectory(runtime)
     }
 
+    /// Makes the empty workspace or runtime folder `create` makes, when nothing else is wrong
+    /// with a current package, as after a crash or a full disk cut writing a bot short.
+    /// Anything else, such as an older, redirected or unreadable package, is left for
+    /// `validate` and the configuration to refuse, untouched.
+    func restoreMissingFolders() throws {
+        let missing = [workspace, runtime].filter { !Self.exists($0) }
+        let marker = package.appendingPathComponent(Self.markerName)
+        guard !missing.isEmpty, (try? Self.requireDirectory(package)) != nil, (try? Self.requireFile(marker)) != nil,
+              (try? JSONDecoder().decode(Marker.self, from: Data(contentsOf: marker)))?.version == Self.version,
+              (try? Self.requireFile(configuration)) != nil,
+              (try? AgentConfiguration.load(from: self).requireBackstory()) != nil else { return }
+        for folder in missing {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        }
+    }
+
     func markCurrent() throws {
         try Self.writeState(Marker(version: Self.version), to: package.appendingPathComponent(Self.markerName))
     }

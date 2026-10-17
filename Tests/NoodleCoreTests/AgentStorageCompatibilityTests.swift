@@ -83,6 +83,39 @@ final class AgentStorageCompatibilityTests: XCTestCase {
         XCTAssertThrowsError(try repository.loadAgents())
     }
 
+    /// A package written by hand, or cut short by a crash or a full disk, can hold only its
+    /// marker and agent.json; it gets the empty folders a new bot starts with and loads.
+    func testAPackageWithOnlyItsConfigurationGetsItsFoldersBack() throws {
+        let agent = AgentRecord(displayName: "Partial", harnessIdentifier: "claude-code")
+        let layout = repository.storage(for: agent.id)
+        try FileManager.default.createDirectory(at: layout.package, withIntermediateDirectories: false)
+        try Data("{\"version\":1}".utf8).write(to: layout.package.appendingPathComponent(AgentStorageLayout.markerName))
+        try AgentConfiguration(agent: agent, backstory: "Kept").save(to: layout)
+        XCTAssertEqual(try repository.loadAgents().map(\.id), [agent.id])
+        XCTAssertNoThrow(try layout.validate())
+        try repository.synchronizeAgentWorkspace(agent)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.workspace.appendingPathComponent("AGENTS.md").path))
+        XCTAssertEqual(try repository.loadAgentBackstory(agent), "Kept")
+
+        try FileManager.default.removeItem(at: layout.runtime)
+        XCTAssertEqual(try repository.loadAgents().map(\.id), [agent.id])
+        XCTAssertNoThrow(try layout.validate())
+    }
+
+    /// Only a package Noodle could otherwise load is completed.
+    func testAPartialPackageThatCannotBeReadIsRefusedUntouched() throws {
+        for configuration in ["{\"displayName\":\"Broken\"}", "not json"] {
+            let layout = repository.storage(for: UUID())
+            try FileManager.default.createDirectory(at: layout.package, withIntermediateDirectories: false)
+            try Data("{\"version\":1}".utf8).write(to: layout.package.appendingPathComponent(AgentStorageLayout.markerName))
+            try Data(configuration.utf8).write(to: layout.configuration)
+            XCTAssertThrowsError(try repository.loadAgents())
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: layout.package.path).sorted(),
+                           [AgentStorageLayout.markerName, "agent.json"])
+            try FileManager.default.removeItem(at: layout.package)
+        }
+    }
+
     /// Several loops ask for the bots every second; an unchanged package is not read again,
     /// but an edit or a redirect made since is still seen.
     func testUnchangedPackagesAreNotReadAgainButChangesAreSeen() throws {

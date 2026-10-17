@@ -467,6 +467,7 @@ public struct WorkspaceRepository: Sendable {
             try AgentStorageLayout.requireDirectory(url)
             try AgentStorageLayout.requireFile(layout.configuration)
             agentRecords.read()
+            try layout.restoreMissingFolders()
             try layout.validate()
             let configuration = try AgentConfiguration.load(from: layout)
             _ = try configuration.requireBackstory()
