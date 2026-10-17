@@ -102,7 +102,10 @@ private struct SettingsResizeObserver: NSViewRepresentable {
                 (NSWindow.didEndLiveResizeNotification, .liveResizeEnded)
             ]
             for (notification, event) in events {
-                NotificationCenter.default.publisher(for: notification, object: window)
+                // A publisher keeps its object alive, and this view lives in the
+                // window, so passing the window as object would leak it.
+                NotificationCenter.default.publisher(for: notification)
+                    .filter { [weak window] in $0.object as AnyObject? === window }
                     .sink { [weak self] _ in self?.onResize?(event) }
                     .store(in: &observers)
             }

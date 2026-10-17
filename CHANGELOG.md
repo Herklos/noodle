@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Closed sheets and Settings windows are freed, so the app no longer slows down the longer it runs.
+
 ## [0.66.0] - 2026-10-17
 
 ### Added

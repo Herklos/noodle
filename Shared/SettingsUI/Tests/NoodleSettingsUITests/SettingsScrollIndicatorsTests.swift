@@ -55,6 +55,26 @@ import NoodleSettingsUI
         try await wait { fixture.probe.visibility == .automatic }
     }
 
+    func testClosedWindowIsReleased() async throws {
+        guard #available(macOS 27.0, *) else { throw XCTSkip("Workaround is specific to macOS 27") }
+        weak var released: NSWindow?
+        do {
+            let window = FixtureWindow(contentRect: .init(x: -10000, y: -10000, width: 580, height: 300),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: SettingsFixture(selection: Selection()))
+            window.contentView = host
+            window.orderBack(nil)
+            try await wait {
+                host.layoutSubtreeIfNeeded()
+                return self.find(host, type: IndicatorView.self) != nil
+            }
+            window.close()
+            released = window
+        }
+        try await wait { released == nil }
+    }
+
     private func fixture() async throws -> (window: NSWindow, host: NSView, selection: Selection, probe: IndicatorView) {
         guard #available(macOS 27.0, *) else { throw XCTSkip("Workaround is specific to macOS 27") }
         let selection = Selection()
