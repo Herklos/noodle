@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 import LocalMacCore
@@ -92,6 +93,102 @@ import XCTest
         let runtime = LocalMacComputer(displayIDs: { displays })
         try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
         displays.insert(99)
+        await runtime.refreshStatus()
+        XCTAssertFalse(runtime.isConnected)
+        XCTAssertTrue(runtime.error?.contains("separate") == true)
+        _ = try await helper.value
+    }
+
+    /// Answers until the client closes, for requests the client sends by itself.
+    private final class RequestLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [LocalMacRequest] = []
+        func append(_ request: LocalMacRequest) { lock.lock(); values.append(request); lock.unlock() }
+        var requests: [LocalMacRequest] { lock.lock(); defer { lock.unlock() }; return values }
+        var streams: [LocalMacRequest] { requests.filter { $0.operation == .stream } }
+    }
+    private func openPeer(_ input: Pipe, _ output: Pipe, log: RequestLog,
+                          respond: @escaping (LocalMacRequest) -> LocalMacReply) -> Task<Void, Error> {
+        Task.detached {
+            defer { try? output.fileHandleForWriting.close(); try? input.fileHandleForReading.close() }
+            while let data = try LocalMacWire.read(input.fileHandleForReading) {
+                let request = try LocalMacWire.decode(LocalMacRequest.self, from: data)
+                try request.validate(); log.append(request)
+                try LocalMacWire.write(JSONEncoder().encode(respond(request)), to: output.fileHandleForWriting)
+            }
+        }
+    }
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(condition(), "Timed out")
+    }
+    func testLockedMacStartsWithoutCaptureUntilItsDisplaysReturn() async throws {
+        let input = Pipe(), output = Pipe(), log = RequestLog()
+        let helper = openPeer(input, output, log: log) { Self.reply($0, displayID: $0.operation == .stream ? 99 : nil) }
+        var displays: Set<UInt32> = []
+        let runtime = LocalMacComputer(displayIDs: { displays })
+        var disconnects: [String] = []; runtime.onDisconnect = { disconnects.append($0) }
+        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [])
+        XCTAssertTrue(runtime.isConnected)
+        XCTAssertEqual(log.requests.map(\.operation), [.status])
+        // No view polls here: capture must come back on its own.
+        displays = [2]
+        try await waitUntil { !log.streams.isEmpty }
+        XCTAssertEqual(log.streams.map(\.enabled), [true])
+        XCTAssertEqual(log.streams.first?.protectedDisplayIDs, [2])
+        XCTAssertTrue(disconnects.isEmpty)
+        runtime.close()
+        try await helper.value
+    }
+    func testLockingTheMacPausesCaptureAndKeepsTheConnection() async throws {
+        let input = Pipe(), output = Pipe(), log = RequestLog()
+        let frame = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)?
+            .representation(using: .png, properties: [:]))
+        var streaming = false
+        let helper = openPeer(input, output, log: log) { request in
+            if request.operation == .stream { streaming = request.enabled == true }
+            var reply = Self.reply(request, displayID: streaming ? 99 : nil)
+            if streaming { reply.frame = true; reply.data = frame }
+            return reply
+        }
+        var displays: Set<UInt32> = [2]
+        let runtime = LocalMacComputer(displayIDs: { displays })
+        var disconnects: [String] = []; runtime.onDisconnect = { disconnects.append($0) }
+        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
+        XCTAssertNotNil(runtime.image)
+
+        displays = []
+        await runtime.refreshStatus()
+        XCTAssertNil(runtime.image, "Frames must not be shown while the main desktop's displays are unknown.")
+        try await waitUntil { log.streams.count == 2 && runtime.status?.displayID == nil }
+        XCTAssertEqual(log.streams.map(\.enabled), [true, false])
+        XCTAssertTrue(runtime.isConnected)
+        XCTAssertNil(runtime.error)
+        XCTAssertNil(runtime.image)
+        var read = LocalMacRequest(.terminalRead); read.terminalID = UUID()
+        _ = try await runtime.call(read)
+
+        displays = [2]
+        try await waitUntil { log.streams.count == 3 && runtime.image != nil }
+        XCTAssertEqual(log.streams.map(\.enabled), [true, false, true])
+        XCTAssertEqual(log.streams.last?.protectedDisplayIDs, [2])
+        XCTAssertTrue(disconnects.isEmpty)
+        runtime.close()
+        try await helper.value
+    }
+    func testMainDisplayCaptureStillDisconnectsWhileTheMacIsLocked() async throws {
+        let input = Pipe(), output = Pipe()
+        var replies = 0
+        let helper = peer(input, output, count: 3) { request in
+            replies += 1
+            return Self.reply(request, displayID: ([nil, 99, 2] as [UInt32?])[replies - 1])
+        }
+        var displays: Set<UInt32> = [2]
+        let runtime = LocalMacComputer(displayIDs: { displays })
+        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
+        displays = []
         await runtime.refreshStatus()
         XCTAssertFalse(runtime.isConnected)
         XCTAssertTrue(runtime.error?.contains("separate") == true)

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Closed sheets and Settings windows are freed, so the app no longer slows down the longer it runs.
+- Local Mac computers keep running while your Mac is locked, and can be started then, instead of stopping with "Needs attention". Their terminals and files keep working; the desktop preview pauses until you unlock the Mac.
 
 ## [0.32.0] - 2026-10-17
 
