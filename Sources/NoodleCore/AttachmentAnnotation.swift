@@ -41,6 +41,18 @@ public struct AttachmentAnnotation: Codable, Hashable, Sendable {
         self.region = region
     }
 
+    /// One that arrived from elsewhere, such as a Noodle Hub; check `isValid` before keeping it.
+    public init(version: Int, sourceAttachmentID: UUID, sourceFilename: String, sourceMessageID: UUID?, quote: String?,
+                comment: String, region: Region?) {
+        self.version = version
+        self.sourceAttachmentID = sourceAttachmentID
+        self.sourceFilename = sourceFilename
+        self.sourceMessageID = sourceMessageID
+        self.quote = quote
+        self.comment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.region = region
+    }
+
     public var isValid: Bool {
         (version == 1 || version == 2) && !sourceFilename.isEmpty && !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             (region?.isValid ?? true) && !(quote != nil && region != nil)

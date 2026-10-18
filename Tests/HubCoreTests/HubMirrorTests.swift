@@ -500,6 +500,35 @@ import XCTest
         XCTAssertEqual(try f.local.loadMessages(conversationID: local.id).last?.attachmentIDs, [answer.id])
     }
 
+    /// A comment on a file reaches the bot on the Hub with what it refers to, and the bot's own comments arrive here.
+    func testCommentsOnFilesTravelBothWays() async throws {
+        let f = try await fixture()
+        let mirror = f.mirror()
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code"))
+        let local = try conversation(of: agent.id, in: f.local)
+        let resume = try f.local.importAttachment(data: Data("%PDF-1.4 resume".utf8), originalFilename: "Resume.pdf", into: local.id,
+                                                  mediaType: "application/pdf")
+        let comment = AttachmentAnnotation(source: resume, quote: "Ten years", comment: "Say eleven")
+        let note = try f.local.importAttachment(data: Data(comment.textRepresentation.utf8), originalFilename: "Annotation — Resume.txt",
+                                                into: local.id, mediaType: "text/plain", annotation: comment)
+        _ = try f.local.sendUserMessage(conversationID: local.id, body: "Fix this", attachmentIDs: [resume.id, note.id])
+        await mirror.pushPending()
+        XCTAssertNil(mirror.error)
+
+        let remoteBot = try XCTUnwrap(f.hub.repository.loadAgents().first)
+        let remote = try conversation(of: remoteBot.id, in: f.hub.repository)
+        let onHub = try f.hub.repository.loadAttachments(conversationID: remote.id)
+        XCTAssertEqual(onHub.first { $0.id == note.id }?.annotation, comment)
+
+        let hubResume = try XCTUnwrap(onHub.first { $0.id == resume.id })
+        let answer = AttachmentAnnotation(source: hubResume, quote: "Ten years", comment: "Changed to eleven")
+        let reply = try f.hub.repository.importAttachment(data: Data(answer.textRepresentation.utf8), originalFilename: "Annotation — Resume.txt",
+                                                          into: remote.id, mediaType: "text/plain", annotation: answer)
+        _ = try f.hub.repository.sendAgentMessage(agentID: remoteBot.id, conversationID: remote.id, body: "Done.", attachmentIDs: [reply.id])
+        await mirror.sync()
+        XCTAssertEqual(try f.local.loadAttachments(conversationID: local.id).first { $0.id == reply.id }?.annotation, answer)
+    }
+
     /// A link a bot on the Hub shares arrives as the same link with its card, so it opens live here.
     func testLinksFromTheHubStayLinks() async throws {
         let f = try await fixture()

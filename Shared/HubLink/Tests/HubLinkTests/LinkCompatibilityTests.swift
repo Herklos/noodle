@@ -198,6 +198,8 @@ final class LinkCompatibilityTests: XCTestCase {
         XCTAssertFalse(status.canPairDevices)
         // Nor does one without admins offer to manage its users.
         XCTAssertFalse(status.isAdmin)
+        // Nor does one that drops comments on files say it keeps them.
+        XCTAssertFalse(status.keepsAnnotations)
 
         let harness = try decode(LinkHarness.self, #"{"provider":"codex","providerName":"Codex"}"#)
         XCTAssertEqual(harness.models, [])
@@ -219,6 +221,15 @@ final class LinkCompatibilityTests: XCTestCase {
         let voice = LinkVoice(transcript: "Hello", duration: 2.5, waveform: [0.1, 0.9], localeIdentifier: "en_GB")
         let spoken = LinkAttachment(id: id, filename: "a.caf", mediaType: "audio/x-caf", byteCount: 3, voice: voice)
         XCTAssertEqual(try decode(LinkAttachment.self, String(decoding: try LinkProtocol.encoder.encode(spoken), as: UTF8.self)), spoken)
+        XCTAssertNil(file.annotation)
+        let comment = LinkAnnotation(version: 2, sourceAttachmentID: conversation, sourceFilename: "Photo.png", comment: "Crop here",
+                                     region: LinkAnnotation.Region(x: 0.1, y: 0.2, width: 0.3, height: 0.4))
+        let marked = LinkAttachment(id: id, filename: "Annotation — Photo.png", mediaType: "image/png", byteCount: 3, annotation: comment)
+        XCTAssertEqual(try decode(LinkAttachment.self, String(decoding: try LinkProtocol.encoder.encode(marked), as: UTF8.self)), marked)
+        // A comment that does not read leaves a plain file rather than failing the message.
+        let unreadable = try decode(LinkAttachment.self,
+            #"{"id":"\#(id)","filename":"a.png","mediaType":"image/png","byteCount":3,"annotation":{"comment":7}}"#)
+        XCTAssertNil(unreadable.annotation)
 
         let send = try decode(LinkOutgoingMessage.self, #"{"conversationID":"\#(conversation)","id":"\#(id)","body":"Hi"}"#)
         XCTAssertEqual(send.attachmentIDs, [])
@@ -315,6 +326,10 @@ final class LinkVersion1Tests: XCTestCase {
             "people": .people, "shareBot": .shareBot(id: a, people: [b, c]),
             "setAvatar": .setAvatar(LinkAvatar(symbol: "leaf.fill", colour: 3, imageDigest: "abc")), "noAvatar": .setAvatar(nil),
             "personPicture": .picture(.person(b)),
+            "annotatedUpload": .upload(conversationID: b, attachment: LinkAttachment(
+                id: c, filename: "Annotation — Report.txt", mediaType: "text/plain", byteCount: 7,
+                annotation: LinkAnnotation(version: 2, sourceAttachmentID: a, sourceFilename: "Report.pdf", sourceMessageID: b,
+                                           quote: "Q3 revenue", comment: "Check this figure")), offset: 0, data: Data([9])),
         ]
     }
     private var group: LinkGroup {
@@ -327,6 +342,9 @@ final class LinkVersion1Tests: XCTestCase {
                                     colour: 3, icon: Data([2]), botIDs: [b])
         let browser = LinkBrowser(id: a, name: "Work", description: "Research", symbol: "briefcase", colour: 2, icon: Data([3]),
                                   paused: true, botIDs: [b])
+        let marked = LinkAttachment(id: c, filename: "Annotation — Photo.png", mediaType: "image/png", byteCount: 9,
+                                    annotation: LinkAnnotation(version: 2, sourceAttachmentID: a, sourceFilename: "Photo.png", comment: "Crop here",
+                                                               region: LinkAnnotation.Region(x: 0.25, y: 0.5, width: 0.5, height: 0.25)))
         let link = LinkAttachment(id: c, filename: "Hacker News.webloc", mediaType: "application/x-webloc", byteCount: 180,
                                   url: URL(string: "noodlebrowser://00000000-0000-0000-0000-00000000000a?tab=00000000-0000-0000-0000-00000000000b"),
                                   card: LinkCardInfo(title: "Hacker News", detail: "https://news.ycombinator.com", image: Data([4]),
@@ -359,6 +377,10 @@ final class LinkVersion1Tests: XCTestCase {
             "groups": .groups([group]), "group": .group(group),
             "noodlet": .noodlet(LinkNoodlet(grant: a, noodletID: b, revision: "abc", byteCount: 9, manifest: Data([3]))),
             "noodletAnswer": .noodletAnswer(Data([4])),
+            "markedMessage": .message(LinkMessage(id: a, conversationID: b, author: .you, body: "See", createdAt: date, delivered: true,
+                                                  attachments: [marked])),
+            "annotationsStatus": .status(LinkStatus(hubName: "Hub", userName: "Ada", planName: "Family", harnesses: [], endpoints: [],
+                                                    keepsAnnotations: true)),
         ]
     }
     private var nextEvents: [String: LinkEvent] {
@@ -446,7 +468,8 @@ final class LinkVersion1Tests: XCTestCase {
         "shareBot": #"{"version":1,"request":{"shareBot":{"id":"00000000-0000-0000-0000-00000000000A","people":["00000000-0000-0000-0000-00000000000B","00000000-0000-0000-0000-00000000000C"]}}}"#,
         "setAvatar": #"{"version":1,"request":{"setAvatar":{"_0":{"symbol":"leaf.fill","colour":3,"imageDigest":"abc"}}}}"#,
         "noAvatar": #"{"version":1,"request":{"setAvatar":{}}}"#,
-        "personPicture": #"{"version":1,"request":{"picture":{"_0":{"person":{"_0":"00000000-0000-0000-0000-00000000000B"}}}}}"#
+        "personPicture": #"{"version":1,"request":{"picture":{"_0":{"person":{"_0":"00000000-0000-0000-0000-00000000000B"}}}}}"#,
+        "annotatedUpload": #"{"version":1,"request":{"upload":{"conversationID":"00000000-0000-0000-0000-00000000000B","attachment":{"id":"00000000-0000-0000-0000-00000000000C","filename":"Annotation — Report.txt","mediaType":"text\/plain","byteCount":7,"annotation":{"version":2,"sourceAttachmentID":"00000000-0000-0000-0000-00000000000A","sourceFilename":"Report.pdf","sourceMessageID":"00000000-0000-0000-0000-00000000000B","quote":"Q3 revenue","comment":"Check this figure"}},"offset":0,"data":"CQ=="}}}"#
     ]
     private static let nextResponseJSON: [String: String] = [
         "kickConfirmation": #"{"kickConfirmation":{"_0":{"id":"00000000-0000-0000-0000-00000000000A","title":"Safeguards stopped Alfred","message":"Stopped.","confirmTitle":"Resume","offersNewSession":true}}}"#,
@@ -471,7 +494,9 @@ final class LinkVersion1Tests: XCTestCase {
         "groups": #"{"groups":{"_0":[{"id":"00000000-0000-0000-0000-00000000000B","draft":{"name":"House","publicDescription":"Staff","botIDs":["00000000-0000-0000-0000-00000000000A"]},"createdAt":1790000000,"readUpTo":1790000000}]}}"#,
         "group": #"{"group":{"_0":{"id":"00000000-0000-0000-0000-00000000000B","draft":{"name":"House","publicDescription":"Staff","botIDs":["00000000-0000-0000-0000-00000000000A"]},"createdAt":1790000000,"readUpTo":1790000000}}}"#,
         "noodlet": #"{"noodlet":{"_0":{"grant":"00000000-0000-0000-0000-00000000000A","noodletID":"00000000-0000-0000-0000-00000000000B","revision":"abc","byteCount":9,"manifest":"Aw=="}}}"#,
-        "noodletAnswer": #"{"noodletAnswer":{"_0":"BA=="}}"#
+        "noodletAnswer": #"{"noodletAnswer":{"_0":"BA=="}}"#,
+        "markedMessage": #"{"message":{"_0":{"id":"00000000-0000-0000-0000-00000000000A","conversationID":"00000000-0000-0000-0000-00000000000B","author":{"you":{}},"body":"See","createdAt":1790000000,"delivered":true,"attachments":[{"id":"00000000-0000-0000-0000-00000000000C","filename":"Annotation — Photo.png","mediaType":"image\/png","byteCount":9,"annotation":{"version":2,"sourceAttachmentID":"00000000-0000-0000-0000-00000000000A","sourceFilename":"Photo.png","comment":"Crop here","region":{"x":0.25,"y":0.5,"width":0.5,"height":0.25}}}]}}}"#,
+        "annotationsStatus": #"{"status":{"_0":{"hubName":"Hub","userName":"Ada","planName":"Family","harnesses":[],"endpoints":[],"protocolVersion":1,"keepsAnnotations":true}}}"#
     ]
     private static let nextEventJSON: [String: String] = [
         "browsersChanged": #"{"browsersChanged":{}}"#,

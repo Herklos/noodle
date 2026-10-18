@@ -13,6 +13,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - In a patch review, dragging across lines selects them, and Add Annotation with no lines selected comments on the whole patch. Annotate Region marks a region of the review, as in other previews, and closing a comment without saving no longer stops the next one from opening.
+- Comments on attachments reach bots on a Noodle Hub with what they refer to, including the comment on a marked-up picture, instead of arriving as plain files. Comments from those bots arrive here as comments too.
 
 ## [0.68.0] - 2026-10-18
 

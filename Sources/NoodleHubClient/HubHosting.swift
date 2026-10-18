@@ -443,6 +443,7 @@ import Observation
                 VoiceMessage(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform, localeIdentifier: $0.localeIdentifier)
             }
             _ = try repository.importAttachment(from: staging, into: conversation, mediaType: attachment.mediaType, voice: voice,
+                                                annotation: attachment.annotation.map { AttachmentAnnotation($0) },
                                                 id: attachment.id, originalFilename: name.isEmpty ? "Attachment" : name)
         }
     }
@@ -465,6 +466,7 @@ import Observation
                             id: file.id, filename: file.originalFilename, mediaType: file.mediaType, byteCount: Int(file.byteCount),
                             voice: file.voice.map { LinkVoice(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform,
                                                               localeIdentifier: $0.localeIdentifier) },
+                            annotation: file.annotation.map { LinkAnnotation($0) },
                             url: file.url)
                         if let url = file.url {
                             // What opens live opens on this Mac's companions, which people on the Hub cannot reach.
