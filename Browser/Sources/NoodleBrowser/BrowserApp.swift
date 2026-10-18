@@ -123,7 +123,6 @@ struct NoodleBrowserApp: App {
         NSLog("noodle.development-hooks.enabled")
         #endif
         CompanionAppVisibility.shared.start(permitsDock: !BrowserLaunchCheck.smoke && !BrowserLaunchCheck.ui)
-        runtime.showBrowser = { [weak self] id in self?.showBrowser(id) }
         runtime.willRemoveBrowser = { [weak self] id in
             guard let self else { return }
             if self.presentation.selection == id { self.presentation.selection = nil }

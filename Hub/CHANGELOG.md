@@ -7,6 +7,10 @@
 - Krea can be added as a tool.
 - A plan can limit how many computers and browsers each of its users keeps on the Hub.
 
+### Changed
+
+- The Hub's bots can no longer bring up a browser's window on the Hub's Mac; they send a card for the tab instead.
+
 ### Fixed
 
 - Comments on attachments reach the Hub's bots with what they refer to, including the comment on a marked-up picture, instead of arriving as plain files.

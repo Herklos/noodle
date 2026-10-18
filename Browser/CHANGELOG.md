@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Bots and other apps can no longer bring a browser's window to the front. Bots attach tabs to conversations instead, and you open a browser yourself.
+
 ### Fixed
 
 - A tab that isn't shown in the browser window can no longer appear on the desktop as a bare window showing its page.

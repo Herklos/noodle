@@ -10,6 +10,10 @@ All notable changes to Noodle are documented here, following
 
 - Krea can be added as a tool.
 
+### Changed
+
+- Bots and apps outside Noodle can no longer bring a browser's window up on your screen. Bots send a card for the tab instead, and you open it.
+
 ### Fixed
 
 - In a patch review, dragging across lines selects them, and Add Annotation with no lines selected comments on the whole patch. Annotate Region marks a region of the review, as in other previews, and closing a comment without saving no longer stops the next one from opening.

@@ -10,7 +10,7 @@ public struct BrowserError: LocalizedError, Sendable {
 
 public enum BrowserOperation: String, Codable, CaseIterable, Sendable {
     case list, status, tabs, open, navigate, back, forward, reload, close
-    case inspect, eval, click, fill, key, scroll, screenshot, upload, downloads, download, dialog, show, present
+    case inspect, eval, click, fill, key, scroll, screenshot, upload, downloads, download, dialog, present
     case move, mouseReset = "mouse-reset"
     case history, bookmarks
     case webMCPList = "webmcp-list", webMCPCall = "webmcp-call"
@@ -27,7 +27,7 @@ public enum BrowserOperation: String, Codable, CaseIterable, Sendable {
     public var timeout: Int { isFileTransfer ? 600 : 60 }
     public var isFileTransfer: Bool { self == .upload || self == .download || self == .screenshot }
     public var isManagement: Bool { [.create, .update, .delete, .surfaceStream, .setOwner, .borrow].contains(self) }
-    public var needsTab: Bool { ![.list, .status, .tabs, .open, .downloads, .download, .show, .history, .bookmarks, .bookmarkAdd, .bookmarkUpdate, .bookmarkRemove, .create, .update, .delete, .setOwner, .borrow].contains(self) }
+    public var needsTab: Bool { ![.list, .status, .tabs, .open, .downloads, .download, .history, .bookmarks, .bookmarkAdd, .bookmarkUpdate, .bookmarkRemove, .create, .update, .delete, .setOwner, .borrow].contains(self) }
     /// What bots may call.
     public static var agentCases: [Self] { allCases.filter { !$0.isManagement } }
     /// What apps outside Noodle may call: what bots may, apart from posting into a conversation,

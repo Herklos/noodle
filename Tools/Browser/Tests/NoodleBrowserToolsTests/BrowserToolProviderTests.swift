@@ -191,6 +191,14 @@ final class BrowserToolProviderTests: XCTestCase {
         for operation in BrowserOperation.agentCases { XCTAssertFalse(BrowserToolGuidance.tool(operation).isEmpty, operation.rawValue) }
     }
 
+    /// Bots attach browsers to conversations; nothing they call brings a browser's window up.
+    func testNoToolOpensTheBrowsersWindow() async throws {
+        let listed = try await provider.tools(context: .init(agentID: UUID(), workspace: workspace))
+        XCTAssertFalse(try ToolDescriptor.list(mcp: listed).map(\.name).contains("show"))
+        XCTAssertNil(BrowserOperation(rawValue: "show"))
+        XCTAssertFalse(provider.manifest.instructions.contains("`show`"))
+    }
+
     /// Noodle and the Hub make, edit and delete browsers; bots never do.
     func testManagingBrowsersGoesThroughTheConnectionButIsNoBotTool() async throws {
         let listed = try await provider.tools(context: .init(agentID: UUID(), workspace: workspace))

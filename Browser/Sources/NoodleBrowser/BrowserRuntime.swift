@@ -21,7 +21,6 @@ import WebKit
     /// From this many tabs, opening another asks the bot to close the ones it no longer needs,
     /// well before the 100-tab limit.
     static let manyTabs = 30
-    var showBrowser: ((UUID) -> Void)?
     var willRemoveBrowser: ((UUID) -> Void)?
     private var server: BrowserConnectionServer?
     private var activeDownloads: [ObjectIdentifier: (download: WKDownload?, browserID: UUID, record: BrowserDownloadInfo)] = [:]
@@ -389,7 +388,6 @@ import WebKit
         case .bookmarkRemove: try library.removeBookmark(id, bookmark: request.bookmarkID!); return response
         default: break
         }
-        if request.operation == .show { showBrowser?(id); return response }
         if request.operation == .open {
             let tab = try makeTab(browserID: id)
             if let url = request.url { tab.navigate(try BrowserRequest.navigationURL(url)) }
