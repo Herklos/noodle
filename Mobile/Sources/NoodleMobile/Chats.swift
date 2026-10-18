@@ -120,6 +120,11 @@ enum HubThread: HubConversation {
     })
     /// Which files of each patch the person has viewed, kept on this phone only.
     @ObservationIgnored private lazy var patchReviews = PatchReviewStore(fileURL: pairing.directory.appendingPathComponent("patch-reviews.json"))
+    /// Comments waiting above each conversation's composer, kept on this phone until they go with a message.
+    @ObservationIgnored private(set) lazy var annotationDrafts = AnnotationDrafts(folder: pairing.directory.appendingPathComponent("Annotation Drafts", isDirectory: true))
+
+    /// Whether the Hub keeps what a comment refers to; an older one would pass on a bare file.
+    var canAnnotate: Bool { pairing.status?.keepsAnnotations == true }
 
     /// Whether the live stream from the Hub is open.
     private(set) var isConnected = false
@@ -606,6 +611,15 @@ enum HubThread: HubConversation {
 
     func messages(of conversation: some HubConversation) -> [LinkMessage] { conversations[conversation.conversationID] ?? [] }
 
+    /// Who wrote a message, as its preview and a comment on it say.
+    func authorName(of message: LinkMessage, in thread: HubThread) -> String {
+        switch message.author {
+        case .you: "You"
+        case .bot(let id): agent(id)?.draft.name ?? thread.name
+        case .system: thread.name
+        }
+    }
+
     func latestMessage(of conversation: some HubConversation) -> LinkMessage? { messages(of: conversation).last }
 
     /// What the bubble over a pinned circle says: the start of an unread reply, or else the bot's status.
@@ -871,6 +885,7 @@ enum HubThread: HubConversation {
         conversations = conversations.filter { kept.contains($0.key) }
         linkPreviews.keep(only: kept)
         try? patchReviews.retainConversations(kept)
+        annotationDrafts.retain(kept)
     }
 
     /// Your messages the Hub has not confirmed, kept on this phone with their files to send again.
@@ -980,7 +995,8 @@ enum HubThread: HubConversation {
                 .appendingPathComponent(fileURL(for: attachment).lastPathComponent)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: fileURL(for: attachment), to: url)
-            return OutgoingFile(url: url, filename: attachment.filename, mediaType: attachment.mediaType, voice: attachment.voice)
+            return OutgoingFile(url: url, filename: attachment.filename, mediaType: attachment.mediaType, voice: attachment.voice,
+                                annotation: attachment.annotation)
         }
         delete(message, in: conversation)
         return (kept.typed, files)
@@ -1882,6 +1898,12 @@ struct ChatView: View {
     @State private var reviewing: PatchReviewRequest?
     /// The message lifted by a long press, with its reactions and actions.
     @State private var focused: MessageFocus?
+    /// A comment being written over the conversation, and one asked for from a lifted message, which
+    /// opens once the message has gone back.
+    @State private var commenting: AnnotationRequest?
+    @State private var commentingNext: AnnotationRequest?
+    /// The files open in the preview that comments on them, held here for the same reason as `watching`.
+    @State private var previewingFiles: AttachmentPreviewRequest?
     /// Whether the panel of things to attach is open over the conversation.
     @State private var attaching = false
     @Namespace private var attachGlass
@@ -1925,7 +1947,8 @@ struct ChatView: View {
         let call = chats.calls.call?.threadID == thread.id ? chats.calls.call : nil
         let liveCard = call == nil ? nil : messages.last { $0.call != nil && $0.call?.endedAt == nil }?.id
         let blocks = CallLayout.blocks(in: messages, live: liveCard.map { ($0, call?.lines ?? []) })
-        return ScrollView {
+        // In parts, which the compiler checks in reasonable time.
+        let conversation = ScrollView {
             LazyVStack(spacing: Bubble.rowSpacing) {
                 // Reaching the top loads the page before.
                 if chats.hasEarlier(thread) {
@@ -2026,6 +2049,7 @@ struct ChatView: View {
                 }
             }
         }
+        let presenting = conversation
         .sheet(isPresented: $showingShared, onDismiss: {
             if let attachment = openingShared {
                 openingShared = nil
@@ -2069,7 +2093,8 @@ struct ChatView: View {
         .environment(\.watchLive) { watchingAt = $1; watching = $0 }
         .environment(\.reviewPatch) { reviewing = $0 }
         .sheet(item: $reviewing) { request in
-            PatchReviewScreen(request: request, viewed: chats.viewedPatchFiles(request.attachment, in: thread)) {
+            PatchReviewScreen(request: request, viewed: chats.viewedPatchFiles(request.attachment, in: thread),
+                              annotating: annotating(in: thread)) {
                 chats.saveViewedPatchFiles($0, for: request.attachment, in: thread)
             }
         }
@@ -2086,8 +2111,14 @@ struct ChatView: View {
             withTransaction(instant) { focused = focus }
         }
         // Over the whole screen, bars included, as in Messages; the overlay animates itself in and out.
-        .fullScreenCover(item: $focused) { focus in
-            MessageActions(focus: focus, unsent: unsentActions(for: focus.message, in: thread)) { emoji in
+        .fullScreenCover(item: $focused, onDismiss: {
+            if let next = commentingNext {
+                commentingNext = nil
+                commenting = next
+            }
+        }) { focus in
+            MessageActions(focus: focus, unsent: unsentActions(for: focus.message, in: thread),
+                           comment: commentAction(for: focus, in: thread)) { emoji in
                 Task { try? await chats.toggleReaction(emoji, on: focus.message, in: thread) }
             } close: {
                 var instant = Transaction()
@@ -2106,6 +2137,7 @@ struct ChatView: View {
                 LiveSurfaceScreen(chats: chats, thread: thread, attachment: attachment)
             }
         }
+        return withComments(presenting, in: thread)
     }
 
     private func finishProfileChoice() {
@@ -2159,9 +2191,16 @@ struct ChatView: View {
                         if !Task.isCancelled { self.problem = nil }
                     }
             }
-            if !files.isEmpty {
+            if !files.isEmpty || !notes.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
+                        ForEach(notes) { note in
+                            AnnotationDraftChip(draft: note, file: chats.annotationDrafts.url(of: note)) {
+                                commenting = chats.annotationDrafts.request(editing: note)
+                            } remove: {
+                                if let thread = chats.thread(threadID) { chats.annotationDrafts.remove(note.id, in: thread.conversationID) }
+                            }
+                        }
                         ForEach(files) { file in
                             PendingFileChip(file: file) { files.removeAll { $0.id == file.id } }
                         }
@@ -2181,6 +2220,43 @@ struct ChatView: View {
     }
 
     private var unavailableReason: String? { chats.thread(threadID).flatMap(chats.composerUnavailableReason) }
+
+    /// Comments waiting to go with the next message.
+    private var notes: [AnnotationDrafts.Draft] {
+        chats.thread(threadID).map { chats.annotationDrafts.drafts(in: $0.conversationID) } ?? []
+    }
+
+    /// Comments on files and messages: the preview that marks files up, and the sheet comments are written in.
+    private func withComments(_ content: some View, in thread: HubThread) -> some View {
+        let annotating = annotating(in: thread)
+        var preview: (@MainActor (AttachmentPreviewRequest) -> Void)?
+        if annotating != nil { preview = { previewingFiles = $0 } }
+        return content
+            .environment(\.annotating, annotating)
+            .environment(\.previewAttachments, preview)
+            .fullScreenCover(item: $previewingFiles) { request in
+                if let annotating { AttachmentPreviewScreen(request: request, annotating: annotating) }
+            }
+            .sheet(item: $commenting) { request in
+                AnnotationCommentSheet(request: request) { comment in try annotating?.save(request, comment) }
+            }
+    }
+
+    /// Comment… on a lifted message, which opens the sheet once the message has gone back.
+    private func commentAction(for focus: MessageFocus, in thread: HubThread) -> (() -> Void)? {
+        guard annotating(in: thread) != nil else { return nil }
+        let request = AnnotationRequest.message(focus.message, quote: focus.quote, author: chats.authorName(of: focus.message, in: thread),
+                                                in: thread.name)
+        return { commentingNext = request }
+    }
+
+    /// How comments are written here, while the Hub keeps what they refer to.
+    private func annotating(in thread: HubThread) -> Annotating? {
+        guard chats.canAnnotate else { return nil }
+        let chats = chats, conversationID = thread.conversationID
+        return Annotating(begin: { commenting = $0 },
+                          save: { request, comment in try chats.annotationDrafts.save(request, comment: comment, in: conversationID) })
+    }
 
     /// The plus, which grows into the panel of things to attach, as in Messages.
     private var attachButton: some View {
@@ -2253,7 +2329,7 @@ struct ChatView: View {
             }
             .padding(.vertical, 13)
             // As in Messages: the microphone until there is something to send.
-            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty {
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty && notes.isEmpty {
                 Button { recorder.start() } label: {
                     Image(systemName: "mic").font(.system(size: 18, weight: .regular))
                         .foregroundStyle(.secondary)
@@ -2336,7 +2412,9 @@ struct ChatView: View {
                                  do {
                                      let (text, picked) = try chats.takeBack(message, in: thread)
                                      draft = [text, draft].filter { !$0.isEmpty }.joined(separator: "\n")
-                                     files += picked
+                                     // Its comments wait above the composer again, to edit like any other.
+                                     chats.annotationDrafts.restore(picked.filter { $0.annotation != nil }, in: thread.conversationID)
+                                     files += picked.filter { $0.annotation == nil }
                                  } catch {
                                      problem = error.localizedDescription
                                  }
@@ -2346,13 +2424,22 @@ struct ChatView: View {
 
     private func send() {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty || !files.isEmpty, let thread = chats.thread(threadID) else { return }
-        let sending = files
+        guard !body.isEmpty || !files.isEmpty || !notes.isEmpty, let thread = chats.thread(threadID) else { return }
+        // Waiting comments go with the message, after its files.
+        let comments = chats.annotationDrafts.take(in: thread.conversationID)
+        let sending = files + comments
         draft = ""
         files = []
         problem = nil
         Task {
-            do { try await chats.send(body, files: sending, to: thread) } catch { problem = error.localizedDescription }
+            do {
+                try await chats.send(body, files: sending, to: thread)
+                // The message keeps copies of its files from the start, to send again if it has to.
+                chats.annotationDrafts.discard(comments)
+            } catch {
+                chats.annotationDrafts.restore(comments, in: thread.conversationID)
+                problem = error.localizedDescription
+            }
         }
     }
 }
@@ -2571,7 +2658,8 @@ private struct Bubble: View {
         if !message.attachments.isEmpty {
             MessageAttachments(attachments: message.attachments, mode: AttachmentLayout(rawValue: attachmentLayout) ?? .standard,
                                trailing: message.author == .you) { attachment, compact in
-                AttachmentView(chats: chats, thread: thread, attachment: attachment, group: message.attachments, compact: compact)
+                AttachmentView(chats: chats, thread: thread, attachment: attachment, group: message.attachments, compact: compact,
+                               sentBy: chats.authorName(of: message, in: thread), sentAt: message.createdAt)
             }
             .modifier(Reactions(badges: reactions, shown: !showsText && !message.reactions.isEmpty))
         }
@@ -2583,8 +2671,8 @@ private struct Bubble: View {
         case .text(let text):
             let folded = !expanded && MessageFolding.isLong(text)
             MessageText(text: text, folded: folded, foreground: foreground, background: background) { expanded = true }
-                .onLongPressGesture(minimumDuration: 0.35) { lift(text, folded: folded, at: index) } onPressingChanged: { pressing = $0 ? index : nil }
-                .accessibilityAction(named: "React") { lift(text, folded: folded, at: index) }
+                .onLongPressGesture(minimumDuration: 0.35) { lift(text, folded: folded, at: index, quote: text) } onPressingChanged: { pressing = $0 ? index : nil }
+                .accessibilityAction(named: "React") { lift(text, folded: folded, at: index, quote: text) }
         case .table(let table):
             MessageTableCard(table: table, foreground: foreground, background: background)
                 .onLongPressGesture(minimumDuration: 0.35) { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
@@ -2612,8 +2700,10 @@ private struct Bubble: View {
             && !(message.attachments.contains { $0.voice != nil } && message.body == OutgoingMessages.voiceBody)
     }
 
-    private func lift(_ text: String, folded: Bool, at index: Int) {
-        focusMessage(MessageFocus(message: message, text: text, frame: segmentFrames[index] ?? .zero, folded: folded))
+    /// A comment on the lifted message quotes the stretch of text pressed, or the whole message for a table.
+    private func lift(_ text: String, folded: Bool, at index: Int, quote: String? = nil) {
+        focusMessage(MessageFocus(message: message, text: text, frame: segmentFrames[index] ?? .zero, folded: folded,
+                                  quote: quote ?? message.body))
     }
 }
 

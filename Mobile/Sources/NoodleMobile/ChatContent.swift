@@ -27,6 +27,9 @@ struct AttachmentView: View {
     var group: [LinkAttachment] = []
     /// Sharing a row with others, so a picture takes less room.
     var compact = false
+    /// Who sent the message and when, under the file's name in its preview.
+    var sentBy: String?
+    var sentAt: Date?
     @Environment(\.displayScale) private var displayScale
     @State private var url: URL?
     @State private var image: UIImage?
@@ -41,6 +44,8 @@ struct AttachmentView: View {
     @State private var patch: Patch?
     @Environment(\.watchLive) private var watchLive
     @Environment(\.reviewPatch) private var reviewPatch
+    @Environment(\.annotating) private var annotating
+    @Environment(\.previewAttachments) private var previewAttachments
 
     private var isImage: Bool { attachment.mediaType.hasPrefix("image/") }
 
@@ -59,7 +64,15 @@ struct AttachmentView: View {
 
     private var file: some View {
         Button(action: open) {
-            if isImage { picture } else if let patch { PatchCard(patch: patch, filename: attachment.filename) } else { card }
+            if let note = attachment.annotation {
+                AnnotationCard(note: note, image: note.region == nil ? nil : shownImage)
+            } else if isImage {
+                picture
+            } else if let patch {
+                PatchCard(patch: patch, filename: attachment.filename)
+            } else {
+                card
+            }
         }
         .buttonStyle(.plain)
         .disabled(url == nil && image == nil)
@@ -74,8 +87,11 @@ struct AttachmentView: View {
                     try await chats.file(for: attachment, in: thread)
                 }, preview: SharePreview(attachment.filename))
             }
+            if let annotating, attachment.annotation == nil {
+                Button("Comment…", systemImage: "text.bubble") { annotating.begin(.attachment(attachment)) }
+            }
             // As on the Mac: a picture in the conversation can become its backdrop.
-            if isImage {
+            if isImage, attachment.annotation == nil {
                 Button("Use as Background", systemImage: "photo.on.rectangle") {
                     Task { try? await chats.setBackground(photo: Data(contentsOf: chats.file(for: attachment, in: thread)), for: thread) }
                 }
@@ -219,11 +235,30 @@ struct AttachmentView: View {
                 reviewPatch(PatchReviewRequest(attachment: attachment, patch: patch, file: url))
                 return
             }
+            if let previewAttachments {
+                let items = LinkAttachment.previewGallery(opening: attachment, among: group).compactMap { other in
+                    (other.id == attachment.id ? url : chats.downloadedFile(for: other))
+                        .map { AttachmentPreviewRequest.Item(attachment: other, url: $0) }
+                }
+                previewAttachments(AttachmentPreviewRequest(items: items, start: items.firstIndex { $0.attachment.id == attachment.id } ?? 0,
+                                                            subtitle: subtitle))
+                return
+            }
             gallery = LinkAttachment.previewGallery(opening: attachment, among: group).compactMap {
                 $0.id == attachment.id ? url : chats.downloadedFile(for: $0)
             }
             previewing = url
         }
+    }
+
+    /// "Wren · Today 11:40".
+    private var subtitle: String? {
+        guard let sentBy, let sentAt else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        return "\(sentBy) · \(formatter.string(from: sentAt))"
     }
 
     /// Pixels decoded for a picture's bubble, or for a file card's thumbnail.

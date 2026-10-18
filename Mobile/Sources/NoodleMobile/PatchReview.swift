@@ -95,8 +95,17 @@ struct PatchCounts: View {
 
 // MARK: - Review
 
-/// Where someone is in a review: what they ticked off and what they are looking for.
+/// Where someone is in a review: what they ticked off, what they are looking for and the lines they picked.
 @MainActor @Observable final class PatchReviewModel {
+    /// Lines of one hunk, from where the picking started to where it ends, as on the Mac.
+    struct Selection: Equatable {
+        var path: String
+        var hunk: Int
+        var anchor: Int
+        var head: Int
+        var lines: ClosedRange<Int> { min(anchor, head)...max(anchor, head) }
+    }
+
     struct Folder: Identifiable {
         var path: String
         /// The files shown, filtered.
@@ -111,6 +120,8 @@ struct PatchCounts: View {
     var filter = ""
     var hidesViewed = false
     var showsWalkthrough = true
+    /// The lines picked to comment on.
+    var selection: Selection?
     private let save: (Set<String>) -> Void
 
     init(patch: Patch, viewed: Set<String>, save: @escaping (Set<String>) -> Void) {
@@ -125,6 +136,53 @@ struct PatchCounts: View {
     }
 
     var viewedCount: Int { patch.files.count { viewed.contains($0.path) } }
+
+    /// A tap on a line's number picks it, or lets go of it when it is all that is picked.
+    func select(path: String, hunk: Int, line: Int) {
+        let picked = Selection(path: path, hunk: hunk, anchor: line, head: line)
+        selection = selection == picked ? nil : picked
+    }
+
+    /// A drag down the numbers from `start` picks every line to `line`, in the hunk it started in.
+    func drag(path: String, hunk: Int, from start: Int, to line: Int) {
+        let dragged = Selection(path: path, hunk: hunk, anchor: start, head: line)
+        if selection != dragged { selection = dragged }
+    }
+
+    func isSelected(path: String, hunk: Int, line: Int) -> Bool {
+        guard let selection, selection.path == path, selection.hunk == hunk else { return false }
+        return selection.lines.contains(line)
+    }
+
+    /// The line of a hunk at height `y`, given where its lines are. Past its first or last line, a
+    /// drag stays on the line nearest the finger.
+    static func line(at y: CGFloat, in frames: [Int: CGRect]) -> Int? {
+        func distance(_ frame: CGRect) -> CGFloat { frame.minY > y ? frame.minY - y : max(0, y - frame.maxY) }
+        return frames.min { (distance($0.value), $0.key) < (distance($1.value), $1.key) }?.key
+    }
+
+    private var selectedLines: (file: Patch.File, lines: [Patch.Line])? {
+        guard let selection, let file = patch.files.first(where: { $0.path == selection.path }),
+              file.hunks.indices.contains(selection.hunk) else { return nil }
+        let lines = file.hunks[selection.hunk].lines
+        guard lines.indices.contains(selection.lines.lowerBound), lines.indices.contains(selection.lines.upperBound) else { return nil }
+        return (file, Array(lines[selection.lines]))
+    }
+
+    /// What a comment on the picked lines quotes, as the Mac's does: where they are, then each line with its marker.
+    var selectedQuote: String? {
+        selectedLines.map { Patch.quote($0.lines, in: $0.file.path) }
+    }
+
+    /// The picked lines as they read, to copy or to show over a comment.
+    var selectedText: String? {
+        selectedLines.map { $0.lines.map(\.text).joined(separator: "\n") }
+    }
+
+    /// "Recording.swift · lines 12–15".
+    var selectedCaption: String? {
+        selectedLines.map { AnnotationNotes.linesCaption($0.file.name, new: $0.lines.compactMap(\.newNumber), old: $0.lines.compactMap(\.oldNumber)) }
+    }
 
     /// Files by folder, in order, as the filter and Hide Viewed leave them.
     var folders: [Folder] {
@@ -142,14 +200,17 @@ struct PatchCounts: View {
 }
 
 /// A patch: what it changes, the walkthrough of its commits, and every file to tick off and open.
-/// Only to read: comments on a patch are made on the Mac.
+/// While the Hub keeps what comments refer to, lines picked in a file take a comment, as on the Mac;
+/// the whole patch takes one from its card's menu in the conversation.
 struct PatchReviewScreen: View {
     let request: PatchReviewRequest
+    let annotating: Annotating?
     @State private var model: PatchReviewModel
     @Environment(\.dismiss) private var dismiss
 
-    init(request: PatchReviewRequest, viewed: Set<String>, save: @escaping (Set<String>) -> Void) {
+    init(request: PatchReviewRequest, viewed: Set<String>, annotating: Annotating? = nil, save: @escaping (Set<String>) -> Void) {
         self.request = request
+        self.annotating = annotating
         _model = State(initialValue: PatchReviewModel(patch: request.patch, viewed: viewed, save: save))
     }
 
@@ -189,7 +250,7 @@ struct PatchReviewScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: String.self) { path in
                 if let file = model.patch.files.first(where: { $0.path == path }) {
-                    PatchFileScreen(file: file, model: model)
+                    PatchFileScreen(file: file, model: model, source: request.attachment)
                 }
             }
             .toolbar {
@@ -204,6 +265,7 @@ struct PatchReviewScreen: View {
                     ShareLink(item: request.file)
                 }
             }
+            .environment(\.annotating, annotating)
         }
     }
 
@@ -310,10 +372,23 @@ private struct PatchFileBadges: View {
 }
 
 /// One file's changes: its hunks with line numbers before and after, lines wrapped to the screen.
+/// Tapping a line's number picks it and dragging down the numbers picks more, to comment on or copy.
 struct PatchFileScreen: View {
     let file: Patch.File
     let model: PatchReviewModel
+    /// The patch's file in the conversation, which comments refer to.
+    var source: LinkAttachment?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.annotating) private var annotating
+    @State private var commenting: AnnotationRequest?
+    /// Where the shown lines of each hunk are, for a drag down their numbers. Not observed: it changes
+    /// whenever lines are laid out, and nothing is drawn from it.
+    @State private var lineFrames = LineFrames()
+    private static let lines = "lines"
+
+    private final class LineFrames {
+        var frames: [Int: [Int: CGRect]] = [:]
+    }
 
     private enum Row: Identifiable {
         case hunk(Int)
@@ -339,7 +414,7 @@ struct PatchFileScreen: View {
                 ForEach(rows) { row in
                     switch row {
                     case .hunk(let index): hunkHeader(file.hunks[index])
-                    case .line(let hunk, let line): PatchLineRow(line: file.hunks[hunk].lines[line], numberWidth: width)
+                    case .line(let hunk, let line): lineRow(hunk: hunk, line: line, numberWidth: width)
                     }
                 }
                 if !viewed {
@@ -352,9 +427,16 @@ struct PatchFileScreen: View {
                     .buttonStyle(.bordered).controlSize(.large).padding(16)
                 }
             }
+            .coordinateSpace(.named(Self.lines))
         }
         .navigationTitle(file.name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $commenting) { request in
+            AnnotationCommentSheet(request: request) { comment in
+                try annotating?.save(request, comment)
+                model.selection = nil
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -397,6 +479,62 @@ struct PatchFileScreen: View {
         return CGFloat(String(largest).count) * 6.5 + 6
     }
 
+    /// A line, and while comments can be written, its numbers to pick it by, with Comment… and Copy
+    /// over the first line picked.
+    @ViewBuilder private func lineRow(hunk: Int, line: Int, numberWidth: CGFloat) -> some View {
+        let row = PatchLineRow(line: file.hunks[hunk].lines[line], numberWidth: numberWidth,
+                               selected: model.isSelected(path: file.path, hunk: hunk, line: line))
+        if annotating == nil {
+            row
+        } else {
+            let first = model.selection.map { $0.path == file.path && $0.hunk == hunk && $0.lines.lowerBound == line } ?? false
+            row
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.lines)) } action: { lineFrames.frames[hunk, default: [:]][line] = $0 }
+                // Only the numbers pick lines, so a swipe over the code still scrolls.
+                .overlay(alignment: .leading) {
+                    Color.clear.frame(width: numberWidth * 2 + 16).contentShape(Rectangle())
+                        .onTapGesture { model.select(path: file.path, hunk: hunk, line: line) }
+                        .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.lines)).onChanged { value in
+                            if let reached = PatchReviewModel.line(at: value.location.y, in: lineFrames.frames[hunk] ?? [:]) {
+                                model.drag(path: file.path, hunk: hunk, from: line, to: reached)
+                            }
+                        })
+                }
+                .overlay(alignment: .topLeading) {
+                    if first { selectionMenu.offset(x: numberWidth * 2 + 24, y: -50) }
+                }
+                .zIndex(first ? 1 : 0)
+                .accessibilityAction(named: "Comment") {
+                    if !model.isSelected(path: file.path, hunk: hunk, line: line) { model.select(path: file.path, hunk: hunk, line: line) }
+                    comment()
+                }
+        }
+    }
+
+    /// As the edit menu over selected text.
+    private var selectionMenu: some View {
+        HStack(spacing: 0) {
+            Button("Comment…", action: comment).padding(.horizontal, 16).padding(.vertical, 10)
+            Divider().frame(height: 20)
+            Button("Copy") {
+                UIPasteboard.general.string = model.selectedText
+                model.selection = nil
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+        .font(.body)
+        .foregroundStyle(.primary)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    private func comment() {
+        guard let source, let quote = model.selectedQuote else { return }
+        commenting = AnnotationRequest(sourceAttachmentID: source.id, sourceFilename: source.filename, quote: quote,
+                                       shownQuote: model.selectedText, caption: model.selectedCaption, monospaced: true)
+    }
+
     private func hunkHeader(_ hunk: Patch.Hunk) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(hunk.header).font(.caption.monospaced()).foregroundStyle(Color.blue).lineLimit(1).truncationMode(.tail)
@@ -417,6 +555,7 @@ struct PatchFileScreen: View {
 private struct PatchLineRow: View {
     let line: Patch.Line
     let numberWidth: CGFloat
+    var selected = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -430,8 +569,10 @@ private struct PatchLineRow: View {
         .font(.system(size: 11, design: .monospaced))
         .foregroundStyle(.tertiary)
         .padding(.vertical, 1.5).padding(.trailing, 8)
-        .background(background)
+        .background(selected ? Color.accentColor.opacity(0.25) : background)
+        .overlay(alignment: .leading) { if selected { Rectangle().fill(Color.accentColor).frame(width: 3) } }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var code: Text {
