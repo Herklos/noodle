@@ -1,4 +1,5 @@
 import BrowserBridge
+import BrowserCore
 @testable import NoodleBrowser
 import XCTest
 
@@ -89,6 +90,34 @@ import XCTest
         var left = BrowserAddressDraft(address: "https://example.com")
         XCTAssertEqual(left.take(.key(.escape)), .cancel)
         XCTAssertEqual(left.take(.key(.enter)), .go("https://example.com"), "Return on an untouched address stayed put")
+    }
+
+    /// Someone watching from another device who clicks a page's upload button gets no file picker
+    /// on this Mac, where nobody may be to close it, and the live view says why.
+    func testAnUploadClickedInALiveViewOpensNoPickerOnThisMac() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let tab = try runtime.makeTab(browserID: browser)
+        defer { if let sheet = tab.surface.attachedSheet { tab.surface.endSheet(sheet) } }
+        tab.web.loadHTMLString("<input type=file style='position:fixed;inset:0;width:100%;height:100%'>", baseURL: nil)
+        for _ in 0..<250 where try await tab.evaluate("return document.readyState") as? String != "complete" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        tab.watched = true
+        let view = BrowserLiveView(browserID: browser, runtime: runtime)
+        let point = (x: 200.0, y: BrowserLiveChrome.height + 200)
+        try view.apply(.pointer(.down, x: point.x, y: point.y, clickCount: 1))
+        try view.apply(.pointer(.up, x: point.x, y: point.y, clickCount: 1))
+        for _ in 0..<250 where tab.info.error == nil && tab.surface.attachedSheet == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(tab.surface.attachedSheet, "a file picker opened on this Mac")
+        XCTAssertEqual(tab.info.error, BrowserTab.liveViewUploadNote)
+        let picture = try await view.picture()
+        XCTAssertGreaterThan(picture.size.height, tab.web.bounds.height + BrowserLiveChrome.height, "the live view did not show the note")
     }
 
     private func samples(_ image: CGImage) -> [UInt32] {

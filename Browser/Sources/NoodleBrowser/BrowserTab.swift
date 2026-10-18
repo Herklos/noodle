@@ -35,6 +35,9 @@ import WebKit
     private var visitedURL: String?
     private var visitedTitle: String?
     private var humanInput = false
+    /// The last click or key came from someone watching live, who may be on another device.
+    private var viewerInput = false
+    static let liveViewUploadNote = "Files can't be uploaded from a live view. Upload them in \(BrowserBuildIdentity.current.appName) on its Mac, or ask the bot."
     /// When a person, a bot or someone watching live last used the page, to the moment.
     var lastActive = Date()
     /// Waiting on a dialog, an upload or a page call, or being watched; stopping the page would lose that.
@@ -76,12 +79,12 @@ import WebKit
             if event.type != .keyDown {
                 if self.web.bounds.contains(self.web.convert(event.locationInWindow, from: nil)) {
                     self.resetPointer()
-                    if event.type == .leftMouseDown { self.humanInput = true }
+                    if event.type == .leftMouseDown { self.humanInput = true; self.viewerInput = false }
                     used = event.type != .mouseMoved
                 }
             } else if let view = event.window?.firstResponder as? NSView, view === self.web || view.isDescendant(of: self.web) {
                 self.resetPointer()
-                self.humanInput = true
+                self.humanInput = true; self.viewerInput = false
                 used = true
             }
             if used { self.runtime?.touch(browserID: self.browserID, tabID: self.id) }
@@ -117,7 +120,7 @@ import WebKit
             }
         } catch { runtime.failure = error.localizedDescription }
     }
-    func beginAgentInteraction() { humanInput = false }
+    func beginAgentInteraction() { humanInput = false; viewerInput = false }
     func resetPointer() { inputGeneration += 1; pointer.reset() }
     func mute(_ muted: Bool) async { await web.setAllMediaPlaybackSuspended(muted) }
     func restoreSurface() {
@@ -271,7 +274,9 @@ import WebKit
         }
         guard humanInput, let window = web.window, window.isVisible else {
             completionHandler(nil)
-            info.error = "Use the upload command to provide files."; runtime?.saveTab(self); return
+            // A picker here could open where nobody is, so a live view says why the upload did nothing.
+            info.error = viewerInput ? Self.liveViewUploadNote : "Use the upload command to provide files."
+            runtime?.saveTab(self); return
         }
         humanInput = false
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = parameters.allowsMultipleSelection
@@ -401,7 +406,7 @@ import WebKit
     /// What a person watching remotely did, as real events in the tab, the same way Noodle
     /// Computer and Noodle Applet take it.
     func apply(_ input: SurfaceInput) throws {
-        humanInput = true
+        humanInput = false; viewerInput = true
         if surfaceInjector == nil { surfaceInjector = SurfaceEventInjector(view: web) }
         try surfaceInjector?.deliver(input)
     }

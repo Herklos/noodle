@@ -4,15 +4,19 @@ import BrowserCore
 import SwiftUI
 
 /// What a live view shows above the page: the browser's tabs, and below them the back, forward
-/// and reload buttons and the address, which its window keeps in the toolbar instead.
+/// and reload buttons and the address, which its window keeps in the toolbar instead, then the
+/// line its window shows above a page whose tab has something to say.
 struct BrowserLiveChrome: View {
     static let height = BrowserTabStrip.height + 36
+    private static let noteHeight: CGFloat = 30
+    static func height(note: String?) -> CGFloat { height + (note == nil ? 0 : noteHeight) }
 
     let tabs: [BrowserTabInfo]
     var icons: [UUID: NSImage] = [:]
     let selectedTabID: UUID?
     let address: String
     let editing: Bool
+    var note: String?
     let layout: ([BrowserTabStripTarget: CGRect]) -> Void
     @State private var tabTargets: [BrowserTabStripTarget: CGRect] = [:]
     @State private var navigation: [BrowserTabStripTarget: CGRect] = [:]
@@ -39,6 +43,11 @@ struct BrowserLiveChrome: View {
                 .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(editing ? Color.accentColor : .clear, lineWidth: 1.5))
                 .located(.address, in: $navigation)
             }.padding(.horizontal, 8).frame(height: 36)
+            if let note {
+                Label(note, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail).padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity).frame(height: Self.noteHeight).background(.quaternary.opacity(0.35))
+            }
         }
         .coordinateSpace(.named(BrowserTabStripSpace.name))
         .onChange(of: navigation) { layout(tabTargets.merging(navigation) { $1 }) }
@@ -92,18 +101,19 @@ struct BrowserAddressDraft: Equatable {
     }
 
     /// The chrome at `width` points, `scale` pixels to a point.
-    func render(tabs: [BrowserTabInfo], icons: [UUID: NSImage] = [:], selected: UUID?, address: String, editing: Bool, width: CGFloat,
-                scale: CGFloat) -> CGImage? {
+    func render(tabs: [BrowserTabInfo], icons: [UUID: NSImage] = [:], selected: UUID?, address: String, editing: Bool, note: String? = nil,
+                width: CGFloat, scale: CGFloat) -> CGImage? {
+        let height = BrowserLiveChrome.height(note: note)
         host.rootView = AnyView(BrowserLiveChrome(tabs: tabs, icons: icons, selectedTabID: selected, address: address, editing: editing,
-                                                  layout: { [weak self] in self?.targets = $0 })
-            .frame(width: width, height: BrowserLiveChrome.height)
+                                                  note: note, layout: { [weak self] in self?.targets = $0 })
+            .frame(width: width, height: height)
             .background(Color(nsColor: .windowBackgroundColor)))
-        panel.setContentSize(CGSize(width: width, height: BrowserLiveChrome.height))
+        panel.setContentSize(CGSize(width: width, height: height))
         host.layoutSubtreeIfNeeded()
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
         host.cacheDisplay(in: host.bounds, to: rep)
         guard let drawn = rep.cgImage else { return nil }
-        let pixels = (width: Int((width * scale).rounded()), height: Int((BrowserLiveChrome.height * scale).rounded()))
+        let pixels = (width: Int((width * scale).rounded()), height: Int((height * scale).rounded()))
         guard let context = CGContext(data: nil, width: pixels.width, height: pixels.height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
@@ -130,6 +140,8 @@ struct BrowserAddressDraft: Equatable {
     private var pressedOnStrip: Bool?
     /// What is being typed into the address bar, while it has the keyboard.
     private var draft: BrowserAddressDraft?
+    /// Where the page starts in the picture last shown, below the chrome.
+    private var top = BrowserLiveChrome.height
 
     init(browserID: UUID, runtime: BrowserRuntime) {
         self.browserID = browserID
@@ -138,12 +150,15 @@ struct BrowserAddressDraft: Equatable {
 
     func picture() async throws -> (image: CGImage, size: CGSize) {
         let profile = try profile()
-        let page = try await selectedTab(profile).surfacePicture()
+        let tab = try selectedTab(profile)
+        let note = tab.failure == nil ? tab.info.error : nil
+        let page = try await tab.surfacePicture()
         let scale = CGFloat(page.image.width) / max(1, page.size.width)
-        let stripHeight = Int((BrowserLiveChrome.height * scale).rounded())
+        let chrome = BrowserLiveChrome.height(note: note)
+        let stripHeight = Int((chrome * scale).rounded())
         let address = draft?.text ?? profile.tabs.first { $0.id == profile.selectedTabID }.map { $0.url == "about:blank" ? "" : $0.url } ?? ""
         guard let tabs = strip.render(tabs: profile.tabs, icons: runtime?.favicons ?? [:], selected: profile.selectedTabID,
-                                      address: address, editing: draft != nil,
+                                      address: address, editing: draft != nil, note: note,
                                       width: page.size.width, scale: scale),
               let context = CGContext(data: nil, width: page.image.width, height: page.image.height + stripHeight, bitsPerComponent: 8,
                                       bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
@@ -152,11 +167,12 @@ struct BrowserAddressDraft: Equatable {
         context.draw(page.image, in: CGRect(x: 0, y: 0, width: page.image.width, height: page.image.height))
         context.draw(tabs, in: CGRect(x: 0, y: page.image.height, width: page.image.width, height: stripHeight))
         guard let image = context.makeImage() else { throw BrowserError("The browser cannot be shown.") }
-        return (image, CGSize(width: page.size.width, height: page.size.height + BrowserLiveChrome.height))
+        top = chrome
+        return (image, CGSize(width: page.size.width, height: page.size.height + chrome))
     }
 
     func apply(_ input: SurfaceInput) throws {
-        let top = BrowserLiveChrome.height
+        let top = self.top
         if let id = try profile().selectedTabID { runtime?.touch(browserID: browserID, tabID: id) }
         switch input {
         case .pointer(let phase, let x, let y, let count):

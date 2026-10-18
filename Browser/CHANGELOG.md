@@ -9,6 +9,7 @@
 ### Fixed
 
 - A tab that isn't shown in the browser window can no longer appear on the desktop as a bare window showing its page.
+- Clicking a page's upload button in a live view no longer opens a file picker on the Mac running Browser. The live view says why the upload did nothing.
 
 ## [0.19.3] - 2026-10-17
 
