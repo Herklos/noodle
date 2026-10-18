@@ -18,6 +18,36 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.web.window === tab.surface)
     }
 
+    /// A tab out of the browser window keeps its page in a window of its own that nobody at this
+    /// Mac sees. Only a live view puts it on screen, transparent; nothing else can show it.
+    @MainActor func testATabsOwnWindowStaysOffScreenUnlessWatched() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let tab = try runtime.makeTab(browserID: try library.create(name: "Work").id)
+        defer { tab.surface.orderOut(nil) }
+        XCTAssertTrue(tab.web.window === tab.surface)
+        let attempts: [(String, () -> Void)] = [
+            ("orderFront", { tab.surface.orderFront(nil) }), ("orderBack", { tab.surface.orderBack(nil) }),
+            ("makeKeyAndOrderFront", { tab.surface.makeKeyAndOrderFront(nil) }),
+            ("orderFrontRegardless", { tab.surface.orderFrontRegardless() }), ("setIsVisible", { tab.surface.setIsVisible(true) }),
+        ]
+        for (name, show) in attempts {
+            show()
+            XCTAssertFalse(tab.surface.isVisible, "\(name) showed the tab's window")
+            tab.surface.orderOut(nil)
+        }
+
+        tab.watched = true
+        XCTAssertTrue(tab.surface.isVisible)
+        XCTAssertEqual(tab.surface.alphaValue, 0)
+        XCTAssertTrue(tab.surface.ignoresMouseEvents)
+        tab.watched = false
+        XCTAssertFalse(tab.surface.isVisible)
+        XCTAssertEqual(tab.surface.alphaValue, 1)
+    }
+
     /// A page that cannot load, or whose process stopped, gives way to an error page that says
     /// what went wrong; a load that fails after the page appeared leaves the page in place.
     @MainActor func testFailedPagesShowAnErrorPage() throws {

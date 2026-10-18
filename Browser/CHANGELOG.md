@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A tab that isn't shown in the browser window can no longer appear on the desktop as a bare window showing its page.
+
 ## [0.19.3] - 2026-10-17
 
 ### Fixed

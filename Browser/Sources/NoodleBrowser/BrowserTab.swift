@@ -1,6 +1,7 @@
 import AppKit
 import BrowserBridge
 import ImageIO
+import os
 import WebKit
 
 /// Each tab has an app-owned rendering surface. Events go directly to this view,
@@ -10,7 +11,7 @@ import WebKit
     let browserID: UUID
     let web: WKWebView
     let pointer: BrowserPointer
-    let surface: NSPanel
+    let surface: BrowserSurfacePanel
     weak var runtime: BrowserRuntime?
     @Published var info: BrowserTabInfo
     @Published var dialog: BrowserDialog?
@@ -62,7 +63,7 @@ import WebKit
         config.applicationNameForUserAgent = Self.safariName
         web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800), configuration: config)
         pointer = BrowserPointer(web: web)
-        surface = NSPanel(contentRect: web.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        surface = BrowserSurfacePanel(contentRect: web.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
         surface.isReleasedWhenClosed = false
         surface.hidesOnDeactivate = false
@@ -152,7 +153,7 @@ import WebKit
         surface.ignoresMouseEvents = unseen
         // A transparent window at the back counts as occluded, which WebKit reports to the page as hidden.
         setOcclusionDetection(!unseen)
-        if unseen { surface.orderBack(nil) } else { surface.orderOut(nil) }
+        if unseen { surface.showForLiveView() } else { surface.orderOut(nil) }
     }
     private func setOcclusionDetection(_ enabled: Bool) {
         let selector = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
@@ -547,5 +548,31 @@ struct BrowserPageFailure: Equatable {
         default:
             self.init(symbol: "exclamationmark.triangle", title: "Can't open this page", detail: error.localizedDescription)
         }
+    }
+}
+
+/// A tab's own window, holding its page while no browser window shows it. It goes on screen only
+/// for a live view, transparent and at the back. Something else once left one on screen, opaque,
+/// showing a bot's page on the desktop, and was never found, so every other request is refused
+/// and logged with whoever made it.
+final class BrowserSurfacePanel: NSPanel {
+    private static let log = Logger(subsystem: "com.pdparchitect.noodle.browser", category: "surface")
+    private var showing = false
+
+    func showForLiveView() {
+        showing = true; defer { showing = false }
+        orderBack(nil)
+    }
+    override func order(_ place: NSWindow.OrderingMode, relativeTo otherWindow: Int) {
+        guard place == .out || showing else { return refuse() }
+        super.order(place, relativeTo: otherWindow)
+    }
+    // The one way on screen that does not pass through order(_:relativeTo:).
+    override func orderFrontRegardless() {
+        guard showing else { return refuse() }
+        super.orderFrontRegardless()
+    }
+    private func refuse() {
+        Self.log.error("Kept a tab's window off screen. Asked by: \(Thread.callStackSymbols.joined(separator: "\n"), privacy: .public)")
     }
 }
