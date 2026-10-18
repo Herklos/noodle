@@ -1,6 +1,7 @@
 import AppKit
 import NoodleCore
 import NoodleRuntimeSettings
+import ScreenCaptureKit
 import SwiftUI
 
 extension ConversationAttachment {
@@ -75,6 +76,8 @@ struct PatchChangeCounts: View {
         let fileURL: URL
         /// The editor every other preview comments with.
         let editor = AttachmentPreviewController()
+        /// The picture of the review being taken for a region annotation.
+        var capture: Task<Void, Never>?
         weak var host: NSWindow?
 
         init(panel: PatchReviewPanel, model: PatchReviewModel, fileURL: URL, host: NSWindow?) {
@@ -137,6 +140,10 @@ struct PatchChangeCounts: View {
             guard let self, let review, let store else { return }
             self.annotate(review, store: store)
         }
+        panel.markRegion = { [weak self, weak review, weak store] in
+            guard let self, let review, let store else { return }
+            self.markRegion(review, store: store)
+        }
         panel.clearSelection = { [weak model] in
             guard let model, model.selection != nil else { return false }
             model.selection = nil
@@ -147,11 +154,55 @@ struct PatchChangeCounts: View {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    /// Comments on the selected lines with the editor and annotation of every other preview, so the
-    /// note waits in the composer and reaches the bot as any other does.
+    /// Comments on the selected lines, or on the whole patch when none are, with the editor and
+    /// annotation of every other preview, so the note waits in the composer and reaches the bot as any other does.
     private func annotate(_ review: Review, store: NoodleStore) {
-        guard !review.editor.hasPendingAnnotation, let quote = review.model.selectedQuote else { NSSound.beep(); return }
-        review.editor.annotateConversation(in: review.panel, source: review.model.attachment, quote: quote) { [weak store] note, content, source in
+        guard !review.editor.hasPendingAnnotation, review.capture == nil else { NSSound.beep(); return }
+        review.editor.annotateConversation(in: review.panel, source: review.model.attachment,
+                                           quote: review.model.selectedQuote, save: Self.save(to: store))
+    }
+
+    /// Marks a region of a picture of the review, as in a conversation or any other preview.
+    private func markRegion(_ review: Review, store: NoodleStore) {
+        guard !review.editor.hasPendingAnnotation, review.capture == nil else { NSSound.beep(); return }
+        let panel = review.panel, frame = panel.frame
+        review.capture = Task { @MainActor [weak review, weak store] in
+            defer { if !Task.isCancelled { review?.capture = nil } }
+            do {
+                let image = try await Self.picture(of: panel)
+                // A review resized or closed meanwhile no longer matches its picture.
+                guard !Task.isCancelled, let review, let store, panel.isVisible, panel.frame == frame,
+                      !review.editor.hasPendingAnnotation else { return }
+                review.editor.annotateConversation(in: panel, source: review.model.attachment, quote: nil,
+                    snapshot: NSImage(cgImage: image, size: frame.size), save: Self.save(to: store))
+            } catch {
+                guard !Task.isCancelled, panel.isVisible else { return }
+                let alert = NSAlert(); alert.messageText = "Review couldn’t be captured"
+                alert.informativeText = error.localizedDescription
+                alert.beginSheetModal(for: panel) { _ in }
+            }
+        }
+    }
+
+    /// Only this window of our own process, at most at twice its size in points, unless the review closed first.
+    private static func picture(of window: NSWindow) async throws -> CGImage {
+        try Task.checkCancellation()
+        let content = try await SCShareableContent.currentProcess
+        guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
+            throw AttachmentPreviewController.CaptureError.unavailable
+        }
+        let config = SCStreamConfiguration()
+        let scale = min(window.backingScaleFactor, 2)
+        config.width = max(1, Int(target.frame.width * scale))
+        config.height = max(1, Int(target.frame.height * scale))
+        config.showsCursor = false; config.ignoreShadowsSingleWindow = true; config.scalesToFit = true
+        config.includeChildWindows = false; config.captureResolution = .best
+        return try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: target),
+                                                          configuration: config)
+    }
+
+    private static func save(to store: NoodleStore) -> (AttachmentAnnotation, Data, ConversationAttachment) throws -> Void {
+        { [weak store] note, content, source in
             guard let store else { throw WorkspaceError.missingConversation(source.conversationID) }
             try store.saveAnnotation(note, content: content, source: source)
         }
@@ -166,14 +217,23 @@ struct PatchChangeCounts: View {
         guard let closing = notification.object as? NSPanel,
               let id = reviews.first(where: { $0.value.panel === closing })?.key, let review = reviews[id] else { return }
         reviews[id] = nil
+        review.capture?.cancel()
         review.editor.close()
         closing.contentView = nil
         if closing.isKeyWindow { review.host?.makeKeyAndOrderFront(nil) }
+    }
+
+    /// A region is marked on a picture of the review as it was, which a resized review no longer matches.
+    func windowDidResize(_ notification: Notification) {
+        guard let review = reviews.values.first(where: { $0.panel === notification.object as? NSWindow }) else { return }
+        review.capture?.cancel(); review.capture = nil
+        if review.editor.conversationCanvas != nil { review.editor.cancelAnnotation() }
     }
 }
 
 private final class PatchReviewPanel: NSPanel {
     var annotate: (() -> Void)?
+    var markRegion: (() -> Void)?
     /// Escape first lets go of selected lines; true when there were some.
     var clearSelection: (() -> Bool)?
 
@@ -182,8 +242,13 @@ private final class PatchReviewPanel: NSPanel {
         if clearSelection?() != true { close() }
     }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if KeyboardBindings.shared.matches(.annotateSelection, event: event) {
+        let bindings = KeyboardBindings.shared
+        if bindings.matches(.annotateSelection, event: event) {
             if !event.isARepeat { annotate?() }
+            return true
+        }
+        if bindings.matches(.annotateRegion, event: event) {
+            if !event.isARepeat { markRegion?() }
             return true
         }
         if event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command,
@@ -253,6 +318,22 @@ private final class PatchReviewPanel: NSPanel {
         }
     }
 
+    /// A drag from `start` selects every line to `line`, in the hunk it started in. With Shift it
+    /// extends the selection already there instead.
+    func drag(path: String, hunk: Int, from start: Int, to line: Int, extending: Bool) {
+        var anchor = start
+        if extending, let selection, selection.path == path, selection.hunk == hunk { anchor = selection.anchor }
+        let dragged = Selection(path: path, hunk: hunk, anchor: anchor, head: line)
+        if selection != dragged { selection = dragged }
+    }
+
+    /// The line of a hunk at height `y`, given where its lines are. Past its first or last line, a
+    /// drag stays in the hunk it started in, on the line nearest the pointer.
+    static func line(at y: CGFloat, in frames: [Int: CGRect]) -> Int? {
+        func distance(_ frame: CGRect) -> CGFloat { frame.minY > y ? frame.minY - y : max(0, y - frame.maxY) }
+        return frames.min { (distance($0.value), $0.key) < (distance($1.value), $1.key) }?.key
+    }
+
     func isSelected(path: String, hunk: Int, line: Int) -> Bool {
         guard let selection, selection.path == path, selection.hunk == hunk else { return false }
         return selection.lines.contains(line)
@@ -273,6 +354,20 @@ struct PatchReviewView: View {
     @Bindable var model: PatchReviewModel
     let store: NoodleStore
     @State private var walkthroughHeight: CGFloat = 0
+    @State private var lineFrames = LineFrames()
+    /// Whether the line pressed on was left, which makes the press a drag rather than a click.
+    @State private var isDragging = false
+    private static let lines = "lines"
+
+    /// Where the shown lines of each hunk are in the list, for a drag across them. Not observed:
+    /// it changes whenever lines are laid out, and nothing is drawn from it.
+    private final class LineFrames {
+        struct Hunk: Hashable {
+            var path: String
+            var hunk: Int
+        }
+        var frames: [Hunk: [Int: CGRect]] = [:]
+    }
 
     private struct Comment {
         var hunk: Int
@@ -287,6 +382,8 @@ struct PatchReviewView: View {
             progress
             Divider()
             files
+            Divider()
+            footer
         }
         // Solid rather than the frame's glass: code is read here at length.
         .background(Color(nsColor: .windowBackgroundColor))
@@ -396,16 +493,31 @@ struct PatchReviewView: View {
 
     private var files: some View {
         let rows = rows(comments: comments)
-        let hint = KeyboardBindings.shared.binding(for: .annotateSelection)
-            .map { "Click a line to select it, Shift-click to select more, then press \($0.displayName) to comment" }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(rows) { row in
-                    view(for: row, hint: hint)
+                    view(for: row)
                 }
             }
+            .coordinateSpace(.named(Self.lines))
             .padding(.bottom, 12)
         }
+    }
+
+    /// How to comment, in view rather than in a tooltip on every line.
+    private var footer: some View {
+        let bindings = KeyboardBindings.shared
+        let comment = bindings.binding(for: .annotateSelection)?.displayName
+        let region = bindings.binding(for: .annotateRegion)?.displayName
+        let count = model.selection?.lines.count ?? 0
+        let hints: [String?] = count > 0
+            ? ["\(count) \(count == 1 ? "line" : "lines") selected", comment.map { "\($0) to comment" }, "Esc to let go"]
+            : ["Click or drag across lines to select them", comment.map { "\($0) to comment on them or the whole patch" },
+               region.map { "\($0) to mark a region" }]
+        return Text(hints.compactMap { $0 }.joined(separator: "  ·  "))
+            .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            .padding(.horizontal, 18).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Comments on this patch, sent or still in the composer, by file, under the lines they quote.
@@ -467,7 +579,7 @@ struct PatchReviewView: View {
         return rows
     }
 
-    @ViewBuilder private func view(for row: Row, hint: String?) -> some View {
+    @ViewBuilder private func view(for row: Row) -> some View {
         switch row {
         case .folder(let folder, let viewed, let total):
             HStack(spacing: 6) {
@@ -482,13 +594,28 @@ struct PatchReviewView: View {
         case .hunk(let file, let index):
             hunkHeader(file.hunks[index])
         case .line(let file, let hunk, let index):
+            let place = LineFrames.Hunk(path: file.path, hunk: hunk)
             PatchLineRow(line: file.hunks[hunk].lines[index],
                          isSelected: model.isSelected(path: file.path, hunk: hunk, line: index))
-                .onTapGesture {
-                    model.select(path: file.path, hunk: hunk, line: index,
-                                 extending: NSEvent.modifierFlags.contains(.shift))
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.lines)) } action: {
+                    lineFrames.frames[place, default: [:]][index] = $0
                 }
-                .help(hint ?? "")
+                .onDisappear { lineFrames.frames[place]?[index] = nil }
+                .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.lines))
+                    .onChanged { drag in
+                        let line = PatchReviewModel.line(at: drag.location.y, in: lineFrames.frames[place] ?? [:]) ?? index
+                        guard isDragging || line != index else { return }
+                        isDragging = true
+                        model.drag(path: file.path, hunk: hunk, from: index, to: line,
+                                   extending: NSEvent.modifierFlags.contains(.shift))
+                    }
+                    .onEnded { _ in
+                        if !isDragging {
+                            model.select(path: file.path, hunk: hunk, line: index,
+                                         extending: NSEvent.modifierFlags.contains(.shift))
+                        }
+                        isDragging = false
+                    })
         case .comment(let text, _):
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "text.bubble.fill").foregroundStyle(.orange)

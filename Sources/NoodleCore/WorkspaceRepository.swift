@@ -907,13 +907,16 @@ public struct WorkspaceRepository: Sendable {
         )
     }
 
-    /// `id` and `originalFilename` let a copy from elsewhere, such as a Noodle Hub, keep the original's.
+    /// `id`, `originalFilename` and `annotation` let a copy from elsewhere, such as a Noodle Hub, keep the original's.
+    /// An annotation that does not fit the file is left off rather than failing the copy. Its source may not have come
+    /// along, so unlike a note made here it need not be in the conversation.
     public func importAttachment(
         from sourceURL: URL,
         into conversationID: UUID,
         mediaType: String,
         now: Date = Date(),
         voice: VoiceMessage? = nil,
+        annotation: AttachmentAnnotation? = nil,
         id: UUID = UUID(),
         originalFilename: String? = nil
     ) throws -> ConversationAttachment {
@@ -934,6 +937,7 @@ public struct WorkspaceRepository: Sendable {
         let attachmentID = id
         let filename = originalFilename ?? sourceURL.lastPathComponent
         let resolvedMediaType = detectedImageMediaType(at: sourceURL) ?? mediaType
+        let annotation = annotation.flatMap { $0.isValid && voice == nil && $0.mediaType == resolvedMediaType ? $0 : nil }
         let attachment = ConversationAttachment(
             id: attachmentID,
             conversationID: conversationID,
@@ -942,7 +946,8 @@ public struct WorkspaceRepository: Sendable {
             mediaType: resolvedMediaType,
             byteCount: Int64(values.fileSize ?? 0),
             createdAt: now,
-            voice: voice
+            voice: voice,
+            annotation: annotation
         )
         let directory = attachmentsDirectory(conversationID: conversationID)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

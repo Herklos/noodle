@@ -1015,10 +1015,13 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     public var avatar: LinkAvatar?
     /// The image model bots with Image Generation use. Nil while the Hub has none downloaded.
     public var imageModel: String?
+    /// Whether the Hub keeps the `annotation` of the files it is sent, so a device may offer to comment on one.
+    public var keepsAnnotations: Bool
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
-                canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil) {
+                canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
+                keepsAnnotations: Bool = false) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1031,10 +1034,12 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.userID = userID
         self.avatar = avatar
         self.imageModel = imageModel
+        self.keepsAnnotations = keepsAnnotations
     }
 
     private enum CodingKeys: String, CodingKey {
-        case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel
+        case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
+             keepsAnnotations
     }
 
     public init(from decoder: Decoder) throws {
@@ -1051,6 +1056,7 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         userID = try c.decodeIfPresent(UUID.self, forKey: .userID)
         avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
         imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel)
+        keepsAnnotations = try c.decode(.keepsAnnotations, or: false)
     }
 }
 
@@ -1485,6 +1491,8 @@ public struct LinkAttachment: Codable, Equatable, Identifiable, Sendable {
     public var byteCount: Int
     /// Set when the file is a voice message.
     public var voice: LinkVoice?
+    /// Set when the file is a comment on another file of the conversation.
+    public var annotation: LinkAnnotation?
     /// Set for a link, which travels as its address rather than as a file: a web page, or a
     /// browser tab, computer or noodlet, which opens live.
     public var url: URL?
@@ -1494,18 +1502,19 @@ public struct LinkAttachment: Codable, Equatable, Identifiable, Sendable {
     public var pixelSize: LinkPixelSize?
 
     public init(id: UUID, filename: String, mediaType: String, byteCount: Int, voice: LinkVoice? = nil,
-                url: URL? = nil, card: LinkCardInfo? = nil, pixelSize: LinkPixelSize? = nil) {
+                annotation: LinkAnnotation? = nil, url: URL? = nil, card: LinkCardInfo? = nil, pixelSize: LinkPixelSize? = nil) {
         self.id = id
         self.filename = filename
         self.mediaType = mediaType
         self.byteCount = byteCount
         self.voice = voice
+        self.annotation = annotation
         self.url = url
         self.card = card
         self.pixelSize = pixelSize
     }
 
-    private enum CodingKeys: String, CodingKey { case id, filename, mediaType, byteCount, voice, url, card, pixelSize }
+    private enum CodingKeys: String, CodingKey { case id, filename, mediaType, byteCount, voice, annotation, url, card, pixelSize }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1514,6 +1523,8 @@ public struct LinkAttachment: Codable, Equatable, Identifiable, Sendable {
         mediaType = try c.decode(.mediaType, or: "application/octet-stream")
         byteCount = try c.decode(Int.self, forKey: .byteCount)
         voice = try c.decodeIfPresent(LinkVoice.self, forKey: .voice)
+        // A comment that does not read leaves the file a plain file rather than failing the message.
+        annotation = try? c.decodeIfPresent(LinkAnnotation.self, forKey: .annotation)
         url = try c.decodeIfPresent(URL.self, forKey: .url)
         card = try c.decodeIfPresent(LinkCardInfo.self, forKey: .card)
         // Only a hint: a size that makes no sense is left out rather than failing the message.
@@ -1595,6 +1606,46 @@ public struct LinkVoice: Codable, Equatable, Sendable {
         self.duration = duration
         self.waveform = waveform
         self.localeIdentifier = localeIdentifier
+    }
+}
+
+/// A comment on a file of the conversation, so a bot reads what it refers to: the selected text, or the
+/// part of a picture marked in the file this travels with. The apps check it when it arrives.
+public struct LinkAnnotation: Codable, Equatable, Sendable {
+    /// Fractions of the marked picture, from its bottom-left corner.
+    public struct Region: Codable, Equatable, Sendable {
+        public var x: Double
+        public var y: Double
+        public var width: Double
+        public var height: Double
+
+        public init(x: Double, y: Double, width: Double, height: Double) {
+            self.x = x
+            self.y = y
+            self.width = width
+            self.height = height
+        }
+    }
+
+    public var version: Int
+    /// The file commented on, by the ID it keeps across the link. It may not have travelled.
+    public var sourceAttachmentID: UUID
+    public var sourceFilename: String
+    /// The message commented on, when the file is a copy of one.
+    public var sourceMessageID: UUID?
+    public var quote: String?
+    public var comment: String
+    public var region: Region?
+
+    public init(version: Int, sourceAttachmentID: UUID, sourceFilename: String, sourceMessageID: UUID? = nil,
+                quote: String? = nil, comment: String, region: Region? = nil) {
+        self.version = version
+        self.sourceAttachmentID = sourceAttachmentID
+        self.sourceFilename = sourceFilename
+        self.sourceMessageID = sourceMessageID
+        self.quote = quote
+        self.comment = comment
+        self.region = region
     }
 }
 

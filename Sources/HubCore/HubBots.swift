@@ -605,6 +605,7 @@ import NoodleVoicePeer
             VoiceMessage(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform, localeIdentifier: $0.localeIdentifier)
         }
         _ = try repository.importAttachment(from: part, into: conversationID, mediaType: attachment.mediaType, voice: voice,
+                                            annotation: attachment.annotation.map { AttachmentAnnotation($0) },
                                             id: attachment.id, originalFilename: filename.isEmpty ? "Attachment" : filename)
     }
 
@@ -1528,6 +1529,7 @@ import NoodleVoicePeer
             LinkAttachment(id: $0.id, filename: $0.originalFilename, mediaType: $0.mediaType, byteCount: Int($0.byteCount),
                            voice: $0.voice.map { LinkVoice(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform,
                                                            localeIdentifier: $0.localeIdentifier) },
+                           annotation: $0.annotation.map { LinkAnnotation($0) },
                            url: $0.url,
                            card: $0.card.map { LinkCardInfo(title: $0.title, detail: $0.detail, image: pictures ? $0.image : nil, symbol: $0.symbol,
                                                             colour: $0.colour, icon: $0.icon, capturedAt: $0.capturedAt) },
@@ -1548,6 +1550,23 @@ import NoodleVoicePeer
         return LinkMessage(id: message.id, conversationID: message.conversationID, author: author, body: message.body,
                            createdAt: message.createdAt, delivered: message.delivery == .delivered, attachments: attachments,
                            reactions: reactions, call: call)
+    }
+}
+
+extension LinkAnnotation {
+    init(_ annotation: AttachmentAnnotation) {
+        self.init(version: annotation.version, sourceAttachmentID: annotation.sourceAttachmentID,
+                  sourceFilename: annotation.sourceFilename, sourceMessageID: annotation.sourceMessageID, quote: annotation.quote,
+                  comment: annotation.comment, region: annotation.region.map { Region(x: $0.x, y: $0.y, width: $0.width, height: $0.height) })
+    }
+}
+
+extension AttachmentAnnotation {
+    /// Checked when the file it came with is kept.
+    init(_ link: LinkAnnotation) {
+        self.init(version: link.version, sourceAttachmentID: link.sourceAttachmentID, sourceFilename: link.sourceFilename,
+                  sourceMessageID: link.sourceMessageID, quote: link.quote, comment: link.comment,
+                  region: link.region.map { Region(x: $0.x, y: $0.y, width: $0.width, height: $0.height) })
     }
 }
 
