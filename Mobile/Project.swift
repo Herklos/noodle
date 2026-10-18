@@ -51,7 +51,7 @@ let project = Project(
                 // Without it the share sheet leaves out Save Image.
                 "NSPhotoLibraryAddUsageDescription": "Noodle saves pictures and videos from conversations to your photos when you choose Save.",
                 "NSLocalNetworkUsageDescription": "Noodle connects to your Noodle Hub on this network.",
-                "NSMicrophoneUsageDescription": "Record voice messages you choose to send, transcribed on this device, talk with bots on calls you start, and let noodlets you open listen when they ask.",
+                "NSMicrophoneUsageDescription": "Record voice messages you choose to send and comments you dictate, transcribed on this device, talk with bots on calls you start, and let noodlets you open listen when they ask.",
                 // A call keeps going with the screen locked or another app in front; CallKit refuses calls without voip.
                 "UIBackgroundModes": ["audio", "voip"],
                 // Shared with the notification and share extensions, which reach the Hubs kept there, and the widgets.

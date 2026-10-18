@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- Comment on files and messages, as on the Mac. In a file's preview, tap Mark Up and drag a box around what you mean, then write or dictate your comment. Pick lines of a patch by their numbers, or select text in a text file, and choose Comment…. Long-press a message or a file in the conversation and choose Comment… to comment on all of it. Comments wait above the message field until you send your next message, which takes them to the bot. Tap one to change it. Needs a Hub that keeps comments.
+- Comments from your Mac or another device show as cards with the part marked or the text quoted.
+
+### What to Test
+
+- Open a picture, a PDF and a text file from a conversation and tap Mark Up: check "Drag to mark an area" shows and goes once you drag, and lifting your finger opens the comment sheet with the area you marked outlined in orange. Write a comment and tap Save.
+- In the comment sheet, tap the microphone and speak: check your words are added to the comment once you stop.
+- Open a patch, open a file and tap a line's number, then drag down the numbers: check the lines are highlighted and Comment… opens the sheet with those lines.
+- Select some words in a text file and choose Comment… from the menu over them.
+- Long-press a message and choose Comment…; long-press a file and choose Comment….
+- Check each comment waits above the message field with its picture and first words. Tap one to change its comment, and remove one with its ×. Leave the conversation and come back, also after quitting the app: check they are still there.
+- Send a message: check the comments go with it, show as Annotation cards, and the bot answers about what you marked or quoted.
+- With a Hub that has not been updated, check Mark Up and Comment… do not show and files open as before.
+
 ## [0.38.0] - 2026-10-18
 
 ### Added

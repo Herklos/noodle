@@ -34,6 +34,8 @@ struct MessageFocus: Identifiable {
     /// The text bubble's frame in the window.
     let frame: CGRect
     let folded: Bool
+    /// What a comment on the message quotes: the stretch of text pressed, or the whole message.
+    var quote = ""
 
     var id: UUID { message.id }
 }
@@ -98,6 +100,8 @@ struct MessageActions: View {
     let focus: MessageFocus
     /// Set for your message that did not go through, which cannot be reacted to.
     var unsent: UnsentActions?
+    /// Writes a comment on the message, while its Hub keeps what comments refer to.
+    var comment: (() -> Void)?
     let react: (String) -> Void
     let close: () -> Void
     @State private var shown = false
@@ -196,6 +200,7 @@ struct MessageActions: View {
                 item("Edit and Send", systemImage: "pencil", action: unsent.edit)
             }
             item("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = focus.message.body }
+            if let comment, unsent == nil { item("Comment…", systemImage: "text.bubble", action: comment) }
             if let unsent { item("Delete", systemImage: "trash", role: .destructive, action: unsent.delete) }
         }
         .font(.body)
