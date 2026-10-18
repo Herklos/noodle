@@ -129,6 +129,8 @@ jobs:
         run: swift test --disable-sandbox --package-path Shared/Brand --scratch-path .build/brand
       - name: Test external tools access
         run: swift test --disable-sandbox --package-path Shared/ExternalTools --scratch-path .build/external-tools
+      - name: Test reading patches
+        run: swift test --disable-sandbox --package-path Shared/Patch --scratch-path .build/patch
 
   test-noodle-macos27:
     needs: [versions]
