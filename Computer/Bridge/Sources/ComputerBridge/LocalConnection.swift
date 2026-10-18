@@ -204,31 +204,34 @@ public final class ComputerConnectionServer: @unchecked Sendable {
             _ = fcntl(peer, F_SETFL, fcntl(peer, F_GETFL) & ~O_NONBLOCK)
             ComputerConnection.configure(peer)
             DispatchQueue.global(qos: .userInitiated).async {
+                // The limit covers only checking the caller and reading its request, which hold this
+                // thread; the work then waits without one, however long a computer takes to answer.
+                let identity: String, request: ComputerRequest
                 do {
-                    let identity = try authenticate(peer)
-                    let request = try ComputerRequest.read(ComputerConnection.receive(peer))
+                    identity = try authenticate(peer)
+                    request = try ComputerRequest.read(ComputerConnection.receive(peer))
                     try request.validate()
-                    if request.operation == .surfaceStream {
-                        // The answer goes first; then the socket belongs to the live view and
-                        // stops counting against the connections served at once.
-                        let socket = SurfaceSocket(fd: peer, held: true)
-                        Task {
-                            let response = await surface?(request, identity, socket)
-                                ?? ComputerResponse(error: "This computer cannot be shown live.")
-                            socket.start(with: (try? JSONEncoder().encode(response)) ?? Data())
-                            if response.error != nil { socket.close() }
-                            permits.signal()
-                        }
-                        return
-                    }
-                    let reply = PendingReply(peer, permits: permits)
-                    Task {
-                        let response = await handler(request, identity)
-                        reply.finish((try? JSONEncoder().encode(response)) ?? Data())
-                    }
                 } catch {
                     try? ComputerConnection.send(JSONEncoder().encode(ComputerResponse(error: error.localizedDescription)), peer)
                     Darwin.close(peer); permits.signal()
+                    return
+                }
+                permits.signal()
+                if request.operation == .surfaceStream {
+                    // The answer goes first; then the socket belongs to the live view.
+                    let socket = SurfaceSocket(fd: peer, held: true)
+                    Task {
+                        let response = await surface?(request, identity, socket)
+                            ?? ComputerResponse(error: "This computer cannot be shown live.")
+                        socket.start(with: (try? JSONEncoder().encode(response)) ?? Data())
+                        if response.error != nil { socket.close() }
+                    }
+                    return
+                }
+                let reply = PendingReply(peer)
+                Task {
+                    let response = await handler(request, identity)
+                    reply.finish((try? JSONEncoder().encode(response)) ?? Data())
                 }
             }
         }
@@ -240,16 +243,16 @@ public final class ComputerConnectionServer: @unchecked Sendable {
 }
 
 /// A request being answered. Its caller sends nothing more while it waits, so anything on the socket
-/// means it gave up; its place is then given back even if a stuck computer never answers.
+/// means it gave up; the connection is then closed even if a stuck computer never answers.
 private final class PendingReply: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false
     private let peer: Int32
     private let watch: DispatchSourceRead
-    init(_ peer: Int32, permits: DispatchSemaphore) {
+    init(_ peer: Int32) {
         self.peer = peer
         watch = DispatchSource.makeReadSource(fileDescriptor: peer, queue: .global(qos: .utility))
-        watch.setCancelHandler { Darwin.close(peer); permits.signal() }
+        watch.setCancelHandler { Darwin.close(peer) }
         // Holds the reply until cancelled, which releases this handler.
         watch.setEventHandler { self.finish(nil) }
         watch.resume()

@@ -192,8 +192,18 @@ public final class BrowserConnectionServer: @unchecked Sendable {
     private var source: DispatchSourceRead?
     private let permits = DispatchSemaphore(value: 4)
     private let url: URL
-    public init(
+    public convenience init(
         socket url: URL, team: String, clientIDs: [String] = BrowserConnection.clientIDs,
+        handler: @escaping @Sendable (BrowserRequest, String) async -> BrowserResponse,
+        surface: (@Sendable (BrowserRequest, String, SurfaceSocket) async -> BrowserResponse)? = nil
+    ) throws {
+        try self.init(
+            socket: url, authenticate: { try BrowserConnection.authenticate($0, team: team, identifiers: clientIDs) },
+            handler: handler, surface: surface)
+    }
+    /// `authenticate` names the app at the other end of a socket, so tests can stand in for a signed one.
+    init(
+        socket url: URL, authenticate: @escaping @Sendable (Int32) throws -> String,
         handler: @escaping @Sendable (BrowserRequest, String) async -> BrowserResponse,
         surface: (@Sendable (BrowserRequest, String, SurfaceSocket) async -> BrowserResponse)? = nil
     ) throws {
@@ -239,37 +249,38 @@ public final class BrowserConnectionServer: @unchecked Sendable {
             _ = fcntl(peer, F_SETFL, fcntl(peer, F_GETFL) & ~O_NONBLOCK)
             BrowserConnection.configure(peer)
             DispatchQueue.global(qos: .userInitiated).async {
+                // The limit covers only checking the caller and reading its request, which hold this
+                // thread; the work then waits without one, however long a page takes to answer.
+                let identity: String, request: BrowserRequest
                 do {
-                    let identity = try BrowserConnection.authenticate(
-                        peer, team: team, identifiers: clientIDs)
-                    let request = try BrowserRequest.read(BrowserConnection.receive(peer))
+                    identity = try authenticate(peer)
+                    request = try BrowserRequest.read(BrowserConnection.receive(peer))
                     try request.validate()
-                    if request.operation == .surfaceStream {
-                        // The answer goes first; then the socket belongs to the live view and
-                        // stops counting against the connections served at once.
-                        let socket = SurfaceSocket(fd: peer, held: true)
-                        Task {
-                            let response = await surface?(request, identity, socket)
-                                ?? BrowserResponse(error: "This browser cannot show tabs live.")
-                            let answer = (try? JSONEncoder().encode(response)) ?? Data()
-                            socket.start(with: answer)
-                            if response.error != nil { socket.close() }
-                            permits.signal()
-                        }
-                        return
-                    }
-                    Task {
-                        let response = await handler(request, identity)
-                        try? BrowserConnection.send(JSONEncoder().encode(response), peer)
-                        Darwin.close(peer)
-                        permits.signal()
-                    }
                 } catch {
                     try? BrowserConnection.send(
                         JSONEncoder().encode(BrowserResponse(error: error.localizedDescription)),
                         peer)
                     Darwin.close(peer)
                     permits.signal()
+                    return
+                }
+                permits.signal()
+                if request.operation == .surfaceStream {
+                    // The answer goes first; then the socket belongs to the live view.
+                    let socket = SurfaceSocket(fd: peer, held: true)
+                    Task {
+                        let response = await surface?(request, identity, socket)
+                            ?? BrowserResponse(error: "This browser cannot show tabs live.")
+                        let answer = (try? JSONEncoder().encode(response)) ?? Data()
+                        socket.start(with: answer)
+                        if response.error != nil { socket.close() }
+                    }
+                    return
+                }
+                let reply = PendingReply(peer)
+                Task {
+                    let response = await handler(request, identity)
+                    reply.finish((try? JSONEncoder().encode(response)) ?? Data())
                 }
             }
         }
@@ -281,4 +292,29 @@ public final class BrowserConnectionServer: @unchecked Sendable {
         source.resume()
     }
     deinit { source?.cancel() }
+}
+
+/// A request being answered. Its caller sends nothing more while it waits, so anything on the socket
+/// means it gave up; the connection is then closed even if a stuck page never answers.
+private final class PendingReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private let peer: Int32
+    private let watch: DispatchSourceRead
+    init(_ peer: Int32) {
+        self.peer = peer
+        watch = DispatchSource.makeReadSource(fileDescriptor: peer, queue: .global(qos: .utility))
+        watch.setCancelHandler { Darwin.close(peer) }
+        // Holds the reply until cancelled, which releases this handler.
+        watch.setEventHandler { self.finish(nil) }
+        watch.resume()
+    }
+    func finish(_ answer: Data?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        if let answer { try? BrowserConnection.send(answer, peer) }
+        watch.cancel()
+    }
 }

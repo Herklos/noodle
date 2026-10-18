@@ -1,4 +1,4 @@
-import BrowserBridge
+@testable import BrowserBridge
 import BrowserCore
 import Network
 @testable import NoodleBrowser
@@ -221,6 +221,39 @@ final class BrowserRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try BrowserConnectionServer(socket: url, team: "1234567890") { _, _ in .init() }) {
             XCTAssertEqual($0.localizedDescription, "A browser provider is already running.")
         }
+        withExtendedLifetime(server) {}
+    }
+
+    /// Requests waiting on a page that never answers must not turn other callers away.
+    func testStuckRequestsLeaveRoomForOthers() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("b.sock")
+        let stuck = DispatchSemaphore(value: 0)
+        let server = try BrowserConnectionServer(socket: url, authenticate: { _ in "test" }) { request, _ in
+            guard request.operation == .list else { return .init() }
+            stuck.signal()
+            try? await Task.sleep(for: .seconds(86_400))
+            return .init()
+        }
+        func connect() throws -> Int32 {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            BrowserConnection.configure(fd, seconds: 5)
+            XCTAssertEqual(try BrowserConnection.withAddress(url) { Darwin.connect(fd, $0, $1) }, 0)
+            return fd
+        }
+        let waiting = try (0..<4).map { _ in
+            let fd = try connect()
+            try BrowserConnection.send(JSONEncoder().encode(BrowserRequest(.list)), fd)
+            XCTAssertEqual(stuck.wait(timeout: .now() + 5), .success)
+            return fd
+        }
+        defer { waiting.forEach { Darwin.close($0) } }
+        let fd = try connect()
+        defer { Darwin.close(fd) }
+        try BrowserConnection.send(JSONEncoder().encode(BrowserRequest(.status, browserID: UUID())), fd)
+        XCTAssertNoThrow(try BrowserConnection.receive(fd), "Four stuck requests turn the next caller away")
         withExtendedLifetime(server) {}
     }
 }

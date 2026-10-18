@@ -6,7 +6,7 @@
 
 - Your own terminal on a Local Mac always opens, however many shells bots and other apps have left open, instead of failing with "Close an unused terminal before opening another". Shells that have ended no longer count towards their limit.
 - A computer made by the Hub or another app no longer switches the sidebar to it, or to the Hub space; what you are looking at stays selected.
-- A computer that stops responding, for example after running out of memory, no longer locks Noodle, the Hub and bots out of every computer until Noodle Computer is restarted. Requests they gave up waiting for stop counting against the requests served at once, which previously failed with "Computer connection write failed" or "Computer disconnected or timed out".
+- A computer that stops responding, for example after running out of memory, no longer locks Noodle, the Hub and bots out of every computer until Noodle Computer is restarted, which failed with "Computer connection write failed" or "Computer disconnected or timed out".
 
 ## [0.32.1] - 2026-10-17
 
