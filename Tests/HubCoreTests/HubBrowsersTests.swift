@@ -142,6 +142,37 @@ import XCTest
         XCTAssertEqual(hub.browsers.assigned(to: alfred.id, for: ada), [])
     }
 
+    func testAPlanLimitsHowManyBrowsersEachUserKeeps() async throws {
+        let (hub, ada, bob) = try hub()
+        let family = try XCTUnwrap(hub.access.plans.first { $0.name == "Family" })
+        hub.access.setBrowserLimit(1, in: family)
+        let work = try await hub.browsers.create(BrowserDraft(name: "Work"), for: ada)
+        do {
+            _ = try await hub.browsers.create(BrowserDraft(name: "Home"), for: ada)
+            XCTFail("Ada made more browsers than the plan allows")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Your plan allows up to 1 browser. Delete it to make another.")
+        }
+        _ = try await hub.browsers.create(BrowserDraft(name: "Bob's"), for: bob)
+
+        try await hub.browsers.delete(work.id, for: ada)
+        _ = try await hub.browsers.create(BrowserDraft(name: "Home"), for: ada)
+        XCTAssertEqual(hub.browsers.browsers(for: ada).map(\.name), ["Home"])
+    }
+
+    /// Browsers asked for at once count those still being made.
+    func testBrowsersMadeAtOnceKeepToThePlan() async throws {
+        let (hub, ada, _) = try hub()
+        let family = try XCTUnwrap(hub.access.plans.first { $0.name == "Family" })
+        hub.access.setBrowserLimit(1, in: family)
+        let browsers = hub.browsers
+        async let one = try? browsers.create(BrowserDraft(name: "Work"), for: ada)
+        async let two = try? browsers.create(BrowserDraft(name: "Home"), for: ada)
+        let made = await [one, two].compactMap { $0 }
+        XCTAssertEqual(made.count, 1)
+        XCTAssertEqual(hub.browsers.browsers(for: ada).count, 1)
+    }
+
     func testADeviceKeepsBrowsersOnTheHub() async throws {
         let (hub, ada, _) = try hub()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-browser-link-\(UUID())")

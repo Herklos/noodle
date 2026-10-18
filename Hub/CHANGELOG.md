@@ -5,6 +5,7 @@
 ### Added
 
 - Krea can be added as a tool.
+- A plan can limit how many computers and browsers each of its users keeps on the Hub.
 
 ### Fixed
 

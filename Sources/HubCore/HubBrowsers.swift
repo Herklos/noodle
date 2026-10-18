@@ -16,6 +16,8 @@ import NoodleCore
     private let call: BrowserToolProvider.Transport
     private let surface: @Sendable (BrowserRequest) async throws -> SurfaceSocket
     private var registry: BrowserAssignments
+    /// Browsers being made for each user, which count towards their plan's limit already.
+    private var making: [UUID: Int] = [:]
 
     /// `surface` opens a live view of a tab; by default in Noodle Browser on this Mac.
     public init(root: URL, access: HubAccess, tools: ToolProviderRegistry, assignments: ToolAssignmentStore,
@@ -53,6 +55,11 @@ import NoodleCore
 
     /// Makes a browser for the user. It reaches no bot until assigned.
     public func create(_ draft: BrowserDraft, for user: HubUser) async throws -> RemoteBrowser {
+        if let limit = access.browserLimit(for: user), browsers(for: user).count + making[user.id, default: 0] >= limit {
+            throw HubAccess.limitReached(limit, "browser", "browsers")
+        }
+        making[user.id, default: 0] += 1
+        defer { making[user.id, default: 1] -= 1 }
         var request = BrowserRequest(.create)
         request.profile = draft
         guard let made = try await call(request).checked().browser else {

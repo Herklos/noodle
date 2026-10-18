@@ -107,6 +107,35 @@ import XCTest
         XCTAssertTrue(access.lends(codex, model: "gpt-5", to: user))
     }
 
+    func testAPlanCanLimitHowManyComputersAndBrowsersEachUserKeeps() throws {
+        let (access, url) = access()
+        let family = try access.addPlan(named: "Family")
+        let user = try access.addUser(named: "Ada")
+        access.move(user, to: family)
+        XCTAssertNil(access.computerLimit(for: user))
+        XCTAssertNil(access.browserLimit(for: user))
+
+        access.setComputerLimit(5, in: family)
+        access.setBrowserLimit(10, in: family)
+        XCTAssertEqual(access.computerLimit(for: user), 5)
+        XCTAssertEqual(access.browserLimit(for: user), 10)
+        XCTAssertEqual(HubAccess(url: url).plans, access.plans)
+
+        access.setComputerLimit(nil, in: family)
+        XCTAssertNil(access.computerLimit(for: user))
+        XCTAssertEqual(access.browserLimit(for: user), 10)
+    }
+
+    func testThePersonalMacsOwnerHasNoLimits() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-access-\(UUID()).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        let access = HubAccess(url: url, personal: true)
+        access.setComputerLimit(0, in: access.plans[0])
+        access.setBrowserLimit(0, in: access.plans[0])
+        XCTAssertNil(access.computerLimit(for: access.users[0]))
+        XCTAssertNil(access.browserLimit(for: access.users[0]))
+    }
+
     func testAHarnessLeavingAPlanTakesItsModelsWithIt() throws {
         let (access, _) = access()
         let profile = UUID()

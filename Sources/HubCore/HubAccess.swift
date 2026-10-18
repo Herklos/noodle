@@ -25,15 +25,22 @@ public struct HubPlan: Identifiable, Codable, Hashable, Sendable {
     public var harnesses: Set<HubHarness>
     /// The models a bot may use on each harness; a harness missing here may use any, the harness default included.
     public var models: [HubHarness: Set<String>]
+    /// How many computers each user on it may keep; nil for any number.
+    public var computerLimit: Int?
+    /// How many browsers each user on it may keep; nil for any number.
+    public var browserLimit: Int?
 
-    public init(id: UUID = UUID(), name: String, harnesses: Set<HubHarness> = [], models: [HubHarness: Set<String>] = [:]) {
+    public init(id: UUID = UUID(), name: String, harnesses: Set<HubHarness> = [], models: [HubHarness: Set<String>] = [:],
+                computerLimit: Int? = nil, browserLimit: Int? = nil) {
         self.id = id
         self.name = name
         self.harnesses = harnesses
         self.models = models
+        self.computerLimit = computerLimit
+        self.browserLimit = browserLimit
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, harnesses, models }
+    private enum CodingKeys: String, CodingKey { case id, name, harnesses, models, computerLimit, browserLimit }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -41,6 +48,8 @@ public struct HubPlan: Identifiable, Codable, Hashable, Sendable {
         name = try c.decode(String.self, forKey: .name)
         harnesses = try c.decode(Set<HubHarness>.self, forKey: .harnesses)
         models = try c.decodeIfPresent([HubHarness: Set<String>].self, forKey: .models) ?? [:]
+        computerLimit = try c.decodeIfPresent(Int.self, forKey: .computerLimit)
+        browserLimit = try c.decodeIfPresent(Int.self, forKey: .browserLimit)
     }
 
     public var isDefault: Bool { id == Self.defaultID }
@@ -181,6 +190,27 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     public func models(on harness: HubHarness, for user: HubUser) -> Set<String>? {
         guard !isPersonal else { return nil }
         return plans.first { $0.id == user.plan }?.models[harness]
+    }
+
+    /// How many computers the user's plan lets them keep; nil when any number.
+    public func computerLimit(for user: HubUser) -> Int? {
+        guard !isPersonal, let current = current(user) else { return nil }
+        return plans.first { $0.id == current.plan }?.computerLimit
+    }
+
+    /// How many browsers the user's plan lets them keep; nil when any number.
+    public func browserLimit(for user: HubUser) -> Int? {
+        guard !isPersonal, let current = current(user) else { return nil }
+        return plans.first { $0.id == current.plan }?.browserLimit
+    }
+
+    /// Why a user at their plan's limit cannot make another computer or browser.
+    static func limitReached(_ limit: Int, _ one: String, _ many: String) -> LinkError {
+        switch limit {
+        case 0: LinkError("Your plan does not include \(many).")
+        case 1: LinkError("Your plan allows up to 1 \(one). Delete it to make another.")
+        default: LinkError("Your plan allows up to \(limit) \(many). Delete one to make another.")
+        }
     }
 
     /// Whether the user may run a bot on `harness` with `model`, nil being the harness default.
@@ -402,6 +432,16 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     /// Limits the models a bot may use on `harness`; nil, or none, lets it use any.
     public func setModels(_ models: Set<String>?, for harness: HubHarness, in plan: HubPlan) {
         update(plan) { $0.models[harness] = models?.isEmpty == false ? models : nil }
+    }
+
+    /// Limits the computers each user on the plan may keep; nil lets them keep any number.
+    public func setComputerLimit(_ limit: Int?, in plan: HubPlan) {
+        update(plan) { $0.computerLimit = limit.map { max(0, $0) } }
+    }
+
+    /// Limits the browsers each user on the plan may keep; nil lets them keep any number.
+    public func setBrowserLimit(_ limit: Int?, in plan: HubPlan) {
+        update(plan) { $0.browserLimit = limit.map { max(0, $0) } }
     }
 
     /// Users on a deleted plan go back to Default.

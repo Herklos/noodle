@@ -16,6 +16,8 @@ import NoodleCore
     private let call: ComputerToolProvider.Transport
     private let surface: @Sendable (ComputerRequest) async throws -> SurfaceSocket
     private var registry: ComputerAssignments
+    /// Computers being made for each user, which count towards their plan's limit already.
+    private var making: [UUID: Int] = [:]
 
     /// `surface` opens a live view of a computer; by default in Noodle Computer on this Mac.
     public init(root: URL, access: HubAccess, tools: ToolProviderRegistry, assignments: ToolAssignmentStore,
@@ -58,6 +60,11 @@ import NoodleCore
 
     /// Makes a computer for the user. It reaches no bot until assigned.
     public func create(_ draft: ComputerDraft, for user: HubUser) async throws -> RemoteComputer {
+        if let limit = access.computerLimit(for: user), computers(for: user).count + making[user.id, default: 0] >= limit {
+            throw HubAccess.limitReached(limit, "computer", "computers")
+        }
+        making[user.id, default: 0] += 1
+        defer { making[user.id, default: 1] -= 1 }
         var request = ComputerRequest(.create)
         request.computer = draft
         guard let made = try await manage(request).computers?.first else { throw LinkError("Noodle Computer did not return the new computer.") }

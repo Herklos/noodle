@@ -186,7 +186,7 @@ struct HubPlansSettingsView: View {
     }
 }
 
-/// One plan: its name and the harnesses it lends.
+/// One plan: its name, the harnesses it lends and how many computers and browsers its users keep.
 struct HubPlanEditor: View {
     let host: HubSettingsHost
     let planID: HubPlan.ID
@@ -230,6 +230,7 @@ struct HubPlanEditor: View {
                             .onSubmit(saveName)
                     }
                     harnessList(plan)
+                    limitList(plan)
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .font(.callout).foregroundStyle(.red)
@@ -307,11 +308,30 @@ struct HubPlanEditor: View {
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: 360)
             .fixedSize(horizontal: false, vertical: true)
-            .background(Color.secondary.opacity(0.075), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.secondary.opacity(0.11))
-            }
+            .planPanel()
         }
+    }
+
+    /// How many computers and browsers each user on the plan may keep, blank for any number.
+    private func limitList(_ plan: HubPlan) -> some View {
+        VStack(spacing: 0) {
+            limitRow("Computers per user", limit: plan.computerLimit) { access.setComputerLimit($0, in: plan) }
+            Divider()
+            limitRow("Browsers per user", limit: plan.browserLimit) { access.setBrowserLimit($0, in: plan) }
+        }
+        .planPanel()
+    }
+
+    private func limitRow(_ title: String, limit: Int?, set: @escaping (Int?) -> Void) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField(title, value: Binding(get: { limit }, set: set), format: .number, prompt: Text("No limit"))
+                .labelsHidden()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 80)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     /// A link naming the models the harness lends, opening a popover to choose them.
@@ -338,6 +358,16 @@ struct HubPlanEditor: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+private extension View {
+    /// The rounded box the plan editor groups its rows in.
+    func planPanel() -> some View {
+        background(Color.secondary.opacity(0.075), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.secondary.opacity(0.11))
+            }
     }
 }
 

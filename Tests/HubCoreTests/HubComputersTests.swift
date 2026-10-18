@@ -111,6 +111,40 @@ import XCTest
         XCTAssertEqual(renamed.name, "Bench")
     }
 
+    func testAPlanLimitsHowManyComputersEachUserKeeps() async throws {
+        let f = try fixture()
+        let family = try XCTUnwrap(f.hub.access.plans.first { $0.name == "Family" })
+        f.hub.access.setComputerLimit(2, in: family)
+        let first = try await f.hub.computers.create(ComputerDraft(template: "ubuntu", name: "One"), for: f.ada)
+        _ = try await f.hub.computers.create(ComputerDraft(template: "ubuntu", name: "Two"), for: f.ada)
+        do {
+            _ = try await f.hub.computers.create(ComputerDraft(template: "ubuntu", name: "Three"), for: f.ada)
+            XCTFail("Ada made more computers than the plan allows")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Your plan allows up to 2 computers. Delete one to make another.")
+        }
+        XCTAssertEqual(f.hub.computers.computers(for: f.ada).count, 2)
+        // The limit is each user's own.
+        _ = try await f.hub.computers.create(ComputerDraft(template: "ubuntu", name: "Bob's"), for: f.bob)
+
+        try await f.hub.computers.delete(first.id, for: f.ada)
+        _ = try await f.hub.computers.create(ComputerDraft(template: "ubuntu", name: "Three"), for: f.ada)
+        XCTAssertEqual(f.hub.computers.computers(for: f.ada).count, 2)
+    }
+
+    /// Computers asked for at once count those still being made.
+    func testComputersMadeAtOnceKeepToThePlan() async throws {
+        let f = try fixture()
+        let family = try XCTUnwrap(f.hub.access.plans.first { $0.name == "Family" })
+        f.hub.access.setComputerLimit(1, in: family)
+        let computers = f.hub.computers, ada = f.ada
+        async let one = try? computers.create(ComputerDraft(template: "ubuntu", name: "One"), for: ada)
+        async let two = try? computers.create(ComputerDraft(template: "ubuntu", name: "Two"), for: ada)
+        let made = await [one, two].compactMap { $0 }
+        XCTAssertEqual(made.count, 1)
+        XCTAssertEqual(f.hub.computers.computers(for: f.ada).count, 1)
+    }
+
     func testABotIsToldOfAComputerItLeftRunningUnused() async throws {
         let f = try fixture()
         let alfred = try f.hub.bots.create(LinkBotDraft(name: "Alfred", provider: "claude-code"), for: f.ada)
