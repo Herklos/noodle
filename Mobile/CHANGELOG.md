@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-18
+
 ### Added
 
 - Comment on files and messages, as on the Mac. In a file's preview, tap Mark Up and drag a box around what you mean, then write or dictate your comment. Pick lines of a patch by their numbers, or select text in a text file, and choose Comment…. Long-press a message or a file in the conversation and choose Comment… to comment on all of it. Comments wait above the message field until you send your next message, which takes them to the bot. Tap one to change it. Needs a Hub that keeps comments.

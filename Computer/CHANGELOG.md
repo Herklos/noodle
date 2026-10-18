@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-10-18
+
 ### Fixed
 
 - Your own terminal on a Local Mac always opens, however many shells bots and other apps have left open, instead of failing with "Close an unused terminal before opening another". Shells that have ended no longer count towards their limit.

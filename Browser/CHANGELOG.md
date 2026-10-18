@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-18
+
 ### Changed
 
 - Bots and other apps can no longer bring a browser's window to the front. Bots attach tabs to conversations instead, and you open a browser yourself.

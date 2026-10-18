@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-18
+
 ### Added
 
 - Krea can be added as a tool.

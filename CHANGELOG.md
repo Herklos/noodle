@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-10-18
+
 ### Added
 
 - Krea can be added as a tool.
