@@ -144,7 +144,7 @@ struct ComputerIdleWatch {
             appearance.iconColour = draft.colour ?? 0
             computer.appearance = appearance
             try computer.validate()
-            guard await store.create(computer, source: nil), let session = store.sessions.first(where: { $0.id == computer.id }) else {
+            guard await store.create(computer, source: nil, selects: false), let session = store.sessions.first(where: { $0.id == computer.id }) else {
                 let message = store.creationWasCancelled ? "Making the computer was cancelled." : store.error ?? "The computer could not be made."
                 store.error = nil
                 throw ComputerBridgeError(message)

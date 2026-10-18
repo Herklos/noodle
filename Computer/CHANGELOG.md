@@ -5,6 +5,7 @@
 ### Fixed
 
 - Your own terminal on a Local Mac always opens, however many shells bots and other apps have left open, instead of failing with "Close an unused terminal before opening another". Shells that have ended no longer count towards their limit.
+- A computer made by the Hub or another app no longer switches the sidebar to it, or to the Hub space; what you are looking at stays selected.
 
 ## [0.32.1] - 2026-10-17
 

@@ -19,6 +19,21 @@ import XCTest
         XCTAssertEqual(try store.library.load().first?.hub, true)
     }
 
+    /// A computer made through the provider, as the Hub makes its own, leaves the person's selection, and so their space, alone.
+    func testComputersMadeForOthersLeaveTheSelectionAlone() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try ComputerStore(root: root)
+        let mine = Computer(name: "Mine", kind: .localMac)
+        let created = await store.create(mine, source: nil)
+        XCTAssertTrue(created)
+        XCTAssertEqual(store.selection, mine.id)
+        let made = await store.create(Computer(name: "Made", kind: .localMac), source: nil, selects: false)
+        XCTAssertTrue(made)
+        XCTAssertEqual(store.sessions.count, 2)
+        XCTAssertEqual(store.selection, mine.id)
+    }
+
     func testOnlyTheHubSaysWhomAComputerIsKeptFor() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

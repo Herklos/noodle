@@ -257,7 +257,8 @@ enum ComputerDisplayMode: String {
     }
     var kernel: URL { Bundle.main.resourceURL!.appendingPathComponent("Runtime/vmlinux-arm64") }
 
-    func create(_ requested: Computer, source: URL?, sshSecret: SSHSecret? = nil) async -> Bool {
+    /// `selects` false for computers agents and the Hub make: the person stays where they are.
+    func create(_ requested: Computer, source: URL?, sshSecret: SSHSecret? = nil, selects: Bool = true) async -> Bool {
         guard !storageCleaning, creationTask == nil else { return false }
         creationID = requested.id
         creationName = requested.name
@@ -266,7 +267,7 @@ enum ComputerDisplayMode: String {
         creationCancelling = false
         error = nil
         setCreationStage("Preparing computer…")
-        let task = Task { await self.performCreation(requested, source: source, sshSecret: sshSecret) }
+        let task = Task { await self.performCreation(requested, source: source, sshSecret: sshSecret, selects: selects) }
         creationTask = task
         defer { creationTask = nil }
         return await withTaskCancellationHandler {
@@ -289,7 +290,7 @@ enum ComputerDisplayMode: String {
         creationLastActivity = .now
     }
 
-    private func performCreation(_ requested: Computer, source: URL?, sshSecret: SSHSecret?) async -> Bool {
+    private func performCreation(_ requested: Computer, source: URL?, sshSecret: SSHSecret?, selects: Bool) async -> Bool {
         var computer = requested
         let directory = library.stagingDirectory(for: computer.id)
         let access = source?.startAccessingSecurityScopedResource() ?? false
@@ -462,7 +463,7 @@ enum ComputerDisplayMode: String {
             computer = try library.commit(computer)
             let session = ComputerSession(computer)
             sessions.append(session)
-            selection = computer.id
+            if selects { selection = computer.id }
             return true
         } catch {
             creationWasCancelled = Task.isCancelled || error is CancellationError
