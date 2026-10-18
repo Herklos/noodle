@@ -92,11 +92,22 @@ struct ShareTarget: Codable, Equatable, Identifiable, Sendable {
 
 /// A file picked on the phone, waiting to be sent. Its ID becomes the attachment's.
 struct OutgoingFile: Identifiable, Equatable, Sendable {
-    let id = UUID()
+    let id: UUID
     let url: URL
     let filename: String
     let mediaType: String
     var voice: LinkVoice?
+    /// Set when the file is a comment on another file or a message of the conversation.
+    var annotation: LinkAnnotation?
+
+    init(id: UUID = UUID(), url: URL, filename: String, mediaType: String, voice: LinkVoice? = nil, annotation: LinkAnnotation? = nil) {
+        self.id = id
+        self.url = url
+        self.filename = filename
+        self.mediaType = mediaType
+        self.voice = voice
+        self.annotation = annotation
+    }
 }
 
 /// A message of words and files, as every Noodle sends one.
@@ -108,6 +119,7 @@ enum OutgoingMessages {
         let attachments = try files.map { file in
             LinkAttachment(id: file.id, filename: file.filename, mediaType: file.mediaType,
                            byteCount: try file.url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0, voice: file.voice,
+                           annotation: file.annotation,
                            pixelSize: file.mediaType.hasPrefix("image/") ? LinkPixelSize(pictureAt: file.url) : nil)
         }
         // As on the Mac, a message of files alone says how many, and a recording alone what it is.
