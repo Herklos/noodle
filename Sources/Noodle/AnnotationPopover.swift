@@ -90,7 +90,8 @@ extension AttachmentPreviewController {
         let reference = NSView(); reference.wantsLayer = true
         reference.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.045).cgColor
         reference.layer?.cornerRadius = 10
-        let quote = annotationLabel(message ?? pending.quote?.replacingOccurrences(of: "\n", with: " ") ?? "Selected image region", size: 12, weight: .medium)
+        let quote = annotationLabel(message ?? pending.quote?.replacingOccurrences(of: "\n", with: " ") ??
+            (pendingImage == nil ? "Whole attachment · no selected text" : "Selected image region"), size: 12, weight: .medium)
         quote.maximumNumberOfLines = 2; quote.lineBreakMode = .byTruncatingTail
         let source = annotationLabel(pending.file, size: 11); source.textColor = .secondaryLabelColor
         let refStack = NSStackView(views: [quote, source]); refStack.orientation = .vertical; refStack.alignment = .leading; refStack.spacing = 4
