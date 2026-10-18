@@ -328,6 +328,13 @@ struct ChatView: View {
             NSWorkspace.shared.open(store.attachmentFileURL(attachment))
             return
         }
+        // A patch opens in a review; a file that only has the name of one opens as any other document.
+        if attachment.isPatchFile, let patch = PatchCache.patchNow(at: store.attachmentFileURL(attachment)) {
+            attachmentPreview.close()
+            screenCapturePreview.close()
+            store.patchReviews.open(attachment, patch: patch, store: store)
+            return
+        }
         let edit: ((ConversationAttachment, String) throws -> ConversationAttachment)? = store.canEditAnnotation(attachment) ? { [weak store] attachment, comment in
             guard let store else { throw WorkspaceError.missingConversation(attachment.conversationID) }
             return try store.reviseAnnotationComment(attachment, comment: comment)

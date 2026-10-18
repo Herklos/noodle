@@ -141,6 +141,8 @@ final class NoodleStore {
 
     let repository: WorkspaceRepository
     @ObservationIgnored private let transcriptPositions: TranscriptPositionStore
+    /// Which files of each patch the person has viewed.
+    @ObservationIgnored private let patchReviewState: PatchReviewStore
     let messenger: MessengerBroker
     /// Every source of agent tools registers here; `messenger tool` reaches them through `tools`.
     let toolProviders = ToolProviderRegistry()
@@ -169,6 +171,8 @@ final class NoodleStore {
     private(set) var hubMirrors: [HubMirror] = []
     /// Live views of what Hub bots' links point at.
     @ObservationIgnored let surfacePanels = HubSurfacePanels()
+    /// Patches open for review.
+    @ObservationIgnored let patchReviews = PatchReviewWindows()
     /// Noodlets opened from conversations, annotated in place from Noodle Applet.
     @ObservationIgnored let noodletAnnotations: NoodletAnnotations
     @ObservationIgnored private let noodletOverlay = NoodletAnnotationOverlay()
@@ -227,6 +231,7 @@ final class NoodleStore {
             installer: repository == nil ? ManagedHarnessInstaller(store: self.repository.managedHarnesses) : nil)
 
         transcriptPositions = TranscriptPositionStore(fileURL: self.repository.rootURL.appendingPathComponent("scroll-positions.json"))
+        patchReviewState = PatchReviewStore(fileURL: self.repository.rootURL.appendingPathComponent("patch-reviews.json"))
         conversationWindows = ConversationWindowRegistry(fileURL: self.repository.rootURL.appendingPathComponent("conversation-windows.json"))
         messenger = MessengerBroker(repository: self.repository)
         let toolAssignments = ToolAssignmentStore()
@@ -651,6 +656,7 @@ final class NoodleStore {
             let knownConversationIDs = Set(conversations.map(\.id))
             drafts.retainConversations(knownConversationIDs)
             try? transcriptPositions.retainConversations(knownConversationIDs)
+            try? patchReviewState.retainConversations(knownConversationIDs)
             conversationWindows.retainConversations(knownConversationIDs)
             let storedPinnedIDs = try repository.loadPinnedConversationIDs()
             pinnedConversationIDs = storedPinnedIDs.filter(knownConversationIDs.contains)
@@ -1663,6 +1669,15 @@ final class NoodleStore {
         guard conversations.contains(where: { $0.id == conversationID }) else { return }
         do { try transcriptPositions.save(viewport, for: conversationID) }
         catch { errorMessage = "Could not save the conversation’s reading position: \(error.localizedDescription)" }
+    }
+
+    func viewedPatchFiles(_ attachment: ConversationAttachment) -> Set<String> {
+        patchReviewState.viewed(attachment)
+    }
+
+    func saveViewedPatchFiles(_ paths: Set<String>, for attachment: ConversationAttachment) {
+        do { try patchReviewState.save(paths, for: attachment) }
+        catch { errorMessage = "Could not save which files you viewed: \(error.localizedDescription)" }
     }
 
     func hasUnreadMessages(in conversation: BotConversation) -> Bool {

@@ -192,6 +192,11 @@ struct Scenario: Codable {
             var floating: Bool?
             var activity: String?
             var settings: String?
+            /// The key of a message whose patch opens for review.
+            var attachment: String?
+            /// Files of that patch to tick off as viewed, and to open, by path.
+            var viewed: [String]?
+            var expanded: [String]?
         }
 
         /// Every sheet of the main window; the ones left out are closed.
@@ -418,6 +423,16 @@ extension Scenario {
 
     func asset(_ path: String) throws -> URL { try file(path, under: folder) }
 
+    /// The attachments of the message a scenario calls `key`, seeded or sent in its timeline.
+    func attachments(ofMessage key: String) -> [Attachment] {
+        for message in (conversations ?? []).flatMap({ $0.messages ?? [] }) where message.key == key { return message.attachments ?? [] }
+        for step in timeline ?? [] {
+            for content in [step.reply, step.say].compactMap({ $0 }) where content.key == key { return content.attachments ?? [] }
+            if let typed = step.type, typed.key == key { return typed.attachments ?? [] }
+        }
+        return []
+    }
+
     /// A file named by a scenario, kept inside `root` however the name is written.
     private func file(_ path: String, under root: URL) throws -> URL {
         let url = root.appendingPathComponent(path).standardizedFileURL
@@ -558,8 +573,17 @@ extension Scenario {
                             "present.scroll.\(key) is \"bottom\" or the key of a message in that conversation.")
             }
             for window in present.windows ?? [] {
-                try require([window.conversation, window.activity, window.settings].compactMap({ $0 }).count == 1,
-                            "A window is a conversation, a bot's activity or a settings tab.")
+                try require([window.conversation, window.activity, window.settings, window.attachment].compactMap({ $0 }).count == 1,
+                            "A window is a conversation, a bot's activity, a settings tab or a message's patch.")
+                if let key = window.attachment {
+                    try require(messageKeys.contains(key), "present.windows opens the patch of \"\(key)\", which no earlier message is called.")
+                    let file = attachments(ofMessage: key).first?.file
+                    try require(file.map { Patch.isPatchFile(name: $0, mediaType: "") } == true,
+                                "present.windows opens the attachment of \"\(key)\", which is not a .patch or .diff file.")
+                    try require(Patch(contentsOf: try asset(file ?? "")) != nil, "\(file ?? "") does not read as a patch.")
+                }
+                try require(window.attachment != nil || window.viewed == nil && window.expanded == nil,
+                            "Only a window that opens a patch has files viewed or expanded.")
                 if let key = window.conversation { try require(members[key] != nil, "present.windows names \"\(key)\", which does not exist.") }
                 try require(window.frame.map { $0.count == 4 } ?? true, "A window frame is [x, y, width, height].")
                 try require(window.settings.map { Self.settingsTabs[$0] != nil } ?? true, "\"\(window.settings ?? "")\" is not a settings tab.")
@@ -939,6 +963,8 @@ extension Scenario {
         runtime.scriptedModels = seeded.models
         store = NoodleStore(repository: repository, runtime: runtime, connectsServices: false)
         if let message = store.errorMessage { throw ScenarioError(message) }
+        // Shots of a scenario that asks for dark look the same on a Mac set to light.
+        if scenario.appearance == "dark" { NSApp?.appearance = NSAppearance(named: .darkAqua) }
         apply(scenario.present ?? .init())
     }
 
@@ -1232,7 +1258,8 @@ extension Scenario {
             guard takesShots, !terminalEnded else { break }
             // Let the last change settle on screen before it is photographed.
             try? await Task.sleep(for: .milliseconds(700))
-            guard let window = mainWindow, let region = mainWindowRegion else { break }
+            // A patch open for review is what the shot is of; otherwise the main window.
+            guard let window = store.patchReviews.frontmost ?? mainWindow, let region = mainWindowRegion else { break }
             write("SCENARIO SHOT \(name) id=\(window.windowNumber) rect=\(region)")
             await withCheckedContinuation { shotWaiters.append($0) }
         }
@@ -1302,6 +1329,13 @@ extension Scenario {
             }
             if !initial, let id = extra.conversation.flatMap({ seeded.conversations[$0]?.id }) {
                 if extra.floating == true { store.floatConversation(id) } else { store.dockConversation(id) }
+            }
+            if let message = extra.attachment.flatMap({ messages[$0] }),
+               let attachment = store.attachments(for: message).first(where: \.isPatchFile),
+               let patch = PatchCache.patchNow(at: store.attachmentFileURL(attachment)) {
+                if let viewed = extra.viewed { store.saveViewedPatchFiles(Set(viewed), for: attachment) }
+                store.patchReviews.open(attachment, patch: patch, store: store, frame: extra.frame.map(ScenarioSupport.rect))
+                store.patchReviews.model(for: attachment)?.expanded.formUnion(extra.expanded ?? [])
             }
         }
         if initial {
