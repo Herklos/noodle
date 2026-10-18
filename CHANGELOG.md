@@ -10,6 +10,10 @@ All notable changes to Noodle are documented here, following
 
 - Krea can be added as a tool.
 
+### Fixed
+
+- In a patch review, dragging across lines selects them, and Add Annotation with no lines selected comments on the whole patch. Annotate Region marks a region of the review, as in other previews, and closing a comment without saving no longer stops the next one from opening.
+
 ## [0.68.0] - 2026-10-18
 
 ### Added
