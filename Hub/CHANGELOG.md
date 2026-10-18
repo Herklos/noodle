@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Krea can be added as a tool.
+
 ## [0.35.3] - 2026-10-17
 
 ### Fixed
