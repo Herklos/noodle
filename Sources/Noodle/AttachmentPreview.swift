@@ -229,6 +229,9 @@ struct AttachmentInlinePreview: View {
 
     @State private var thumbnail: NSImage?
     @State private var thumbnailUnavailable = false
+    /// What a patch file reads as, once read; nil while it is read and for a file that is not one.
+    @State private var patch: Patch?
+    @State private var isNotAPatch = false
     @FocusState private var isFocused: Bool
 
     init(
@@ -271,6 +274,8 @@ struct AttachmentInlinePreview: View {
             } else if let webLink {
                 // A shared web page looks like one unfurled from a message, not like its bookmark file.
                 LinkPreviewCard(url: webLink, shouldLoad: shouldLoad)
+            } else if let patch {
+                patchPreview(patch)
             } else if displaysAsImage {
                 imagePreview
             } else {
@@ -309,6 +314,13 @@ struct AttachmentInlinePreview: View {
             guard shouldLoad,
                   attachment.url.flatMap(NoodletLink.id) == nil, webLink == nil,
                   attachment.annotation == nil || attachment.mediaType.hasPrefix("image/") else { return }
+            if attachment.isPatchFile, !isNotAPatch {
+                if let read = await PatchCache.patch(at: fileURL) {
+                    withAnimation(.easeOut(duration: 0.15)) { patch = read }
+                    return
+                }
+                isNotAPatch = true
+            }
             await loadThumbnail()
         }
     }
@@ -322,6 +334,7 @@ struct AttachmentInlinePreview: View {
         if attachment.isBrowserLink { return "Click or press Space to open in Noodle Browser" }
         if attachment.isComputerLink { return "Click or press Space to open in Noodle Computer" }
         if attachment.isNoodletLink { return "Click or press Space to open in \(AppletBuildIdentity.current.appName)" }
+        if patch != nil { return "Click or press Space to review the changes" }
         return "Click or press Space to preview"
     }
 
@@ -349,6 +362,29 @@ struct AttachmentInlinePreview: View {
                     Text(card.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
                     Text(attachment.isBrowserLink ? (card.detail.flatMap { URL(string: $0)?.host } ?? "Browser") : "Computer")
                         .font(.system(size: 9.5)).opacity(0.72)
+                }
+                Spacer(minLength: 3)
+            }
+            .foregroundStyle(.primary).padding(.horizontal, 2)
+        }
+        .frame(idealWidth: 280, maxWidth: 280)
+    }
+
+    /// A patch: what changed most, in the place of a document's thumbnail, and its title and totals.
+    private func patchPreview(_ patch: Patch) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ZStack {
+                Color.black.opacity(0.16)
+                PatchCardPicture(patch: patch, filename: attachment.originalFilename)
+            }
+            .frame(maxWidth: .infinity).frame(height: 165)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .accessibilityHidden(true)
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 16, weight: .medium))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(patch.title(filename: attachment.originalFilename)).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+                    Text(patch.totals).font(.system(size: 9.5)).opacity(0.72)
                 }
                 Spacer(minLength: 3)
             }

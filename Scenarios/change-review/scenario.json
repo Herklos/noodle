@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "title": "Wren sends a patch for review",
+  "clock": "11:45",
+  "appearance": "dark",
+  "settings": {
+    "Noodle.firstBotSetup.dismissed": true,
+    "Noodle.composer.showBotDescriptions": true
+  },
+  "harnesses": {
+    "claude-code": { "models": "builtin" },
+    "codex": { "models": [
+      { "id": "gpt-5.2-codex", "name": "GPT-5.2 Codex", "description": "Tuned for long coding tasks.",
+        "efforts": ["low", "medium", "high"], "defaultEffort": "medium", "default": true } ] },
+    "grok-build": { "models": [
+      { "id": "grok-code", "name": "Grok Code", "description": "Quick edits and short tasks.", "default": true } ] }
+  },
+  "agents": [
+    { "key": "wren", "name": "Wren", "harness": "codex", "model": "gpt-5.2-codex", "effort": "high",
+      "description": "Builds features, reviews code and chases bugs",
+      "backstory": "You are a careful engineer. You measure before you change anything and you leave a test behind every fix.",
+      "avatar": { "image": "face:any-03" },
+      "autoReplies": ["Thanks. I will answer your comments and send the patch again."] },
+    { "key": "victor", "name": "Victor", "harness": "claude-code", "model": "opus", "effort": "high",
+      "description": "Reviews every pull request before it merges", "avatar": { "image": "face:masculine-06" } },
+    { "key": "mila", "name": "Mila", "harness": "grok-build", "model": "grok-code",
+      "description": "QA: reproduces bugs and writes the test plans", "avatar": { "image": "face:feminine-06" } }
+  ],
+  "conversations": [
+    { "key": "wren", "direct": "wren",
+      "messages": [
+        { "at": "09:52", "from": "user", "text": "Noodlet recordings stutter whenever the window is hidden. Can you make them smooth?" },
+        { "at": "09:54", "from": "wren", "text": "On it. A hidden page gets no animation frames, so I will film it frame by frame instead of in real time." },
+        { "at": "10:58", "from": "user", "text": "Sounds right. Please add a test that measures the spacing of frames." },
+        { "key": "review", "at": "11:40", "from": "wren",
+          "text": "Recordings now film frame by frame. Here is the patch for review: three commits, the last one a test that films a moving square and checks every frame is 1/30 s apart. The whole suite passes.",
+          "attachments": [ { "file": "assets/smooth-recordings.patch" } ] }
+      ] },
+    { "key": "victor", "direct": "victor",
+      "messages": [
+        { "at": "-1d 15:30", "from": "victor", "text": "Approved the settings migration with one note: the fallback path has no test. Not blocking, but worth an hour." }
+      ] },
+    { "key": "mila", "direct": "mila",
+      "messages": [
+        { "at": "-1d 17:10", "from": "mila", "text": "Recorded three noodlets with the window hidden: all three stutter at about 12 fps. Steps are in the test plan." }
+      ] }
+  ],
+  "present": {
+    "window": { "size": [1240, 860], "origin": [100, 70] },
+    "select": "wren",
+    "scroll": { "wren": "bottom" }
+  },
+  "timeline": [
+    { "capture": "01-patch-card" },
+    { "present": { "windows": [ { "attachment": "review", "frame": [500, 50, 880, 960],
+        "viewed": [
+          "Applet/Protocol/Sources/NoodletRuntime/NoodletPage.swift",
+          "Applet/Protocol/Sources/NoodletRuntime/NoodletSnapshot.swift",
+          "Applet/Sources/NoodleApplet/FrameTimer.swift",
+          "Applet/Sources/NoodleApplet/Runtime.swift",
+          "Applet/Protocol/Sources/AppletBridge/AppletGuidance.swift"
+        ],
+        "expanded": [ "Applet/Sources/NoodleApplet/Recording.swift" ] } ] } },
+    { "capture": "02-review" }
+  ]
+}
