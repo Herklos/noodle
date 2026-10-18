@@ -787,6 +787,37 @@ import XCTest
         XCTAssertEqual(stored.voice?.transcript, "Book a table")
     }
 
+    /// The comment on a marked-up picture reaches the bot with what it refers to, and devices get it back.
+    func testCommentsOnFilesKeepWhatTheyReferTo() async throws {
+        let f = try await fixture()
+        let bot = try await createBot(f)
+        guard case .status(let status) = try await f.device.request(.status) else { return XCTFail("no status") }
+        XCTAssertTrue(status.keepsAnnotations)
+        let photo = LinkAttachment(id: UUID(), filename: "Photo.png", mediaType: "image/png", byteCount: 3)
+        let region = LinkAnnotation.Region(x: 0.25, y: 0.5, width: 0.5, height: 0.25)
+        let comment = LinkAnnotation(version: 2, sourceAttachmentID: photo.id, sourceFilename: "Photo.png", comment: "Crop here", region: region)
+        let marked = LinkAttachment(id: UUID(), filename: "Annotation — Photo.png", mediaType: "image/png", byteCount: 3, annotation: comment)
+        // A comment that says nothing is no comment: its file still arrives, as a plain file.
+        let blank = LinkAttachment(id: UUID(), filename: "Annotation — Photo 2.png", mediaType: "image/png", byteCount: 3,
+                                   annotation: LinkAnnotation(version: 2, sourceAttachmentID: photo.id, sourceFilename: "Photo.png",
+                                                              comment: " ", region: region))
+        for file in [photo, marked, blank] {
+            _ = try await f.device.request(.upload(conversationID: bot.conversationID, attachment: file, offset: 0, data: Data([1, 2, 3])))
+        }
+        guard case .message(let sent) = try await f.device.request(.send(LinkOutgoingMessage(
+            conversationID: bot.conversationID, id: UUID(), body: "Like this", attachmentIDs: [photo.id, marked.id, blank.id]))) else {
+            return XCTFail("no message")
+        }
+        XCTAssertEqual(sent.attachments.map(\.annotation), [nil, comment, nil])
+        // The bot reads the comment from the stored file.
+        let stored = try f.hub.repository.loadAttachments(conversationID: bot.conversationID)
+        let note = try XCTUnwrap(stored.first { $0.id == marked.id }?.annotation)
+        XCTAssertEqual(note.comment, "Crop here")
+        XCTAssertEqual(note.sourceAttachmentID, photo.id)
+        XCTAssertEqual(note.region, AttachmentAnnotation.Region(x: 0.25, y: 0.5, width: 0.5, height: 0.25))
+        XCTAssertNil(try XCTUnwrap(stored.first { $0.id == blank.id }).annotation)
+    }
+
     func testMessagesCannotPointAtFilesThatNeverArrived() async throws {
         let f = try await fixture()
         let bot = try await createBot(f)

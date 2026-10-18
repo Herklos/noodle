@@ -841,7 +841,8 @@ import Observation
                     try await pairing.upload(repository.attachmentFileURL(file), as: LinkAttachment(
                         id: file.id, filename: file.originalFilename, mediaType: file.mediaType, byteCount: Int(file.byteCount),
                         voice: file.voice.map { LinkVoice(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform,
-                                                          localeIdentifier: $0.localeIdentifier) }),
+                                                          localeIdentifier: $0.localeIdentifier) },
+                        annotation: file.annotation.map { LinkAnnotation($0) }),
                         to: thread.remote)
                 }
                 let sent = (message.attachmentIDs ?? []).filter { files[$0]?.url == nil }
@@ -881,7 +882,8 @@ import Observation
             }
             let filename = name.isEmpty ? "Attachment" : name
             _ = try repository.importAttachment(from: staging, into: thread.local, mediaType: attachment.mediaType,
-                                                voice: voice, id: attachment.id, originalFilename: filename)
+                                                voice: voice, annotation: attachment.annotation.map { AttachmentAnnotation($0) },
+                                                id: attachment.id, originalFilename: filename)
         }
     }
 
@@ -1083,5 +1085,23 @@ extension LinkConnectionDraft {
     public init(_ record: MCPConnectionRecord) {
         self.init(id: record.id, name: record.name, endpoint: record.endpoint,
                   description: record.description, instructions: record.instructions)
+    }
+}
+
+// As HubCore has them, which this module does not depend on.
+extension LinkAnnotation {
+    init(_ annotation: AttachmentAnnotation) {
+        self.init(version: annotation.version, sourceAttachmentID: annotation.sourceAttachmentID,
+                  sourceFilename: annotation.sourceFilename, sourceMessageID: annotation.sourceMessageID, quote: annotation.quote,
+                  comment: annotation.comment, region: annotation.region.map { Region(x: $0.x, y: $0.y, width: $0.width, height: $0.height) })
+    }
+}
+
+extension AttachmentAnnotation {
+    /// Checked when the file it came with is kept.
+    init(_ link: LinkAnnotation) {
+        self.init(version: link.version, sourceAttachmentID: link.sourceAttachmentID, sourceFilename: link.sourceFilename,
+                  sourceMessageID: link.sourceMessageID, quote: link.quote, comment: link.comment,
+                  region: link.region.map { Region(x: $0.x, y: $0.y, width: $0.width, height: $0.height) })
     }
 }

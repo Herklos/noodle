@@ -235,6 +235,39 @@ import XCTest
         XCTAssertEqual(data, Data("dog".utf8))
     }
 
+    /// A comment on a file keeps what it refers to, from the person to the bot here and back.
+    func testCommentsOnFilesTravelBothWays() async throws {
+        let f = try await fixture()
+        let hosting = f.hosting()
+        try await hosting.share(f.alfred, with: [f.grace.id])
+        await hosting.sync()
+        guard let graces = try await bots(of: f.gracesPhone).first else { return XCTFail("not shared") }
+        let menu = LinkAttachment(id: UUID(), filename: "Menu.txt", mediaType: "text/plain", byteCount: 3)
+        let comment = LinkAnnotation(version: 2, sourceAttachmentID: menu.id, sourceFilename: "Menu.txt", quote: "tea", comment: "Make it two")
+        let note = LinkAttachment(id: UUID(), filename: "Annotation — Menu.txt", mediaType: "text/plain", byteCount: 4, annotation: comment)
+        for (file, data) in [(menu, Data("tea".utf8)), (note, Data("note".utf8))] {
+            _ = try await f.gracesPhone.request(.upload(conversationID: graces.conversationID, attachment: file, offset: 0, data: data))
+        }
+        _ = try await send("Look", to: graces.conversationID, from: f.gracesPhone, attachments: [menu.id, note.id])
+        await hosting.sync()
+        let local = try guestConversation(f)
+        let files = try f.local.loadAttachments(conversationID: local.id)
+        let received = try XCTUnwrap(files.first { $0.id == note.id }?.annotation)
+        XCTAssertEqual(received.comment, "Make it two")
+        XCTAssertEqual(received.quote, "tea")
+        XCTAssertEqual(received.sourceAttachmentID, menu.id)
+
+        let answer = AttachmentAnnotation(source: try XCTUnwrap(files.first { $0.id == menu.id }), quote: "tea", comment: "Two it is")
+        let reply = try f.local.importAttachment(data: Data(answer.textRepresentation.utf8), originalFilename: "Annotation — Menu.txt",
+                                                 into: local.id, mediaType: "text/plain", annotation: answer)
+        _ = try f.local.sendAgentMessage(agentID: f.alfred.id, conversationID: local.id, body: "Done", attachmentIDs: [reply.id])
+        await hosting.step()
+        XCTAssertNil(hosting.error)
+        let last = try await messages(in: graces.conversationID, of: f.gracesPhone).last
+        XCTAssertEqual(last?.attachments.first?.annotation,
+                       LinkAnnotation(version: 2, sourceAttachmentID: menu.id, sourceFilename: "Menu.txt", quote: "tea", comment: "Two it is"))
+    }
+
     /// Grace sees what the bot is doing while this Mac is connected.
     func testPeopleSeeWhatTheBotIsDoing() async throws {
         let f = try await fixture()

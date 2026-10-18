@@ -6,6 +6,10 @@
 
 - Krea can be added as a tool.
 
+### Fixed
+
+- Comments on attachments reach the Hub's bots with what they refer to, including the comment on a marked-up picture, instead of arriving as plain files.
+
 ## [0.35.3] - 2026-10-17
 
 ### Fixed
