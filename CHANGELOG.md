@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-10-18
+
 ### Added
 
 - A .patch or .diff file in a conversation shows the files it changes on its card, and opens in a review: a walkthrough of its commits, every file grouped by folder with a Viewed checkbox that Noodle remembers, and comments on the lines you select, which reach the bot like any other annotation.

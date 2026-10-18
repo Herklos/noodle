@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-18
+
 ### Added
 
 - A .patch or .diff file in a conversation shows its commits and the files that changed most on its card, as on the Mac. Tap it to read the patch: a walkthrough of its commits, its files by folder with a filter, and each file's changes with line numbers. Tick files off as Viewed; this phone remembers them.
