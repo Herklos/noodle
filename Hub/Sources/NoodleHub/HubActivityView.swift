@@ -19,9 +19,11 @@ struct HubActivityView: View {
                     TableColumn("Date") { entry in
                         Text(entry.date, format: .dateTime.year().month().day().hour().minute())
                     }
-                    .width(min: 120, ideal: 150, max: 180)
-                    TableColumn("Who", value: \.who)
-                        .width(min: 120, ideal: 200)
+                    .width(min: 150, ideal: 170, max: 200)
+                    TableColumn("Who") { entry in
+                        Text(entry.who)
+                    }
+                    .width(min: 120, ideal: 200)
                     TableColumn("What") { entry in
                         if let refusal = entry.refusal {
                             Label {
@@ -35,6 +37,7 @@ struct HubActivityView: View {
                         }
                     }
                 }
+                .font(.body.monospaced())
             }
         }
         .frame(minWidth: 640, minHeight: 360)

@@ -9,6 +9,7 @@
 
 ### Changed
 
+- Logs are shown in a monospaced font so their columns line up.
 - The Hub's bots can no longer bring up a browser's window on the Hub's Mac; they send a card for the tab instead.
 
 ### Fixed
