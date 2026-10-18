@@ -122,7 +122,7 @@ import Darwin
                 }
             case .input: try await post(request.input!)
             case .terminalOpen:
-                guard terminals.count < 16 else { throw LocalMacError("Close an unused terminal before opening another.") }
+                // Unlimited here so the person's terminal always opens; the app limits agents' shells.
                 let terminal = try Terminal(home: session.account.home); terminals[terminal.id] = terminal
                 response.terminalID = terminal.id; response.offset = 0; response.exited = false
             case .terminalRead, .terminalWrite, .terminalResize, .terminalClose:

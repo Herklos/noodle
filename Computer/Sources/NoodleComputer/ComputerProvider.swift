@@ -44,7 +44,7 @@ struct ComputerIdleWatch {
     private weak var store: ComputerStore?
     private var server: ComputerConnectionServer?
     private var terminals: [UUID: ProviderTerminal] = [:]
-    private var localTerminals: [UUID: (computer: UUID, owner: String, runtime: LocalMacComputer)] = [:]
+    private var localTerminals: [UUID: (computer: UUID, owner: String, runtime: LocalMacComputer, exited: Bool)] = [:]
     private var windowsTerminals: [UUID: WindowsProviderTerminal] = [:]
     private var sshTerminals: [UUID: SSHProviderTerminal] = [:]
     /// Where a person watching remotely types and clicks, one per desktop view.
@@ -593,10 +593,13 @@ struct ComputerIdleWatch {
             return reply
         }
         if request.operation == .terminalOpen {
-            guard localTerminals.count < 64 else { throw ComputerBridgeError("Close an unused terminal first.") }
+            // Agents' shells only: the person's own terminal opens however many agents hold.
+            guard localTerminals.count < 64, localTerminals.values.filter({ $0.computer == session.id && !$0.exited }).count < 16 else {
+                throw ComputerBridgeError("Too many terminal sessions. Close an unused session first.")
+            }
             let reply = try await runtime.call(.init(.terminalOpen))
             guard let id = reply.terminalID, session.localMac === runtime, session.phase == .running else { throw ComputerBridgeError("The computer stopped while opening its terminal.") }
-            localTerminals[id] = (session.id, owner, runtime)
+            localTerminals[id] = (session.id, owner, runtime, false)
             return .init(terminalID: id, offset: 0, exited: false)
         }
         if request.operation == .preview {
@@ -628,6 +631,7 @@ struct ComputerIdleWatch {
         command.data = request.data; command.width = request.columns; command.height = request.rows
         let result = try await runtime.call(command)
         if operation == .terminalClose { localTerminals.removeValue(forKey: id) }
+        else if result.exited == true { localTerminals[id]?.exited = true }
         return .init(terminalID: id, data: result.data, offset: result.offset, exited: result.exited)
     }
 }

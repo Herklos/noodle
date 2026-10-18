@@ -369,4 +369,55 @@ import XCTest
         let requests = try await helper.value
         XCTAssertEqual(requests.map(\.operation), [.status, .stream, .terminalOpen])
     }
+
+    /// Agents share a Local Mac's 16 running shells; the person's own terminal never counts.
+    func testAgentShellsAreLimitedButThePersonsTerminalAlwaysOpens() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try ComputerStore(root: root)
+        let provider = try ComputerProvider(store: store, socket: root.appendingPathComponent("computer.sock"), listens: false)
+        let session = ComputerSession(Computer(name: "Retained", kind: .localMac))
+        store.sessions = [session]
+        let ids = (0..<20).map { _ in UUID() }
+        let input = Pipe(), output = Pipe()
+        // Serves until the app disconnects; the first agent's shell has ended.
+        let helper = Task.detached { () -> [LocalMacOperation] in
+            defer { try? output.fileHandleForWriting.close(); try? input.fileHandleForReading.close() }
+            var operations: [LocalMacOperation] = [], opened = 0
+            while let data = try? LocalMacWire.read(input.fileHandleForReading),
+                  let request = try? LocalMacWire.decode(LocalMacRequest.self, from: data) {
+                operations.append(request.operation)
+                var reply = Self.reply(request, displayID: request.operation == .status ? nil : 99)
+                if request.operation == .terminalOpen { reply.terminalID = ids[opened]; opened += 1 }
+                if request.operation == .terminalRead {
+                    reply.terminalID = request.terminalID; reply.offset = 0; reply.exited = request.terminalID == ids[0]
+                }
+                try? LocalMacWire.write(JSONEncoder().encode(reply), to: output.fileHandleForWriting)
+            }
+            return operations
+        }
+        let runtime = LocalMacComputer(displayIDs: { [2] })
+        runtime.expectDisconnect(true)
+        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
+        session.localMac = runtime; session.phase = .running
+        let agents = (0..<18).map { _ in UUID() }
+        func open(_ agent: UUID) async throws -> UUID? {
+            try await provider.handle(.init(.terminalOpen, computerID: session.id, agentID: agent), peer: "agents").terminalID
+        }
+
+        for agent in agents[0..<16] { _ = try await open(agent) }
+        do { _ = try await open(agents[16]); XCTFail("A 17th agent shell opened") } catch {}
+        await store.selectDisplay(.terminal, in: session)
+        XCTAssertNotNil(session.localTerminal)
+        XCTAssertNil(store.error)
+        let read = try await provider.handle(.init(.terminalRead, computerID: session.id, agentID: agents[0], terminalID: ids[0]), peer: "agents")
+        XCTAssertEqual(read.exited, true)
+        let replacement = try await open(agents[17])
+        XCTAssertEqual(replacement, ids[17])
+
+        session.localTerminal?.close()
+        runtime.close()
+        let operations = await helper.value
+        XCTAssertEqual(operations.filter { $0 == .terminalOpen }.count, 18)
+    }
 }
