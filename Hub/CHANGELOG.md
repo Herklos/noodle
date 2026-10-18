@@ -16,6 +16,7 @@
 
 - Comments on attachments reach the Hub's bots with what they refer to, including the comment on a marked-up picture, instead of arriving as plain files.
 - A message a bot has taken shows as Delivered on your devices straight away, even when the bot does not reply.
+- When the model service is too busy to answer a Codex bot, the bot tries again by itself up to three times over the next few minutes instead of leaving your message unanswered.
 
 ## [0.35.3] - 2026-10-17
 

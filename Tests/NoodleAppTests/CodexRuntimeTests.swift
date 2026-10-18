@@ -286,6 +286,40 @@ import XCTest
         p.notify(); try await f.wait { wire.count("turn/start") == 2 }
     }
 
+    /// A busy model service ends the turn with the person's message already read, so
+    /// Noodle tries the work again itself a few times instead of dropping it.
+    func testATurnTheModelServiceWasTooBusyForIsTriedAgain() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
+        try await active(f, wire, p)
+        func busy(_ turn: String) {
+            wire.emit(["method": "error", "params": ["threadId": "fixture-thread", "turnId": turn, "willRetry": false,
+                "error": ["message": "Selected model is at capacity.", "codexErrorInfo": "serverOverloaded"]]])
+            wire.emit(["method": "turn/completed", "params": ["threadId": "fixture-thread",
+                "turn": ["id": turn, "status": "failed", "error": ["message": "Selected model is at capacity.",
+                                                                    "codexErrorInfo": "serverOverloaded"]]]])
+        }
+        var waited = 0
+        for (attempt, delay) in [30, 120, 300].enumerated() {
+            busy(attempt == 0 ? "turn-one" : "retry-\(attempt)")
+            let gate = try await f.clock.next(.seconds(delay), after: waited)
+            waited = f.clock.waits.count
+            XCTAssertFalse(p.canReceiveHeartbeat, "A heartbeat must not take the place of the retry")
+            XCTAssertTrue(p.hasInterruptedWork)
+            gate.resolve(.success(()))
+            try await f.wait { wire.count("turn/start") == attempt + 2 }
+            let input = try wire.last("turn/start")["params"] as? [String: Any]
+            XCTAssertEqual(((input?["input"] as? [[String: Any]])?.first?["text"] as? String)?
+                .hasPrefix(AgentWakeReason.runtimeRecovered.eventText), true)
+            try wire.reply("turn/start", result: ["turn": ["id": "retry-\(attempt + 1)"]])
+            try await f.wait { p.snapshot.phase == .working }
+        }
+        busy("retry-3")
+        try await f.wait { !f.recovery(.codex).hasUnfinishedTurn }; await f.drain()
+        XCTAssertEqual(f.clock.waits.count, waited, "Gives up after three tries")
+        XCTAssertTrue(p.canReceiveHeartbeat)
+        XCTAssertEqual(p.snapshot.detail, "Selected model is at capacity.")
+    }
+
     func testDisconnectPreservesRecoveryAndIsReportedOnlyOnce() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
         try await active(f, wire, p)

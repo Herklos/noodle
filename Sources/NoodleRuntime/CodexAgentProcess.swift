@@ -57,6 +57,12 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
     private var earlyTurnError: [String: Any]?
     private var turnErrorDetail: String?
     private var reconnectingSince: Date?
+    /// Whether the active turn's error said the model service was too busy to answer.
+    private var turnWasBusy = false
+    /// A turn the model service was too busy for, waiting to be tried again.
+    private var busyRetry: Task<Void, Never>?
+    private var busyRetries = 0
+    private static let busyRetryDelays: [Duration] = [.seconds(30), .seconds(120), .seconds(300)]
     private var steeringNotificationID: UUID?
     private var startupTimeout: Task<Void, Never>?
     private var steeringTimeout: Task<Void, Never>?
@@ -189,6 +195,8 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         reconnectingSince = nil
         steeringNotificationID = nil
         steeringTimeout?.cancel()
+        cancelBusyRetry()
+        busyRetries = 0
         notifications.take()
         endVoiceCallLocally("The bot stopped.")
         update(.offline, "Stopped")
@@ -212,13 +220,14 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
     public var canReceiveHeartbeat: Bool {
         hostRunning && snapshot.phase == .ready
             && !turnIsActive && !notificationPending && steeringNotificationID == nil && threadID != nil
-            && voiceCallEvents == nil
+            && voiceCallEvents == nil && busyRetry == nil
     }
 
     public var isAlive: Bool { hostRunning }
 
     public var hasInterruptedWork: Bool {
         recoveryPending || turnIsActive || notificationPending || steeringNotificationID != nil || turnRecovery.hasUnfinishedTurn
+            || busyRetry != nil
     }
 
     public func heartbeat() {
@@ -407,6 +416,7 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             }
             guard params["turnId"] as? String == activeTurnID else { return }
             let detail = Self.turnErrorDescription(error, willRetry: willRetry)
+            turnWasBusy = turnWasBusy || Self.isBusyError(error)
             if turnErrorDetail != detail { trace.record(willRetry ? .turnRetrying : .turnError) }
             turnErrorDetail = detail
             // A retry notification does not finish the turn. Keep its recovery
@@ -463,9 +473,20 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             default: .turnEndedUnknown
             }
             trace.finish(outcome)
+            let error = turn?["error"] as? [String: Any]
+            // The person's message was read before the service turned the turn away,
+            // so no later wake would answer it: try the work again after a while.
+            if status == "failed", turnWasBusy || error.map(Self.isBusyError) == true,
+               busyRetries < Self.busyRetryDelays.count {
+                scheduleBusyRetry(after: Self.busyRetryDelays[busyRetries])
+                busyRetries += 1
+                update(.ready, "The Codex model service is busy. Trying again shortly.")
+                sendPendingNotificationIfPossible()
+                return
+            }
+            busyRetries = 0
             // Codex stays running after a failed turn, so the next message or
             // heartbeat tries again; only the error is left showing.
-            let error = turn?["error"] as? [String: Any]
             update(.ready, status == "failed"
                 ? Self.serviceErrorMessage(error?["message"] as? String) ?? "Codex turn failed" : "Codex ready")
             sendPendingNotificationIfPossible()
@@ -486,6 +507,25 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         } catch {
             finishOpeningThread()
         }
+    }
+
+    private static func isBusyError(_ error: [String: Any]) -> Bool {
+        ["serverOverloaded", "rateLimitExceeded"].contains(error["codexErrorInfo"] as? String)
+    }
+
+    private func scheduleBusyRetry(after delay: Duration) {
+        busyRetry = Task { [weak self] in
+            do { try await self?.sleep(delay) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.busyRetry = nil
+            guard self.hostRunning, !self.turnIsActive, self.snapshot.phase == .ready else { return }
+            self.startTurn(reason: .runtimeRecovered)
+        }
+    }
+
+    private func cancelBusyRetry() {
+        busyRetry?.cancel()
+        busyRetry = nil
     }
 
     private static func isConnectionError(_ error: [String: Any]) -> Bool {
@@ -574,7 +614,8 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         }
         guard snapshot.phase == .ready else { return }
         notifications.take()
-        startTurn(reason: .inboxChanged)
+        // A new message during a busy retry's wait starts the retry now; it checks the inbox first.
+        startTurn(reason: busyRetry == nil ? .inboxChanged : .runtimeRecovered)
     }
 
     private func startTurn(reason: AgentWakeReason) {
@@ -585,6 +626,8 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         earlyTurnCompletion = nil
         earlyTurnError = nil
         turnErrorDetail = nil
+        turnWasBusy = false
+        cancelBusyRetry()
         reconnectingSince = nil
         trace.begin(reason: reason)
         let policy: [String: Any] = extendedAccess ? [
