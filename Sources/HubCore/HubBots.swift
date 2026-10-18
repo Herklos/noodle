@@ -53,8 +53,9 @@ import NoodleVoicePeer
     private var hostedPhases: [UUID: LinkBotPhase] = [:]
     /// Bots here that devices never see: on the owner's own Mac, its copies of bots another Hub keeps.
     public var isHidden: (UUID) -> Bool = { _ in false }
-    /// The last seen size and date of each conversation's messages, their count, and the latest reaction change.
-    private var transcripts: [UUID: (size: Int, modified: Date, count: Int, reactions: Int)] = [:]
+    /// The last seen size and date of each conversation's messages, their count, how many of the person's are delivered,
+    /// and the latest reaction change.
+    private var transcripts: [UUID: (size: Int, modified: Date, count: Int, delivered: Int, reactions: Int)] = [:]
     /// When each conversation's chat effects last changed, as last checked.
     private var effectsChanged: [UUID: Date] = [:]
     /// Each conversation's background when last checked.
@@ -1093,7 +1094,7 @@ import NoodleVoicePeer
 
     nonisolated private static func read(
         _ conversation: BotConversation, from repository: WorkspaceRepository,
-        transcript known: (size: Int, modified: Date, count: Int, reactions: Int)?, effectsChanged: Date?
+        transcript known: (size: Int, modified: Date, count: Int, delivered: Int, reactions: Int)?, effectsChanged: Date?
     ) -> ConversationRead {
         let directory = repository.conversationDirectory(id: conversation.id)
         var read = ConversationRead(background: (try? repository.loadBackground(conversationID: conversation.id)) ?? ConversationBackground())
@@ -1137,8 +1138,10 @@ import NoodleVoicePeer
             guard let messages = read.messages else { continue }
             let latestReaction = messages.flatMap { $0.reactionChanges ?? [] }.map(\.sequence).max() ?? 0
             let known = transcripts[conversation.id]
-            transcripts[conversation.id] = (size, modified, messages.count, latestReaction)
-            if known.map({ $0.count != messages.count }) ?? true {
+            // A bot taking the person's message changes no count, but devices still show it delivered.
+            let delivered = messages.filter { $0.author == .user && $0.delivery == .delivered }.count
+            transcripts[conversation.id] = (size, modified, messages.count, delivered, latestReaction)
+            if known.map({ $0.count != messages.count || $0.delivered != delivered }) ?? true {
                 onChange?(owner, .conversationChanged(conversationID: conversation.id, count: messages.count))
                 if conversation.guest != nil, let bot = conversation.participantIDs.first, let host = access.host(ofBot: bot) {
                     onHostChange?(host, .conversationChanged(conversationID: conversation.id, count: messages.count))

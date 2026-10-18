@@ -231,6 +231,24 @@ import XCTest
         XCTAssertEqual(page.messages.first?.author, .bot(bot.id))
     }
 
+    /// A bot taking a message changes no count, yet the devices still show it delivered, reply or not.
+    func testTakingAMessageIsPushedToTheOwnersDevices() async throws {
+        let f = try await fixture()
+        let bot = try await createBot(f)
+        let events = try await f.device.subscribe()
+        _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: bot.conversationID, id: UUID(), body: "Hello", attachmentIDs: [])))
+        f.hub.bots.checkForChanges()
+        try await expect("the message", in: events) { if case .conversationChanged(bot.conversationID, 1) = $0 { true } else { false } }
+
+        _ = try f.hub.repository.latestMessages(for: bot.id)
+        f.hub.bots.checkForChanges()
+        try await expect("the delivery", in: events) { if case .conversationChanged(bot.conversationID, 1) = $0 { true } else { false } }
+        guard case .messages(let page) = try await f.device.request(.messages(conversationID: bot.conversationID, after: 0)) else {
+            return XCTFail("no messages")
+        }
+        XCTAssertEqual(page.messages.map(\.delivered), [true])
+    }
+
     /// A pin made on one device shows on all of the user's devices, in the order they were pinned, and no one else's.
     func testPinsAreKeptOnTheHub() async throws {
         let f = try await fixture()

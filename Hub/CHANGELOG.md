@@ -15,6 +15,7 @@
 ### Fixed
 
 - Comments on attachments reach the Hub's bots with what they refer to, including the comment on a marked-up picture, instead of arriving as plain files.
+- A message a bot has taken shows as Delivered on your devices straight away, even when the bot does not reply.
 
 ## [0.35.3] - 2026-10-17
 
