@@ -266,4 +266,42 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(try ComputerRequest.read(JSONEncoder().encode(request)).owner)
         XCTAssertThrowsError(try ComputerRequest(.setOwner).validate(), "An owner for no computer")
     }
+
+    /// Requests stuck on a computer that never answers give their places back once their callers give up.
+    func testCallersGivingUpFreeTheirPlaces() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("c.sock")
+        let stuck = DispatchSemaphore(value: 0)
+        let server = try ComputerConnectionServer(socket: url, authenticate: { _ in "test" }) { request, _ in
+            guard request.operation == .list else { return .init() }
+            stuck.signal()
+            try? await Task.sleep(for: .seconds(86_400))
+            return .init()
+        }
+        func connect() throws -> Int32 {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            ComputerConnection.configure(fd, seconds: 5)
+            XCTAssertEqual(try ComputerConnection.withAddress(url) { Darwin.connect(fd, $0, $1) }, 0)
+            return fd
+        }
+        for _ in 0..<16 {
+            let fd = try connect()
+            try ComputerConnection.send(JSONEncoder().encode(ComputerRequest(.list)), fd)
+            XCTAssertEqual(stuck.wait(timeout: .now() + 10), .success)
+            Darwin.close(fd)
+        }
+        // The server hears of each hang-up on its own queue, so the next caller may need a few tries.
+        var answered = false
+        for _ in 0..<50 where !answered {
+            let fd = try connect()
+            defer { Darwin.close(fd) }
+            answered = (try? ComputerConnection.send(JSONEncoder().encode(ComputerRequest(.templates)), fd)) != nil
+                && (try? ComputerConnection.receive(fd)) != nil
+            if !answered { Thread.sleep(forTimeInterval: 0.1) }
+        }
+        XCTAssertTrue(answered, "Sixteen callers that gave up still turn the next one away")
+        withExtendedLifetime(server) {}
+    }
 }

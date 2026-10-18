@@ -160,9 +160,16 @@ public final class ComputerConnectionServer: @unchecked Sendable {
     private var source: DispatchSourceRead?
     private let permits = DispatchSemaphore(value: 16)
     private let url: URL
-    public init(socket url: URL, team: String, clientIDs: [String] = ComputerConnection.clientIDs,
-                handler: @escaping @Sendable (ComputerRequest, String) async -> ComputerResponse,
-                surface: (@Sendable (ComputerRequest, String, SurfaceSocket) async -> ComputerResponse)? = nil) throws {
+    public convenience init(socket url: URL, team: String, clientIDs: [String] = ComputerConnection.clientIDs,
+                            handler: @escaping @Sendable (ComputerRequest, String) async -> ComputerResponse,
+                            surface: (@Sendable (ComputerRequest, String, SurfaceSocket) async -> ComputerResponse)? = nil) throws {
+        try self.init(socket: url, authenticate: { try ComputerConnection.authenticate($0, team: team, identifiers: clientIDs) },
+                      handler: handler, surface: surface)
+    }
+    /// `authenticate` names the app at the other end of a socket, so tests can stand in for a signed one.
+    init(socket url: URL, authenticate: @escaping @Sendable (Int32) throws -> String,
+         handler: @escaping @Sendable (ComputerRequest, String) async -> ComputerResponse,
+         surface: (@Sendable (ComputerRequest, String, SurfaceSocket) async -> ComputerResponse)? = nil) throws {
         self.url = url
         var info = stat()
         if lstat(url.path, &info) == 0 {
@@ -198,7 +205,7 @@ public final class ComputerConnectionServer: @unchecked Sendable {
             ComputerConnection.configure(peer)
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let identity = try ComputerConnection.authenticate(peer, team: team, identifiers: clientIDs)
+                    let identity = try authenticate(peer)
                     let request = try ComputerRequest.read(ComputerConnection.receive(peer))
                     try request.validate()
                     if request.operation == .surfaceStream {
@@ -214,10 +221,10 @@ public final class ComputerConnectionServer: @unchecked Sendable {
                         }
                         return
                     }
+                    let reply = PendingReply(peer, permits: permits)
                     Task {
                         let response = await handler(request, identity)
-                        try? ComputerConnection.send(JSONEncoder().encode(response), peer)
-                        Darwin.close(peer); permits.signal()
+                        reply.finish((try? JSONEncoder().encode(response)) ?? Data())
                     }
                 } catch {
                     try? ComputerConnection.send(JSONEncoder().encode(ComputerResponse(error: error.localizedDescription)), peer)
@@ -230,4 +237,28 @@ public final class ComputerConnectionServer: @unchecked Sendable {
         source.resume()
     }
     deinit { source?.cancel() }
+}
+
+/// A request being answered. Its caller sends nothing more while it waits, so anything on the socket
+/// means it gave up; its place is then given back even if a stuck computer never answers.
+private final class PendingReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private let peer: Int32
+    private let watch: DispatchSourceRead
+    init(_ peer: Int32, permits: DispatchSemaphore) {
+        self.peer = peer
+        watch = DispatchSource.makeReadSource(fileDescriptor: peer, queue: .global(qos: .utility))
+        watch.setCancelHandler { Darwin.close(peer); permits.signal() }
+        // Holds the reply until cancelled, which releases this handler.
+        watch.setEventHandler { self.finish(nil) }
+        watch.resume()
+    }
+    func finish(_ answer: Data?) {
+        lock.lock(); defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        if let answer { try? ComputerConnection.send(answer, peer) }
+        watch.cancel()
+    }
 }
