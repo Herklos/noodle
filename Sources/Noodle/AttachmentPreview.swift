@@ -224,6 +224,8 @@ struct AttachmentInlinePreview: View {
     let isSelected: Bool
     let select: () -> Void
     let preview: () -> Void
+    /// For a voice message, whether its transcript is open.
+    let showsTranscript: Binding<Bool>?
     private let imagePreviewSize: CGSize
     private let displaysAsImage: Bool
 
@@ -240,7 +242,8 @@ struct AttachmentInlinePreview: View {
         shouldLoad: Bool,
         isSelected: Bool,
         select: @escaping () -> Void,
-        preview: @escaping () -> Void
+        preview: @escaping () -> Void,
+        showsTranscript: Binding<Bool>? = nil
     ) {
         self.attachment = attachment
         self.fileURL = fileURL
@@ -248,6 +251,7 @@ struct AttachmentInlinePreview: View {
         self.isSelected = isSelected
         self.select = select
         self.preview = preview
+        self.showsTranscript = showsTranscript
         displaysAsImage = attachment.mediaType.hasPrefix("image/") || AttachmentThumbnailCache.isImage(fileURL)
         imagePreviewSize = displaysAsImage
             ? AttachmentThumbnailCache.previewSize(for: fileURL)
@@ -256,7 +260,7 @@ struct AttachmentInlinePreview: View {
 
     var body: some View {
         if let voice = attachment.voice, attachment.mediaType.hasPrefix("audio/") {
-            VoiceMessagePlayer(url: fileURL, voice: voice, shouldPlay: shouldLoad)
+            VoiceMessagePlayer(url: fileURL, voice: voice, shouldPlay: shouldLoad, showsTranscript: showsTranscript)
         } else {
             filePreview
         }

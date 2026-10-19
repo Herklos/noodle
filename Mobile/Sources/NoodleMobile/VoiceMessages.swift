@@ -585,6 +585,18 @@ struct VoiceWaveform: View {
         position = player.currentTime
     }
 
+    /// Seeks a recording that may not have played yet, loading it without playing it.
+    func seek(_ fraction: Double, in url: URL) {
+        if loadedURL != url { reset() }
+        if player == nil {
+            do { player = try AVAudioPlayer(contentsOf: url); loadedURL = url; error = nil } catch {
+                self.error = error.localizedDescription
+                return
+            }
+        }
+        seek(fraction)
+    }
+
     func stop(rewind: Bool = false) {
         timer?.cancel()
         timer = nil
@@ -601,7 +613,8 @@ struct VoiceWaveform: View {
     }
 }
 
-/// A voice message in the conversation: play, the waveform to seek, and the time.
+/// A voice message in the conversation: play, the waveform and the time. Tapping it, anywhere but
+/// play, opens its transcript.
 struct VoiceMessagePlayer: View {
     let url: URL?
     let voice: LinkVoice
@@ -610,51 +623,242 @@ struct VoiceMessagePlayer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                Button { if let url { playback.toggle(url: url) } } label: {
-                    Image(systemName: playback.playing ? "pause.fill" : "play.fill").frame(width: 28, height: 32)
-                }
-                .buttonStyle(.plain)
-                .disabled(url == nil)
-                .accessibilityLabel(playback.playing ? "Pause voice message" : "Play voice message")
-                GeometryReader { geometry in
-                    VoiceWaveform(samples: voice.waveform, progress: playback.position / max(voice.duration, 1))
-                        .contentShape(Rectangle())
-                        .onTapGesture { location in playback.seek(location.x / max(geometry.size.width, 1)) }
-                }
-                .frame(height: 28)
-                .accessibilityElement()
-                .accessibilityLabel("Playback position")
-                .accessibilityValue(voiceTime(playback.position))
-                .accessibilityAdjustableAction { direction in
-                    playback.seek((playback.position + (direction == .increment ? 5 : -5)) / max(voice.duration, 1))
-                }
+            HStack(spacing: 2) {
+                VoicePlayButton(playback: playback, url: url)
+                VoiceWaveform(samples: voice.waveform, progress: playback.position / max(voice.duration, 1))
+                    .frame(height: 28)
+                    .accessibilityElement()
+                    .accessibilityLabel("Playback position")
+                    .accessibilityValue(voiceTime(playback.position))
+                    .accessibilityAdjustableAction { direction in
+                        guard let url else { return }
+                        playback.seek((playback.position + (direction == .increment ? 5 : -5)) / max(voice.duration, 1), in: url)
+                    }
+                    .accessibilityAction(named: "Show Transcript") { showingTranscript = true }
                 Text(voiceTime(playback.playing ? playback.position : voice.duration))
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.leading, 8)
             }
-            if let error = playback.error { Text(error).font(.caption).foregroundStyle(.red) }
+            if let error = playback.error { Text(error).font(.caption).foregroundStyle(.red).padding(.leading, 8) }
         }
-        .padding(.horizontal, 12).padding(.vertical, 7)
+        // Play's 44-point target stands in for most of the bubble's leading and vertical margins.
+        .padding(.leading, 4).padding(.trailing, 12).padding(.vertical, 1)
         .frame(width: 250)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture { showingTranscript = true }
         .contextMenu {
             Button("Show Transcript", systemImage: "text.quote") { showingTranscript = true }
         }
         .sheet(isPresented: $showingTranscript) {
-            NavigationStack {
-                ScrollView {
-                    Text(voice.transcript ?? "No transcript available.").textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding()
-                }
-                .navigationTitle("Transcript")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { showingTranscript = false } }
-                }
-            }
-            .presentationDetents([.medium, .large])
+            VoiceTranscriptSheet(url: url, voice: voice, playback: playback)
+                .presentationDetents([.medium, .large])
         }
         .onDisappear { playback.stop() }
+    }
+}
+
+/// Plays and pauses a recording, once it is on the phone.
+struct VoicePlayButton: View {
+    let playback: VoicePlayback
+    let url: URL?
+
+    var body: some View {
+        Button { if let url { playback.toggle(url: url) } } label: {
+            Image(systemName: playback.playing ? "pause.fill" : "play.fill")
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(url == nil)
+        .accessibilityLabel(playback.playing ? "Pause voice message" : "Play voice message")
+    }
+}
+
+/// A voice message's transcript matched to its recording. Transcripts have no word timings,
+/// so the match is by proportion: a fraction of the recording is the same fraction of the
+/// transcript's characters, and the sentence holding that character is the one being said.
+struct VoiceTranscriptText: Equatable {
+    static let missing = "No transcript was made for this voice message."
+    let text: String
+    /// Each sentence without the spaces after it, in order.
+    let sentences: [Range<String.Index>]
+    /// Where each sentence starts, in characters.
+    let starts: [Int]
+    let count: Int
+
+    /// Nil when nothing was transcribed.
+    init?(_ transcript: String?) {
+        guard let text = transcript?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        var sentences: [Range<String.Index>] = [], starts: [Int] = []
+        var offset = 0, counted = text.startIndex
+        text.enumerateSubstrings(in: text.startIndex..., options: [.bySentences, .substringNotRequired]) { _, range, _, _ in
+            offset += text.distance(from: counted, to: range.lowerBound)
+            counted = range.lowerBound
+            var end = range.upperBound
+            while end > range.lowerBound, text[text.index(before: end)].isWhitespace { end = text.index(before: end) }
+            guard end > range.lowerBound else { return }
+            sentences.append(range.lowerBound..<end)
+            starts.append(offset)
+        }
+        if sentences.isEmpty { sentences = [text.startIndex..<text.endIndex]; starts = [0] }
+        self.text = text; self.sentences = sentences; self.starts = starts; count = text.count
+    }
+
+    /// The sentence being said at a fraction of the recording.
+    func sentence(at fraction: Double) -> Int {
+        guard fraction.isFinite else { return 0 }
+        let offset = Int((min(1, max(0, fraction)) * Double(count)).rounded())
+        return starts.lastIndex { $0 <= offset } ?? 0
+    }
+
+    /// How far into the recording a sentence starts.
+    func fraction(of sentence: Int) -> Double {
+        guard starts.indices.contains(sentence), count > 0 else { return 0 }
+        return Double(starts[sentence]) / Double(count)
+    }
+}
+
+/// Splits a transcript once rather than on every tick of playback.
+@MainActor final class VoiceTranscriptSplit {
+    private var source: String??
+    private var value: VoiceTranscriptText?
+
+    func callAsFunction(_ transcript: String?) -> VoiceTranscriptText? {
+        if source != .some(transcript) { source = .some(transcript); value = VoiceTranscriptText(transcript) }
+        return value
+    }
+}
+
+/// The transcript as selectable text. Each sentence is a link that plays from it, and the one
+/// being played is marked.
+struct VoiceTranscriptBody: View {
+    static let scheme = "noodle-transcript-sentence"
+    let transcript: VoiceTranscriptText
+    let highlighted: Int?
+
+    var body: some View {
+        Text(attributed)
+            .textSelection(.enabled)
+            // Sentences read as plain text, not as links.
+            .tint(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var attributed: AttributedString {
+        var result = AttributedString(transcript.text)
+        for (index, sentence) in transcript.sentences.enumerated() {
+            guard let range = Range(sentence, in: result) else { continue }
+            result[range].link = URL(string: "\(Self.scheme):\(index)")
+            if index == highlighted { result[range].swiftUI.backgroundColor = Color.accentColor.opacity(0.28) }
+        }
+        return result
+    }
+
+    static func sentence(in url: URL) -> Int? {
+        guard url.scheme == scheme else { return nil }
+        return Int(url.absoluteString.dropFirst(scheme.count + 1))
+    }
+}
+
+/// A waveform that tapping or dragging moves through the recording.
+struct VoiceSeekingWaveform: View {
+    let samples: [Float]
+    let progress: Double
+    let seek: (Double) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            VoiceWaveform(samples: samples, progress: progress)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                    seek(drag.location.x / max(geometry.size.width, 1))
+                })
+        }
+    }
+}
+
+/// A voice message's transcript with its recording to play and move through, and the sentence
+/// being played marked. It shares the message's playback, so both show the same. It opens before
+/// the recording has downloaded, since the transcript comes with the message; play and seeking
+/// wait for the recording.
+struct VoiceTranscriptSheet: View {
+    let url: URL?
+    let voice: LinkVoice
+    let playback: VoicePlayback
+    @Environment(\.dismiss) private var dismiss
+    @State private var split = VoiceTranscriptSplit()
+    @State private var scroll = ScrollPosition()
+    @State private var textHeight: CGFloat = 0
+    @State private var visible = CGRect.zero
+
+    var body: some View {
+        let transcript = split(voice.transcript)
+        let fraction = playback.position / max(voice.duration, 1)
+        // A recording that has not been played or moved through has no place in the text yet.
+        let highlighted = transcript.flatMap { playback.playing || playback.position > 0 ? $0.sentence(at: fraction) : nil }
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 2) {
+                    VoicePlayButton(playback: playback, url: url)
+                    VoiceSeekingWaveform(samples: voice.waveform, progress: fraction) { value in
+                        if let url { playback.seek(value, in: url) }
+                    }
+                    .frame(height: 36)
+                    .disabled(url == nil)
+                    .accessibilityElement()
+                    .accessibilityLabel("Playback position")
+                    .accessibilityValue(voiceTime(playback.position))
+                    .accessibilityAdjustableAction { direction in
+                        guard let url else { return }
+                        playback.seek((playback.position + (direction == .increment ? 5 : -5)) / max(voice.duration, 1), in: url)
+                    }
+                    Text("\(voiceTime(playback.position)) / \(voiceTime(voice.duration))")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .padding(.leading, 8)
+                }
+                .padding(.leading, 8).padding(.trailing)
+                if let error = playback.error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal) }
+                if let transcript {
+                    ScrollView {
+                        VoiceTranscriptBody(transcript: transcript, highlighted: highlighted)
+                            .padding(.horizontal)
+                            .padding(.bottom)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
+                    }
+                    .scrollPosition($scroll)
+                    .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in visible = rect }
+                    .environment(\.openURL, OpenURLAction { link in
+                        guard let index = VoiceTranscriptBody.sentence(in: link) else { return .systemAction }
+                        if let url { playback.seek(transcript.fraction(of: index), in: url) }
+                        return .handled
+                    })
+                    .onChange(of: highlighted) { _, index in reveal(index, in: transcript) }
+                } else {
+                    Text(VoiceTranscriptText.missing).foregroundStyle(.secondary).padding(.horizontal)
+                }
+            }
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .navigationTitle("Transcript")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if let transcript {
+                        Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = transcript.text }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+
+    /// Scrolls the marked sentence into view, at about where it falls in the text.
+    private func reveal(_ index: Int?, in transcript: VoiceTranscriptText) {
+        guard let index, textHeight > visible.height, visible.height > 0 else { return }
+        let y = transcript.fraction(of: index) * textHeight
+        guard y < visible.minY + 8 || y > visible.maxY - 32 else { return }
+        withAnimation { scroll.scrollTo(y: min(textHeight - visible.height, max(0, y - visible.height / 3))) }
     }
 }
 

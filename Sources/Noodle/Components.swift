@@ -208,7 +208,8 @@ struct MessageBubble: View {
     @State private var inspectedReaction: String?
     @State private var changingReaction = false
     @State private var isVisible = false
-    @State private var transcriptAttachment: ConversationAttachment?
+    /// The voice message whose transcript is open.
+    @State private var transcriptAttachmentID: UUID?
     let message: ChatMessage
     let hasConversationBackground: Bool
     @Binding var selectedAttachmentID: UUID?
@@ -342,9 +343,6 @@ struct MessageBubble: View {
         .onScrollVisibilityChange(threshold: 0.01) { visible in
             isVisible = visible
         }
-        .sheet(item: $transcriptAttachment) { attachment in
-            if let voice = attachment.voice { VoiceTranscriptSheet(voice: voice).noodleSheetSizing() }
-        }
         }
     }
 
@@ -386,7 +384,13 @@ struct MessageBubble: View {
             shouldLoad: isVisible,
             isSelected: selectedAttachmentID == attachment.id,
             select: { selectedAttachmentID = attachment.id },
-            preview: { previewAttachment(attachment, store.attachments(for: message)) }
+            preview: { previewAttachment(attachment, store.attachments(for: message)) },
+            showsTranscript: attachment.voice == nil ? nil : Binding(
+                get: { transcriptAttachmentID == attachment.id },
+                set: { shown in
+                    if shown { transcriptAttachmentID = attachment.id }
+                    else if transcriptAttachmentID == attachment.id { transcriptAttachmentID = nil }
+                })
         )
         .onDrag { store.attachmentDragProvider(attachment) }
         .overlay { reactionContextMenu(attachment: attachment) }
@@ -454,7 +458,7 @@ struct MessageBubble: View {
                 iconAgent.map { _ in { () -> Void in Task { await store.useAttachmentAsIcon(item) } } }
             },
             showTranscript: attachment.flatMap { item in
-                item.voice == nil ? nil : { transcriptAttachment = item }
+                item.voice == nil ? nil : { transcriptAttachmentID = item.id }
             },
             openOnThisMac: attachment.flatMap { item in
                 store.isHubNoodlet(item) ? { Task { try? await store.openCompanion(item, at: .device) } } : nil

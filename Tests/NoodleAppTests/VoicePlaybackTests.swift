@@ -182,11 +182,62 @@ import NoodleCore
         press(try await control("Play voice message", in: view))
         let error = try XCTUnwrap(f.playback.error)
         _ = try await control(error, in: view)
-        let transcript = host(VoiceTranscriptSheet(voice: voice))
+        let transcript = host(VoiceTranscriptView(url: a, voice: voice, playback: playbackFixture().playback))
         _ = try await control("Fixture transcript", in: transcript)
-        press(try await control("Done", in: transcript))
-        let absent = host(VoiceTranscriptSheet(voice: VoiceMessage(transcript: nil, duration: 0, waveform: [], localeIdentifier: nil)))
-        _ = try await control("No transcript available.", in: absent)
+        _ = try await control("Copy", in: transcript)
+        let absent = host(VoiceTranscriptView(url: a, voice: VoiceMessage(transcript: nil, duration: 0, waveform: [], localeIdentifier: nil),
+                                              playback: playbackFixture().playback))
+        _ = try await control("No transcript was made for this voice message.", in: absent)
+        XCTAssertFalse(hasControl("Copy", in: absent))
+    }
+
+    func testTheTranscriptPlaysTheMessagesOwnRecording() async throws {
+        let f = playbackFixture()
+        let transcript = host(VoiceTranscriptView(url: a, voice: voice, playback: f.playback))
+        press(try await control("Play voice message", in: transcript))
+        try await wait { f.playback.playing }
+        XCTAssertEqual(f.factory.players[a]?.isPlaying, true)
+        press(try await control("Pause voice message", in: transcript))
+        try await wait { !f.playback.playing }
+    }
+
+    func testSeekingARecordingThatHasNotPlayedLoadsItWithoutPlaying() throws {
+        let f = playbackFixture()
+        f.playback.seek(0.5, in: a)
+        let player = try XCTUnwrap(f.factory.players[a])
+        XCTAssertFalse(f.playback.playing); XCTAssertEqual(player.plays, 0)
+        XCTAssertEqual(player.currentTime, 6); XCTAssertEqual(f.playback.position, 6)
+        f.playback.toggle(url: a)
+        XCTAssertTrue(f.playback.playing); XCTAssertEqual(player.currentTime, 6)
+        XCTAssertEqual(f.factory.requested, [a])
+        f.playback.seek(0.25, in: b)
+        XCTAssertFalse(f.playback.playing); XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(f.factory.players[b]?.currentTime, 3)
+        f.factory.failures.insert(URL(fileURLWithPath: "/fixture/missing.m4a"))
+        f.playback.seek(0.5, in: URL(fileURLWithPath: "/fixture/missing.m4a"))
+        XCTAssertNotNil(f.playback.error); XCTAssertEqual(f.playback.position, 0)
+    }
+
+    func testTranscriptSentencesFollowTheRecordingByProportion() throws {
+        let text = try XCTUnwrap(VoiceTranscriptText("One two. Three four five six?  Seven!"))
+        XCTAssertEqual(text.sentences.map { String(text.text[$0]) }, ["One two.", "Three four five six?", "Seven!"])
+        XCTAssertEqual(text.starts, [0, 9, 31]); XCTAssertEqual(text.count, 37)
+        XCTAssertEqual([0, 0.2, 0.25, 0.8, 0.9, 1].map(text.sentence(at:)), [0, 0, 1, 1, 2, 2])
+        XCTAssertEqual([-1, 2, .nan, .infinity].map(text.sentence(at:)), [0, 2, 0, 0])
+        XCTAssertEqual(text.fraction(of: 1), 9.0 / 37); XCTAssertEqual(text.fraction(of: 7), 0)
+        for index in text.sentences.indices { XCTAssertEqual(text.sentence(at: text.fraction(of: index)), index) }
+    }
+
+    func testTranscriptWithoutSentencesIsOneAndAMissingTranscriptIsNone() throws {
+        let words = try XCTUnwrap(VoiceTranscriptText("  just some words "))
+        XCTAssertEqual(words.sentences.map { String(words.text[$0]) }, ["just some words"])
+        XCTAssertEqual(words.sentence(at: 0.7), 0)
+        XCTAssertNil(VoiceTranscriptText(nil)); XCTAssertNil(VoiceTranscriptText(" \n "))
+    }
+
+    func testTranscriptSentenceLinksNameTheirSentence() throws {
+        XCTAssertEqual(VoiceTranscriptBody.sentence(in: try XCTUnwrap(URL(string: "noodle-transcript-sentence:12"))), 12)
+        XCTAssertNil(VoiceTranscriptBody.sentence(in: try XCTUnwrap(URL(string: "https://example.com/12"))))
     }
 
     func testReplacingAFailedRecordingClearsItsErrorBeforeTheNextPlayback() async throws {

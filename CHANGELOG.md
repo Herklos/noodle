@@ -10,6 +10,10 @@ All notable changes to Noodle are documented here, following
 
 - Settings → Hub has Computers & Browsers… for each Noodle Hub you joined. It lists all your computers and browsers there, whichever bots have them. Edit… changes one's name and description, and Delete removes it after saying which bots lose it.
 
+### Changed
+
+- Clicking a voice message shows its transcript in a balloon, with the waveform to play it and click or drag through it. The sentence being played is marked, roughly, since it follows the time rather than the words, and clicking a sentence plays from there. Copy copies the transcript. The play button still plays and pauses, dragging the message still exports the recording, and Show Transcript in its menu opens the same balloon.
+
 ## [0.69.1] - 2026-10-19
 
 ### Fixed
