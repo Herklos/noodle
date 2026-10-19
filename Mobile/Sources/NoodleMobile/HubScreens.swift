@@ -593,6 +593,10 @@ struct ProfileView: View {
     @State private var pairingDevice = false
     @State private var showingArchived = false
     @State private var editingPicture = false
+    /// Whether the Hub listed this user's computers and browsers; one that keeps none, or cannot
+    /// list them now, shows no row for them.
+    @State private var listsComputers = false
+    @State private var listsBrowsers = false
 
     var body: some View {
         List {
@@ -648,6 +652,20 @@ struct ProfileView: View {
                     }
                 }
             }
+            if let chats, listsComputers || listsBrowsers {
+                Section {
+                    if listsComputers {
+                        NavigationLink { HubCompanionsScreen(chats: chats, kind: .computer) } label: {
+                            LabeledContent("Computers", value: "\(chats.computers.count)")
+                        }
+                    }
+                    if listsBrowsers {
+                        NavigationLink { HubCompanionsScreen(chats: chats, kind: .browser) } label: {
+                            LabeledContent("Browsers", value: "\(chats.browsers.count)")
+                        }
+                    }
+                }
+            }
             if pairing.status?.canPairDevices == true {
                 Section {
                     Button("Pair Another Device") { pairingDevice = true }
@@ -666,7 +684,11 @@ struct ProfileView: View {
         .sheet(isPresented: $pairingDevice) { PairDeviceView(title: "Pair a Device") { try await pairing.invite() } }
         .sheet(isPresented: $editingPicture) { PersonPictureEditor(pairing: pairing) }
         .sheet(isPresented: $showingArchived) { if let chats { ArchivedView(chats: chats) } }
-        .wordmarkRefreshable { await pairing.refresh() }
+        .task { await loadCompanions() }
+        .wordmarkRefreshable {
+            await pairing.refresh()
+            await loadCompanions()
+        }
         .confirmationDialog("Leave \(pairing.hubName)?", isPresented: $leaving, titleVisibility: .visible) {
             Button("Leave", role: .destructive) {
                 dismiss()
@@ -682,6 +704,12 @@ struct ProfileView: View {
     private var status: some View {
         let connection = HubConnection(pairing)
         return Text(connection.title).foregroundStyle(connection.color)
+    }
+
+    private func loadCompanions() async {
+        guard let chats else { return }
+        listsComputers = (try? await chats.loadComputers()) != nil
+        listsBrowsers = (try? await chats.loadBrowsers()) != nil
     }
 }
 

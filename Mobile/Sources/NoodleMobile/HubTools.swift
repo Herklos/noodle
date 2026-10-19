@@ -87,6 +87,12 @@ extension HubChats {
         return made
     }
 
+    /// Renames and describes a computer; an empty description clears it.
+    func updateComputer(_ computer: LinkComputer, name: String, description: String) async throws {
+        _ = try await pairing.request(.updateComputer(id: computer.id, LinkComputerDraft(name: name, description: description)))
+        try await loadComputers()
+    }
+
     func deleteComputer(_ computer: LinkComputer) async throws {
         _ = try await pairing.request(.deleteComputer(id: computer.id))
         try await loadComputers()
@@ -94,6 +100,12 @@ extension HubChats {
 
     func createBrowser(named name: String) async throws {
         _ = try await pairing.request(.createBrowser(LinkBrowserDraft(name: name)))
+        try await loadBrowsers()
+    }
+
+    /// Renames and describes a browser; an empty description clears it.
+    func updateBrowser(_ browser: LinkBrowser, name: String, description: String) async throws {
+        _ = try await pairing.request(.updateBrowser(id: browser.id, LinkBrowserDraft(name: name, description: description)))
         try await loadBrowsers()
     }
 
@@ -369,6 +381,163 @@ struct HubToolsScreen: View {
         Task {
             defer { busy = nil }
             do { try await action() } catch { problem = error.localizedDescription }
+        }
+    }
+}
+
+/// One of this user's computers or browsers on the Hub, as its list and editor show it.
+struct HubCompanion: Identifiable, Hashable {
+    let id: UUID
+    let name: String
+    let description: String?
+    /// Under its name: its description, or else what it is doing.
+    let detail: String?
+
+    init(_ computer: LinkComputer) {
+        id = computer.id
+        name = computer.name
+        description = computer.description
+        detail = computer.description ?? computer.state
+    }
+
+    init(_ browser: LinkBrowser) {
+        id = browser.id
+        name = browser.name
+        description = browser.description
+        detail = browser.description ?? (browser.paused ? "Paused" : nil)
+    }
+}
+
+/// All of this user's computers or browsers on the Hub, whichever bots have them: tap one to rename
+/// or describe it, swipe to delete it.
+struct HubCompanionsScreen: View {
+    let chats: HubChats
+    let kind: HubTool
+    @State private var editing: HubCompanion?
+    @State private var deleting: HubCompanion?
+    @State private var busy: UUID?
+    @State private var problem: String?
+
+    private var items: [HubCompanion] {
+        kind == .computer ? chats.computers.map { HubCompanion($0) } : chats.browsers.map { HubCompanion($0) }
+    }
+
+    var body: some View {
+        List {
+            if items.isEmpty {
+                Text("None on this Hub yet").foregroundStyle(.secondary)
+            }
+            ForEach(items) { item in
+                Button { editing = item } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name).foregroundStyle(.primary)
+                            if let detail = item.detail {
+                                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                        }
+                        Spacer()
+                        if busy == item.id { ProgressView() }
+                    }
+                }
+                .disabled(busy == item.id)
+                .swipeActions {
+                    Button("Delete", role: .destructive) { deleting = item }
+                }
+            }
+            if let problem {
+                Text(problem).foregroundStyle(.red)
+            }
+        }
+        .navigationTitle(kind == .computer ? "Computers" : "Browsers")
+        .sheet(item: $editing) { HubCompanionEditor(chats: chats, kind: kind, item: $0) }
+        .confirmationDialog("Delete “\(deleting?.name ?? "")”?",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { item in
+            Button("Delete", role: .destructive) { delete(item) }
+        } message: { item in
+            Text(chats.deletionSummary(kind, item.id))
+        }
+        .wordmarkRefreshable { try? await load() }
+    }
+
+    private func load() async throws {
+        if kind == .computer { try await chats.loadComputers() } else { try await chats.loadBrowsers() }
+    }
+
+    private func delete(_ item: HubCompanion) {
+        busy = item.id
+        problem = nil
+        Task {
+            defer { busy = nil }
+            do {
+                if kind == .computer, let computer = chats.computers.first(where: { $0.id == item.id }) {
+                    try await chats.deleteComputer(computer)
+                } else if let browser = chats.browsers.first(where: { $0.id == item.id }) {
+                    try await chats.deleteBrowser(browser)
+                }
+            } catch { problem = error.localizedDescription }
+        }
+    }
+}
+
+/// A computer's or browser's name and description, saved on the Hub.
+private struct HubCompanionEditor: View {
+    let chats: HubChats
+    let kind: HubTool
+    let item: HubCompanion
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var description: String
+    @State private var saving = false
+    @State private var problem: String?
+
+    init(chats: HubChats, kind: HubTool, item: HubCompanion) {
+        self.chats = chats
+        self.kind = kind
+        self.item = item
+        _name = State(initialValue: item.name)
+        _description = State(initialValue: item.description ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $name)
+                TextField("Description", text: $description, axis: .vertical)
+                    .lineLimit(2...6)
+                if let problem { Text(problem).foregroundStyle(.red) }
+            }
+            .navigationTitle(kind == .computer ? "Edit Computer" : "Edit Browser")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func save() {
+        saving = true
+        problem = nil
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            defer { saving = false }
+            do {
+                if kind == .computer {
+                    guard let computer = chats.computers.first(where: { $0.id == item.id }) else { throw LinkError("The computer is no longer on the Hub.") }
+                    try await chats.updateComputer(computer, name: name, description: description)
+                } else {
+                    guard let browser = chats.browsers.first(where: { $0.id == item.id }) else { throw LinkError("The browser is no longer on the Hub.") }
+                    try await chats.updateBrowser(browser, name: name, description: description)
+                }
+                dismiss()
+            } catch { problem = error.localizedDescription }
         }
     }
 }

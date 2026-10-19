@@ -257,6 +257,27 @@ private actor FakeHub {
             guard let index = hubSharing.firstIndex(where: { $0.id == hub }) else { return .failure("No such Hub.") }
             hubSharing[index].sharedWith = people
             return .hubSharing(hubSharing)
+        case .success(.computers):
+            return .computers(computers)
+        case .success(.browsers):
+            return .browsers(browsers)
+        case .success(.updateComputer(let id, let draft)):
+            guard let index = computers.firstIndex(where: { $0.id == id }) else { return .failure("No such computer.") }
+            computers[index].name = draft.name
+            // As the Hub's apps do: no description keeps the one it has, and an empty one clears it.
+            if let description = draft.description { computers[index].description = description.isEmpty ? nil : description }
+            return .computer(computers[index])
+        case .success(.updateBrowser(let id, let draft)):
+            guard let index = browsers.firstIndex(where: { $0.id == id }) else { return .failure("No such browser.") }
+            browsers[index].name = draft.name
+            if let description = draft.description { browsers[index].description = description.isEmpty ? nil : description }
+            return .browser(browsers[index])
+        case .success(.deleteComputer(let id)):
+            computers.removeAll { $0.id == id }
+            return .done
+        case .success(.deleteBrowser(let id)):
+            browsers.removeAll { $0.id == id }
+            return .done
         case .success(.linkCard):
             cardFetches += 1
             return .linkCard(LinkCardInfo(title: "Racer"))
@@ -290,6 +311,15 @@ private actor FakeHub {
     var kickConfirmation: LinkKickConfirmation?
 
     func askBeforeKick(_ confirmation: LinkKickConfirmation?) { kickConfirmation = confirmation }
+
+    /// This user's computers and browsers on the Hub.
+    var computers: [LinkComputer] = []
+    var browsers: [LinkBrowser] = []
+
+    func keep(_ computer: LinkComputer, _ browser: LinkBrowser) {
+        computers.append(computer)
+        browsers.append(browser)
+    }
 }
 
 /// Whether the Hub lets the phone in, switched by a test from any thread.
@@ -601,6 +631,34 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(await hub.edits.last?.avatarImageData == nil)
         #expect(await hub.bot.draft.avatarImageData == picture)
         #expect(await hub.bot.draft.name == "Ranger")
+    }
+
+    /// Computers and browsers on the Hub are renamed and described from the phone, an empty description
+    /// clears one, and deleting one first says which bots lose it.
+    @Test func computersAndBrowsersAreEditedFromThePhone() async throws {
+        let hub = FakeHub()
+        let scout = await hub.bot
+        let computer = LinkComputer(id: UUID(), name: "Workbench", kind: "Linux", state: "Stopped", symbol: "terminal", botIDs: [scout.id])
+        let browser = LinkBrowser(id: UUID(), name: "Work", description: "Sign-ins")
+        await hub.keep(computer, browser)
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        try await chats.loadComputers()
+        try await chats.loadBrowsers()
+
+        try await chats.updateComputer(computer, name: "Bench", description: "For builds")
+        #expect(chats.computers.map(\.name) == ["Bench"])
+        #expect(chats.computers.first?.description == "For builds")
+        try await chats.updateBrowser(browser, name: "Office", description: "")
+        #expect(chats.browsers.map(\.name) == ["Office"])
+        #expect(chats.browsers.first?.description == nil)
+
+        #expect(chats.deletionSummary(.computer, computer.id) == "It moves to the Trash on the Hub, and Scout loses it.")
+        #expect(chats.deletionSummary(.browser, browser.id) == "Its sign-ins and history are erased for good.")
+        try await chats.deleteBrowser(try #require(chats.browsers.first))
+        #expect(chats.browsers.isEmpty)
+        #expect(await hub.computers.map(\.name) == ["Bench"])
     }
 
     @Test func agentsListWithTheirLatestMessage() async throws {
