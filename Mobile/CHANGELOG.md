@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Tap …, choose Hubs and tap your Hub: it lists all your computers and browsers on it, whichever bots have them. Tap one to change its name and description, or swipe to delete it.
+
 ### Fixed
 
 - Deleting a tool, computer or browser in a bot's settings asks first. It says which of your bots lose it, and that a computer moves to the Trash on the Hub or that a browser's sign-ins and history are erased for good.
@@ -9,6 +13,10 @@
 ### What to Test
 
 - In a bot's settings, open Tools, Computers and Browsers and swipe one to delete it: check a confirmation asks first and names the bots that use it. Check it says a computer moves to the Trash on the Hub and a browser's sign-ins and history are erased. Tap outside it and check nothing is deleted; delete one and check it goes.
+- Tap …, choose Hubs and tap your Hub: check Computers and Browsers show with how many you have. Open each and check every one is listed with its description, or a computer's state.
+- Tap one, change its name and description and tap Save: check the list shows them, and so do the bot's Computers or Browsers and Noodle on the Mac. Clear a description, save, and check it is gone.
+- Swipe one to delete it: check the confirmation names the bots that use it, and that after Delete it is gone from the list and from those bots.
+- With a Hub that cannot list computers or browsers, check those rows do not show.
 
 ## [0.39.0] - 2026-10-18
 
