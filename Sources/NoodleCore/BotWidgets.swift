@@ -7,8 +7,8 @@ public struct WidgetBot: Identifiable, Codable, Hashable, Sendable {
     public var name: String
     public var symbol: String?
     public var colour: Int
-    /// The avatar as Noodle draws it, as PNG.
-    public var image: Data?
+    /// The avatar as Noodle draws it, as PNG. The shelf keeps it in a file of its own.
+    public var image: Data? = nil
     public var status: String?
     public var isWorking: Bool
     /// When it last finished a turn.
@@ -19,6 +19,8 @@ public struct WidgetBot: Identifiable, Codable, Hashable, Sendable {
         self.id = id; self.conversationID = conversationID; self.name = name; self.symbol = symbol; self.colour = colour
         self.image = image; self.status = status; self.isWorking = isWorking; self.finishedAt = finishedAt
     }
+
+    private enum CodingKeys: String, CodingKey { case id, conversationID, name, symbol, colour, status, isWorking, finishedAt }
 }
 
 public enum WidgetBots {
@@ -72,11 +74,17 @@ public enum WidgetBots {
     }
 }
 
-/// Where Noodle leaves its widgets' bots, in the app group it shares with its extensions.
+/// Where Noodle leaves its widgets' bots, in the app group it shares with its extensions. Every bot's picture is
+/// a file of its own beside the list: a widget extension has little memory, and with every picture in the list it
+/// read them all to show a few.
 public struct BotWidgetShelf: Sendable {
     public let fileURL: URL
+    private let picturesURL: URL
 
-    public init(rootURL: URL) { fileURL = rootURL.appendingPathComponent("bots.json") }
+    public init(rootURL: URL) {
+        fileURL = rootURL.appendingPathComponent("bots.json")
+        picturesURL = rootURL.appendingPathComponent("Pictures", isDirectory: true)
+    }
 
     public static func configured(bundle: Bundle = .main) -> BotWidgetShelf? {
         guard let identifier = bundle.object(forInfoDictionaryKey: "NoodleSharedGroup") as? String,
@@ -85,20 +93,53 @@ public struct BotWidgetShelf: Sendable {
         return BotWidgetShelf(rootURL: container.appendingPathComponent("Widgets", isDirectory: true))
     }
 
+    /// Every bot, without its picture.
     public func load() -> [WidgetBot] {
         guard let data = try? Data(contentsOf: fileURL) else { return [] }
         return (try? Self.decoder.decode([WidgetBot].self, from: data)) ?? []
     }
 
+    /// The bots with their pictures, for the few a widget shows.
+    public func withPictures(_ bots: [WidgetBot]) -> [WidgetBot] {
+        bots.map { bot in
+            var bot = bot
+            bot.image = try? Data(contentsOf: pictureURL(bot.id))
+            return bot
+        }
+    }
+
     /// Returns whether anything changed, so widgets reload only then.
     @discardableResult
     public func save(_ bots: [WidgetBot]) throws -> Bool {
+        let manager = FileManager.default
+        try manager.createDirectory(at: picturesURL, withIntermediateDirectories: true)
+        var changed = false
+        // Pictures before the list, so a widget reading the new list finds them.
+        for bot in bots {
+            let url = pictureURL(bot.id)
+            if let image = bot.image {
+                guard (try? Data(contentsOf: url)) != image else { continue }
+                try image.write(to: url, options: .atomic)
+                changed = true
+            } else if manager.fileExists(atPath: url.path) {
+                try manager.removeItem(at: url)
+                changed = true
+            }
+        }
         let data = try Self.encoder.encode(bots)
-        guard (try? Data(contentsOf: fileURL)) != data else { return false }
-        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: fileURL, options: .atomic)
-        return true
+        if (try? Data(contentsOf: fileURL)) != data {
+            try data.write(to: fileURL, options: .atomic)
+            changed = true
+        }
+        let kept = Set(bots.map { pictureURL($0.id).lastPathComponent })
+        for url in (try? manager.contentsOfDirectory(at: picturesURL, includingPropertiesForKeys: nil)) ?? []
+        where !kept.contains(url.lastPathComponent) {
+            try? manager.removeItem(at: url)
+        }
+        return changed
     }
+
+    private func pictureURL(_ id: UUID) -> URL { picturesURL.appendingPathComponent("\(id.uuidString.lowercased()).png") }
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
