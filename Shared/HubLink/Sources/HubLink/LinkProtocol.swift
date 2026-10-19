@@ -915,6 +915,33 @@ public struct LinkComputer: Codable, Equatable, Identifiable, Sendable {
         self.icon = icon
         self.botIDs = botIDs
     }
+
+    /// What deleting one does, as its confirmation says, naming the bots that lose it.
+    public static func deletionSummary(bots: [String]) -> String {
+        LinkDeletion.summary("It moves to the Trash on the Hub", bots: bots)
+    }
+}
+
+extension LinkBrowser {
+    /// What deleting one does, as its confirmation says, naming the bots that lose it.
+    public static func deletionSummary(bots: [String]) -> String {
+        LinkDeletion.summary("Its sign-ins and history are erased for good", bots: bots)
+    }
+}
+
+extension LinkConnection {
+    /// What deleting one does, as its confirmation says, naming the bots that lose it.
+    public static func deletionSummary(bots: [String]) -> String {
+        LinkDeletion.summary("Its sign-in is deleted", bots: bots)
+    }
+}
+
+private enum LinkDeletion {
+    static func summary(_ effect: String, bots: [String]) -> String {
+        let bots = bots.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !bots.isEmpty else { return "\(effect)." }
+        return "\(effect), and \(bots.formatted(.list(type: .and))) \(bots.count == 1 ? "loses" : "lose") it."
+    }
 }
 
 /// A kind of computer the Hub can make.

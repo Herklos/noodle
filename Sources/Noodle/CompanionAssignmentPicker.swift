@@ -128,7 +128,9 @@ struct CompanionAssignmentPicker<Prompt: View, LibraryButton: View, Notice: View
             Button("Delete \(noun.capitalized)", role: .destructive) { selectedIDs.remove(item.id); onDelete?(item) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("It moves to the Trash, and every bot using it loses it.")
+            // A computer can be put back from the Trash; a browser's website data cannot.
+            Text(noun == "browser" ? "Its sign-ins and history are erased for good, and every bot using it loses it."
+                 : "It moves to the Trash, and every bot using it loses it.")
         }
     }
 }

@@ -19,10 +19,13 @@ import XCTest
         @MainActor func mirror() -> HubMirror { HubMirror(pairing: device, repository: local, directory: folder) }
     }
 
-    private func fixture() async throws -> Fixture {
+    /// `browser` stands in for Noodle Browser on the Hub's Mac.
+    private func fixture(browser: HubBrowsersTests.FakeBrowser? = nil) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-mirror-\(UUID())")
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
-        let hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil)
+        let hub: Hub
+        if let browser { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil, browser: { try browser.call($0) }) }
+        else { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil) }
         try hub.repository.prepare()
         let link = HubLinkService(hubName: "Mac mini", directory: root.appendingPathComponent("Hub/Link"),
                                   access: hub.access, profiles: hub.harnessProfiles, bots: hub.bots,
@@ -631,6 +634,21 @@ import XCTest
         XCTAssertEqual(mirror.connectionIDs(forAgent: agent.id), [notes.id])
         let remote = try XCTUnwrap(try f.hub.repository.loadAgents().first)
         XCTAssertEqual(f.hub.connections.assigned(to: remote.id, for: f.ada), [notes.id])
+    }
+
+    /// A browser kept on the Hub is renamed, described and deleted from here, and the list here follows.
+    func testABrowserOnTheHubIsEditedAndDeletedFromHere() async throws {
+        let f = try await fixture(browser: HubBrowsersTests.FakeBrowser())
+        let mirror = f.mirror()
+        let work = try await mirror.createBrowser(LinkBrowserDraft(name: "Work"))
+        let changed = try await mirror.updateBrowser(work.id, with: LinkBrowserDraft(name: "Office", description: "Sign-ins"))
+        XCTAssertEqual(changed.description, "Sign-ins")
+        XCTAssertEqual(mirror.browsers.map(\.name), ["Office"])
+        XCTAssertEqual(f.hub.browsers.browsers(for: f.ada).map(\.name), ["Office"])
+        _ = try await mirror.updateBrowser(work.id, with: LinkBrowserDraft(name: "Office", description: ""))
+        XCTAssertNil(mirror.browsers.first?.description)
+        try await mirror.deleteBrowser(work.id)
+        XCTAssertEqual(mirror.browsers, [])
     }
 
     /// A connected mirror, one of its connections, and the pages it asked the browser to open.

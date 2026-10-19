@@ -59,14 +59,20 @@ import XCTest
             return XCTFail("no bot")
         }
         _ = try await f.device.request(.assignComputers(botID: bot.id, computerIDs: [computer.id]))
-        guard case .computer(let renamed) = try await f.device.request(.updateComputer(id: computer.id, LinkComputerDraft(name: "Bench"))) else {
+        guard case .computer(let renamed) = try await f.device.request(.updateComputer(id: computer.id, LinkComputerDraft(name: "Bench", description: "For builds"))) else {
             return XCTFail("not renamed")
         }
         XCTAssertEqual(renamed.name, "Bench")
+        XCTAssertEqual(renamed.description, "For builds")
+        guard case .computer(let cleared) = try await f.device.request(.updateComputer(id: computer.id, LinkComputerDraft(name: "Bench", description: ""))) else {
+            return XCTFail("not changed")
+        }
+        XCTAssertNil(cleared.description)
         guard case .computers(let listed) = try await f.device.request(.computers) else { return XCTFail("not listed") }
         XCTAssertEqual(listed.map(\.id), [computer.id])
         XCTAssertEqual(listed.first?.botIDs, [bot.id])
         XCTAssertEqual(listed.first?.name, "Bench")
+        XCTAssertNil(listed.first?.description)
 
         _ = try await f.device.request(.deleteComputer(id: computer.id))
         guard case .computers(let left) = try await f.device.request(.computers) else { return XCTFail("not listed") }

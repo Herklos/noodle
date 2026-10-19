@@ -489,6 +489,14 @@ import Observation
         return made
     }
 
+    public func updateBrowser(_ id: UUID, with draft: LinkBrowserDraft) async throws -> LinkBrowser {
+        guard case .browser(let changed) = try await pairing.request(.updateBrowser(id: id, draft)) else {
+            throw LinkError("The Hub sent an unexpected answer.")
+        }
+        try await syncBrowsers()
+        return changed
+    }
+
     public func deleteBrowser(_ id: UUID) async throws {
         _ = try await pairing.request(.deleteBrowser(id: id))
         try await syncBrowsers()

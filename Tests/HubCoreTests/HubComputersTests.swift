@@ -36,6 +36,8 @@ import XCTest
                 case .update:
                     let index = try XCTUnwrap(computers.firstIndex { $0.id == request.computerID })
                     computers[index].name = request.computer?.name ?? computers[index].name
+                    // As Noodle Computer does: no description keeps the one it has, and an empty one clears it.
+                    if let description = request.computer?.description { computers[index].description = description.isEmpty ? nil : description }
                     response.computers = [computers[index]]
                 case .delete:
                     computers.removeAll { $0.id == request.computerID }
@@ -201,6 +203,28 @@ import XCTest
             _ = try await f.hub.computers.update(made.id, with: ComputerDraft(name: "Mine"), for: f.bob)
             XCTFail("Bob changed Ada's computer")
         } catch {}
+    }
+
+    /// Its owner renames and describes a computer; no description keeps the one it has, and an empty one clears it.
+    func testOnlyItsOwnerRenamesOrDescribesAComputer() async throws {
+        let f = try fixture()
+        let made = try await f.hub.computers.create(ComputerDraft(template: "ubuntu", name: "Workbench"), for: f.ada)
+        let described = try await f.hub.computers.update(made.id, with: ComputerDraft(name: "Bench", description: "For builds"), for: f.ada)
+        XCTAssertEqual(f.hub.computers.link(described, for: f.ada).description, "For builds")
+        do {
+            _ = try await f.hub.computers.update(made.id, with: ComputerDraft(name: "Mine", description: ""), for: f.bob)
+            XCTFail("Bob changed Ada's computer")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "That computer is not yours or no longer exists.")
+        }
+        XCTAssertEqual(f.hub.computers.link(for: f.ada).map(\.name), ["Bench"])
+        XCTAssertEqual(f.hub.computers.link(for: f.ada).first?.description, "For builds")
+
+        _ = try await f.hub.computers.update(made.id, with: ComputerDraft(name: "Builds"), for: f.ada)
+        XCTAssertEqual(f.hub.computers.link(for: f.ada).first?.description, "For builds")
+        _ = try await f.hub.computers.update(made.id, with: ComputerDraft(name: "Builds", description: ""), for: f.ada)
+        XCTAssertEqual(f.hub.computers.link(for: f.ada).map(\.name), ["Builds"])
+        XCTAssertNil(f.hub.computers.link(for: f.ada).first?.description)
     }
 
     func testTakingAComputerAwayEndsTheBotsTerminals() async throws {

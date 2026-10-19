@@ -27,6 +27,17 @@ final class LinkProtocolTests: XCTestCase {
         XCTAssertEqual(LinkPerson.sharingSummary(bot: "  ", people: []), "Only you can talk to this bot.")
     }
 
+    /// Deleting a computer, browser or connection on the Hub says first what happens to it and which bots lose it.
+    func testDeletingSaysWhatHappensAndWhichBotsLoseIt() {
+        XCTAssertEqual(LinkComputer.deletionSummary(bots: []), "It moves to the Trash on the Hub.")
+        XCTAssertEqual(LinkComputer.deletionSummary(bots: ["Alfred"]), "It moves to the Trash on the Hub, and Alfred loses it.")
+        XCTAssertEqual(LinkBrowser.deletionSummary(bots: ["Alfred", "Chloe"]),
+                       "Its sign-ins and history are erased for good, and Alfred and Chloe lose it.")
+        XCTAssertEqual(LinkConnection.deletionSummary(bots: ["Alfred"]), "Its sign-in is deleted, and Alfred loses it.")
+        // A bot still being named is left out.
+        XCTAssertEqual(LinkBrowser.deletionSummary(bots: [" "]), "Its sign-ins and history are erased for good.")
+    }
+
     func testBackgroundNamesNeverLeaveTheirFolder() {
         let id = UUID().uuidString.lowercased()
         XCTAssertEqual(LinkBackground(media: "\(id).mov", mediaKind: "video").mediaFilename, "\(id).mov")
