@@ -65,4 +65,25 @@ final class BotWidgetsTests: XCTestCase {
         XCTAssertFalse(try shelf.save(bots))
         XCTAssertEqual(shelf.load(), bots)
     }
+
+    /// A widget extension has little memory; it reads every bot's name, so the pictures must not come with them.
+    func testShelfKeepsPicturesOutOfTheList() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-widgets-tests-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let shelf = BotWidgetShelf(rootURL: root)
+        var alfred = bot("Alfred"), blake = bot("Blake")
+        alfred.image = Data(repeating: 7, count: 50_000)
+        blake.image = Data(repeating: 9, count: 50_000)
+        XCTAssertTrue(try shelf.save([alfred, blake]))
+        XCTAssertLessThan(try Data(contentsOf: shelf.fileURL).count, 2_000)
+        XCTAssertEqual(shelf.load().map(\.image), [nil, nil])
+        XCTAssertEqual(shelf.withPictures(shelf.load()).map(\.image), [alfred.image, blake.image])
+        XCTAssertFalse(try shelf.save([alfred, blake]))
+
+        blake.image = Data(repeating: 1, count: 10)
+        XCTAssertTrue(try shelf.save([blake]), "A new picture is a change")
+        XCTAssertEqual(shelf.withPictures(shelf.load()).map(\.image), [blake.image])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Pictures").path).count, 1,
+                       "A removed bot's picture goes with it")
+    }
 }

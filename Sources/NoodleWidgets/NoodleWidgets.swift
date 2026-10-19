@@ -8,28 +8,70 @@ struct BotsEntry: TimelineEntry {
     let bots: [WidgetBot]
 }
 
+/// Which bots a widget shows, so its extension reads only their pictures.
+enum BotWidgetKind {
+    case launcher, status
+
+    /// How many bots a widget of this size holds.
+    func limit(_ family: WidgetFamily) -> Int {
+        switch (self, family) {
+        case (_, .systemSmall): 1
+        case (.launcher, .systemLarge): 16
+        case (.launcher, _): 8
+        case (.status, .systemLarge): 7
+        case (.status, _): 3
+        }
+    }
+
+    /// The launcher's bots in the sidebar's order; Bot Status's working first, then the most recently finished.
+    func shown(_ bots: [WidgetBot], family: WidgetFamily) -> [WidgetBot] {
+        Array((self == .status ? WidgetBots.recent(bots) : bots).prefix(limit(family)))
+    }
+}
+
 /// Noodle writes the bots and reloads the widgets when they change, so there is nothing to schedule.
 struct BotsProvider: TimelineProvider {
-    func placeholder(in context: Context) -> BotsEntry { BotsEntry(date: Date(), bots: Self.samples) }
+    let kind: BotWidgetKind
+
+    func placeholder(in context: Context) -> BotsEntry {
+        BotsEntry(date: Date(), bots: kind.shown(Self.samples, family: context.family))
+    }
 
     func getSnapshot(in context: Context, completion: @escaping (BotsEntry) -> Void) {
-        let bots = BotWidgetShelf.configured()?.load() ?? []
-        completion(BotsEntry(date: Date(), bots: bots.isEmpty && context.isPreview ? Self.samples : bots))
+        completion(BotsEntry(date: Date(), bots: Self.bots(for: kind, family: context.family, isPreview: context.isPreview,
+                                                           shelf: BotWidgetShelf.configured())))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<BotsEntry>) -> Void) {
-        completion(Timeline(entries: [BotsEntry(date: Date(), bots: BotWidgetShelf.configured()?.load() ?? [])], policy: .never))
+        let bots = Self.bots(for: kind, family: context.family, isPreview: false, shelf: BotWidgetShelf.configured())
+        completion(Timeline(entries: [BotsEntry(date: Date(), bots: bots)], policy: .never))
     }
 
-    /// For the widget gallery before Noodle has any bots.
+    /// The gallery shows the samples whatever Noodle holds, so every size has something to show.
+    static func bots(for kind: BotWidgetKind, family: WidgetFamily, isPreview: Bool, shelf: BotWidgetShelf?) -> [WidgetBot] {
+        if isPreview { return kind.shown(samples, family: family) }
+        guard let shelf else { return [] }
+        return shelf.withPictures(kind.shown(shelf.load(), family: family))
+    }
+
+    /// For the widget gallery.
     static let samples: [WidgetBot] = [
         WidgetBot(id: UUID(), conversationID: UUID(), name: "Alfred", symbol: "sparkles", colour: 0,
                   status: "Planning the week", isWorking: true),
         WidgetBot(id: UUID(), conversationID: UUID(), name: "Cleo", symbol: "paintbrush.fill", colour: 3,
                   status: "Sketching the poster", finishedAt: Date().addingTimeInterval(-300)),
         WidgetBot(id: UUID(), conversationID: UUID(), name: "Max", symbol: "hammer.fill", colour: 5,
-                  finishedAt: Date().addingTimeInterval(-3_600)),
-        WidgetBot(id: UUID(), conversationID: UUID(), name: "Nova", symbol: "globe", colour: 1),
+                  status: "Fixed the build", finishedAt: Date().addingTimeInterval(-3_600)),
+        WidgetBot(id: UUID(), conversationID: UUID(), name: "Nova", symbol: "globe", colour: 1,
+                  status: "Reading the news", isWorking: true),
+        WidgetBot(id: UUID(), conversationID: UUID(), name: "Juno", symbol: "book.fill", colour: 2,
+                  status: "Summarised the report", finishedAt: Date().addingTimeInterval(-7_200)),
+        WidgetBot(id: UUID(), conversationID: UUID(), name: "Otto", symbol: "cart.fill", colour: 4,
+                  status: "Ordered the groceries", finishedAt: Date().addingTimeInterval(-10_800)),
+        WidgetBot(id: UUID(), conversationID: UUID(), name: "Iris", symbol: "calendar", colour: 3,
+                  status: "Booked the dentist", finishedAt: Date().addingTimeInterval(-86_400)),
+        WidgetBot(id: UUID(), conversationID: UUID(), name: "Felix", symbol: "music.note", colour: 5,
+                  status: "Made a playlist", finishedAt: Date().addingTimeInterval(-172_800)),
     ]
 }
 
@@ -83,7 +125,7 @@ struct BotWidgetLink<Content: View>: View {
 
 struct BotLauncherWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "BotLauncher", provider: BotsProvider()) { entry in
+        StaticConfiguration(kind: "BotLauncher", provider: BotsProvider(kind: .launcher)) { entry in
             BotLauncherView(bots: entry.bots).containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Bots")
@@ -116,7 +158,7 @@ struct BotLauncherContents: View {
             .widgetURL(WidgetBots.link(to: bot, scheme: scheme))
         } else {
             // Rows of four, each bot its own link.
-            let shown = Array(bots.prefix(family == .systemLarge ? 16 : 8))
+            let shown = Array(bots.prefix(BotWidgetKind.launcher.limit(family)))
             VStack(spacing: 10) {
                 ForEach(Array(stride(from: 0, to: shown.count, by: 4)), id: \.self) { start in
                     HStack(spacing: 8) {
@@ -147,8 +189,8 @@ struct BotLauncherContents: View {
 
 struct BotStatusWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "BotStatus", provider: BotsProvider()) { entry in
-            BotStatusView(bots: WidgetBots.recent(entry.bots)).containerBackground(.fill.tertiary, for: .widget)
+        StaticConfiguration(kind: "BotStatus", provider: BotsProvider(kind: .status)) { entry in
+            BotStatusView(bots: entry.bots).containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Bot Status")
         .description("See which bots are working and which have finished.")
@@ -184,7 +226,7 @@ struct BotStatusContents: View {
             .widgetURL(WidgetBots.link(to: bot, scheme: scheme))
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(bots.prefix(family == .systemLarge ? 7 : 3)) { bot in
+                ForEach(bots.prefix(BotWidgetKind.status.limit(family))) { bot in
                     BotWidgetLink(destination: WidgetBots.link(to: bot, scheme: scheme),
                                   name: [bot.name, bot.status, bot.isWorking ? "Working" : nil].compactMap { $0 }.joined(separator: ", ")) {
                         BotStatusRow(bot: bot).contentShape(Rectangle())

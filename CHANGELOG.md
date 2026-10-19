@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- The widget gallery shows sample bots in every size of both desktop widgets, and placed widgets load only the bots they show, so they should no longer come up empty.
+
 ## [0.69.0] - 2026-10-18
 
 ### Added
