@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.69.1] - 2026-10-19
+
 ### Fixed
 
 - Deleting a browser in Edit Bot no longer says it moves to the Trash. It says its sign-ins and history are erased for good.

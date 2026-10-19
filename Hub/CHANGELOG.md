@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-10-19
+
+### Fixed
+
+- Bots on remote Apple models whose saved catalog default is missing or no longer offered send no reasoning_effort instead of an empty one the provider rejects.
+
 ## [0.36.0] - 2026-10-18
 
 ### Added
