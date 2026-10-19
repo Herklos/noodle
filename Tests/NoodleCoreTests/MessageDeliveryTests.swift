@@ -34,6 +34,21 @@ final class MessageDeliveryTests: XCTestCase {
         XCTAssertFalse(pending.isImmediate)
     }
 
+    func testStopRequestBelongsToItsOwnWake() {
+        var pending = PendingAgentNotification()
+        let first = pending.enqueue(immediately: true)
+        XCTAssertFalse(pending.requestsStop, "An urgent message is not a stop request")
+        pending.requestStop(UUID())
+        XCTAssertFalse(pending.requestsStop)
+        pending.requestStop(first)
+        XCTAssertTrue(pending.requestsStop)
+        XCTAssertTrue(pending.isImmediate)
+        pending.take()
+        pending.enqueue()
+        pending.requestStop(first)
+        XCTAssertFalse(pending.requestsStop, "An old stop request cannot end a newer turn")
+    }
+
     func testContextContainsUnreadVoiceAndHistoryWithoutConsumingInbox() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

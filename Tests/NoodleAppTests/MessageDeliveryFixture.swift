@@ -68,6 +68,7 @@ import XCTest
     var phaseAfterNotify: AgentRuntimePhase?
     private(set) var notifications: [(id: UUID, immediate: Bool)] = []
     private(set) var promotions: [UUID] = []
+    private(set) var stops: [UUID] = []
     var pending = PendingAgentNotification()
 
     init(agent: AgentRecord = AgentRecord(displayName: "Offline routing fixture"), phase: AgentRuntimePhase = .working) {
@@ -83,6 +84,10 @@ import XCTest
     func promoteNotification(_ id: UUID) {
         promotions.append(id)
         pending.promote(id)
+    }
+    func requestStop(_ id: UUID) {
+        stops.append(id)
+        pending.requestStop(id)
     }
     func start() { XCTFail("Routing must never start a harness") }
     func stop(completion: @escaping (Bool) -> Void) { XCTFail("Routing must never stop a harness") }

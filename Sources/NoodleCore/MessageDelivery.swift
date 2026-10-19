@@ -22,6 +22,8 @@ public enum MessageDeliveryMode: String, CaseIterable, Identifiable, Sendable {
 public struct PendingAgentNotification {
     public private(set) var id: UUID?
     public private(set) var isImmediate = false
+    /// The person asked the bot to stop. A harness that cannot add a message to a running turn ends the turn only for this.
+    public private(set) var requestsStop = false
     public var isPending: Bool { id != nil }
     public init() {}
 
@@ -34,14 +36,17 @@ public struct PendingAgentNotification {
     public mutating func promote(_ id: UUID) {
         if self.id == id { isImmediate = true }
     }
+    public mutating func requestStop(_ id: UUID) {
+        if self.id == id { isImmediate = true; requestsStop = true }
+    }
     @discardableResult public mutating func take() -> UUID? {
-        defer { id = nil; isImmediate = false }
+        defer { id = nil; isImmediate = false; requestsStop = false }
         return id
     }
     public mutating func restore(_ id: UUID) {
         if self.id == nil { self.id = id }
     }
-    public mutating func deferUntilReady() { isImmediate = false }
+    public mutating func deferUntilReady() { isImmediate = false; requestsStop = false }
 }
 
 /// Bounded conversation text, with voice transcripts but no private backstory,

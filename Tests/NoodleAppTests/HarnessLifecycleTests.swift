@@ -44,7 +44,7 @@ import XCTest
             if provider == .codex {
                 try wire.reply("turn/start", result: ["turn": ["id": "turn-one"]]); await f.drain()
             }
-            p.notify(immediately: true)
+            p.requestStop(p.notify(immediately: true))
             if provider == .claudeCode {
                 // Claude Code is interrupted only when its turn does not read the message.
                 try await f.clock.next(.seconds(30)).resolve(.success(()))

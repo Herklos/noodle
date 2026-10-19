@@ -45,7 +45,9 @@ public final class MessageDeliveryRouter {
         let mode = MessageDeliveryMode.load(from: defaults)
         let wasWorking = process.snapshot.phase == .working
         let notificationID = process.notify(immediately: mode == .immediate)
-        guard mode == .automatic, wasWorking else { return nil }
+        // Send immediately still reads the message for a stop request: a harness that cannot take a message
+        // mid-turn ends its turn only for that.
+        guard mode != .queue, wasWorking else { return nil }
         let jobID = UUID()
         let started = ContinuousClock.now
         let deadline = now().advanced(by: timeout)
@@ -60,10 +62,10 @@ public final class MessageDeliveryRouter {
                       !Task.isCancelled, self.now() < deadline else { return }
                 if context.requestsStop {
                     Self.logger.notice("delivery-stop-request bot=\(agentID.uuidString, privacy: .public)")
-                    process?.promoteNotification(notificationID)
+                    process?.requestStop(notificationID)
                     return
                 }
-                guard self.classifier.isAvailable else { return }
+                guard mode == .automatic, self.classifier.isAvailable else { return }
                 let immediate = try await self.classifier.shouldSendImmediately(context)
                 guard !Task.isCancelled, self.now() < deadline else {
                     // A newer message supersedes silently; only a missed deadline is notable.
