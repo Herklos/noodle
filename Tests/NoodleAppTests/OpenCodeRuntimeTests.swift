@@ -81,7 +81,7 @@ import XCTest
         XCTAssertEqual(outcome("allowed")?["optionId"], "once")
         XCTAssertEqual(outcome("foreign")?["outcome"], "cancelled")
         XCTAssertEqual((wire.writes.last { $0["id"] as? String == "fs" }?["error"] as? [String: Any])?["code"] as? Int, -32601)
-        runtime.notify(immediately: true); permission("cancelled")
+        runtime.requestStop(runtime.notify(immediately: true)); permission("cancelled")
         try await f.wait { wire.writes.contains { $0["id"] as? String == "cancelled" && $0["result"] != nil } }
         XCTAssertEqual(outcome("cancelled")?["outcome"], "cancelled")
         XCTAssertEqual(wire.count("session/cancel"), 1)

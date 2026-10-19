@@ -13,6 +13,9 @@ public protocol AgentRuntimeProcess: AnyObject {
     func stop(completion: @escaping (Bool) -> Void)
     @discardableResult func notify(immediately: Bool) -> UUID
     func promoteNotification(_ id: UUID)
+    /// The pending message asks the bot to stop. Harnesses that can add it to the running turn take it like any
+    /// urgent message, and the bot decides what to stop.
+    func requestStop(_ id: UUID)
     func heartbeat()
     /// Starts a turn for a wake the bot scheduled, when it can take one like a heartbeat.
     func wake()
@@ -26,6 +29,7 @@ public protocol AgentRuntimeProcess: AnyObject {
 
 extension AgentRuntimeProcess {
     func notify() { _ = notify(immediately: false) }
+    public func requestStop(_ id: UUID) { promoteNotification(id) }
     public func startVoiceCall(_ request: VoiceCallRequest, events: @escaping @MainActor (VoiceCallEvent) -> Void) throws {
         throw VoiceCallUnavailable()
     }

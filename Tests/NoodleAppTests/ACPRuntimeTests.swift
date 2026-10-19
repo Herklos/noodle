@@ -91,10 +91,27 @@ import XCTest
         XCTAssertFalse(p.snapshot.detail.contains("private account"))
     }
 
-    func testPromotedWakeCancelsOnceAndWaitsForPromptCompletion() async throws {
+    /// Cancelling would end the turn and any background work or sub-agents it runs, and ACP cannot add a message
+    /// to a running prompt, so an urgent message waits for the turn to end.
+    func testUrgentWakeWaitsForTheTurnInsteadOfCancellingIt() async throws {
+        for provider in [HarnessProvider.apple, .fx, .grokBuild, .openCode] {
+            let f = try fixture(), wire = HarnessWire(), p = f.acp(wire, provider: provider)
+            p.start(); try await f.openACP(wire, provider: provider); p.notify()
+            let id = p.notify(immediately: true); p.promoteNotification(id)
+            await f.drain()
+            XCTAssertEqual(wire.count("session/cancel"), 0, "\(provider)")
+            XCTAssertEqual(wire.count("session/prompt"), 1, "\(provider)")
+            try wire.reply("session/prompt", result: ["stopReason": "end_turn"])
+            try await f.wait { wire.count("session/prompt") == 2 }
+            try wire.reply("session/prompt", result: ["stopReason": "end_turn"])
+            try await f.wait { p.canReceiveHeartbeat }
+        }
+    }
+
+    func testStopRequestCancelsOnceAndWaitsForPromptCompletion() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.acp(wire)
         p.start(); try await f.openACP(wire); p.notify()
-        let id = p.notify(); p.promoteNotification(id); p.promoteNotification(id)
+        let id = p.notify(); p.requestStop(id); p.requestStop(id)
         XCTAssertEqual(wire.count("session/cancel"), 1)
         XCTAssertEqual(wire.count("session/prompt"), 1)
         try wire.reply("session/prompt", result: ["stopReason": "cancelled"])
@@ -118,7 +135,7 @@ import XCTest
         }
         XCTAssertEqual(try outcome("foreign")["outcome"], "cancelled")
         XCTAssertEqual(try outcome("allowed")["optionId"], "once")
-        p.notify(immediately: true)
+        p.requestStop(p.notify(immediately: true))
         wire.emit(["id": "cancelled", "method": "session/request_permission", "params": ["sessionId": "fixture-session",
             "options": [["kind": "allow_once", "optionId": "once"]]]])
         wire.emit(["id": "unsupported", "method": "fs/read_text_file", "params": [:]])

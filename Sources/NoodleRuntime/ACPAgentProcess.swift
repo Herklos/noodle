@@ -184,6 +184,11 @@ public final class ACPAgentProcess: AgentRuntimeProcess {
         notifications.promote(id)
         sendPending()
     }
+
+    public func requestStop(_ id: UUID) {
+        notifications.requestStop(id)
+        sendPending()
+    }
     public func heartbeat() { if canReceiveHeartbeat { startTurn(.heartbeat) } }
     public func wake() { if canReceiveHeartbeat { startTurn(.wake) } }
     public func organize() { if canReceiveHeartbeat { startTurn(.organize) } }
@@ -198,7 +203,10 @@ public final class ACPAgentProcess: AgentRuntimeProcess {
     private func sendPending() {
         guard notificationPending, running, let sessionID else { return }
         if turnIsActive {
-            guard notifications.isImmediate, !interruptRequested, snapshot.phase == .working else { return }
+            // ACP cannot add a message to a running prompt, and session/cancel ends the turn with any background
+            // work or sub-agents the harness ties to it. An urgent message waits for the turn to end; only a
+            // request to stop cancels it, and the bot reads that request in the turn after.
+            guard notifications.requestsStop, !interruptRequested, snapshot.phase == .working else { return }
             interruptRequested = true
             send(["jsonrpc": "2.0", "method": "session/cancel", "params": ["sessionId": sessionID]])
             trace.record(.turnInterruptRequested)

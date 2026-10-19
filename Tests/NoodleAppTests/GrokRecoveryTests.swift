@@ -71,7 +71,7 @@ import XCTest
             XCTAssertTrue(first.contains("--list-messages"))
             XCTAssertTrue(p.hasInterruptedWork)
 
-            p.notify(immediately: true)
+            p.requestStop(p.notify(immediately: true))
             try await f.wait { wire.count("session/cancel") == 1 }
             try wire.reply("session/prompt", result: ["stopReason": "cancelled"])
             try await f.wait { wire.count("session/prompt") == 2 }

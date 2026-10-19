@@ -38,15 +38,29 @@ import XCTest
         XCTAssertTrue(f.process.pending.isImmediate)
     }
 
-    func testExplicitModesDeliverWithoutLoadingContextOrClassifying() {
-        for mode in [MessageDeliveryMode.queue, .immediate] {
+    func testQueueDeliversWithoutLoadingContextOrClassifying() {
+        let f = fixture()
+        f.mode(.queue)
+        let task = f.router.notify(f.process) { XCTFail("Queue must bypass context loading"); return nil }
+        XCTAssertNil(task)
+        XCTAssertEqual(f.process.notifications.count, 1)
+        XCTAssertFalse(f.process.pending.isImmediate)
+        XCTAssertTrue(f.classifier.contexts.isEmpty)
+    }
+
+    /// A harness that cannot take a message mid-turn ends its turn only for a stop request, so Send immediately
+    /// still looks for one, without the model.
+    func testSendImmediatelyNeverClassifiesButStillSpotsAStopRequest() async {
+        for (message, stops) in [("Use the blue theme instead", false), ("Stop, wrong file", true)] {
             let f = fixture()
-            f.mode(mode)
-            let task = f.router.notify(f.process) { XCTFail("Explicit delivery must bypass context loading"); return nil }
-            XCTAssertNil(task)
-            XCTAssertEqual(f.process.notifications.count, 1)
-            XCTAssertEqual(f.process.pending.isImmediate, mode == .immediate)
+            f.mode(.immediate)
+            await finish(f.router.notify(f.process) { MessageDeliveryContext(unreadMessages: [message], recentMessages: []) })
             XCTAssertTrue(f.classifier.contexts.isEmpty)
+            XCTAssertEqual(f.process.notifications.count, 1)
+            XCTAssertTrue(f.process.pending.isImmediate)
+            XCTAssertTrue(f.process.promotions.isEmpty)
+            XCTAssertEqual(f.process.stops, stops ? [f.process.pending.id!] : [], message)
+            XCTAssertEqual(f.process.pending.requestsStop, stops, message)
         }
     }
 
@@ -73,15 +87,16 @@ import XCTest
         XCTAssertFalse(f.process.pending.isImmediate)
     }
 
-    func testStopRequestPromotesWithoutTheModel() async {
+    func testStopRequestIsPassedOnWithoutTheModel() async {
         for available in [true, false] {
             let f = fixture()
             f.classifier.isAvailable = available
             let context = MessageDeliveryContext(unreadMessages: ["Thanks", "Wait, wrong file"], recentMessages: [])
             await finish(f.router.notify(f.process) { context })
             XCTAssertTrue(f.classifier.contexts.isEmpty, "A stop request must not wait for the model")
-            XCTAssertEqual(f.process.promotions, [f.process.pending.id!])
+            XCTAssertEqual(f.process.stops, [f.process.pending.id!])
             XCTAssertTrue(f.process.pending.isImmediate)
+            XCTAssertTrue(f.process.pending.requestsStop)
         }
     }
 
