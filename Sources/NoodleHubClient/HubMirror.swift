@@ -489,6 +489,15 @@ import Observation
         return made
     }
 
+    /// Lists this Mac's user's computers on the Hub again. Throws for a Hub that keeps none or cannot list them now.
+    public func refreshComputers() async throws { try await syncComputers() }
+
+    /// Lists this Mac's user's browsers on the Hub again. Throws for a Hub that keeps none or cannot list them now.
+    public func refreshBrowsers() async throws { try await syncBrowsers() }
+
+    /// The local stand-in of one of this Mac's user's bots on the Hub.
+    public func localAgentID(remote id: UUID) -> UUID? { entries.first { $0.remote == id }?.agent }
+
     public func updateBrowser(_ id: UUID, with draft: LinkBrowserDraft) async throws -> LinkBrowser {
         guard case .browser(let changed) = try await pairing.request(.updateBrowser(id: id, draft)) else {
             throw LinkError("The Hub sent an unexpected answer.")

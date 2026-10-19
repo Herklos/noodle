@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Hub has Computers & Browsers… for each Noodle Hub you joined. It lists all your computers and browsers there, whichever bots have them. Edit… changes one's name and description, and Delete removes it after saying which bots lose it.
+
 ## [0.69.1] - 2026-10-19
 
 ### Fixed
