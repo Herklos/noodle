@@ -132,6 +132,7 @@ private struct HubRow: View {
     @State private var confirmingLeave = false
     @State private var showingArchived = false
     @State private var showingUsers = false
+    @State private var showingCompanions = false
     @State private var editingPicture = false
     @State private var pictureProblem: String?
 
@@ -172,6 +173,10 @@ private struct HubRow: View {
                         Button("Archived (\(archived.count))") { showingArchived = true }
                             .buttonStyle(.link)
                     }
+                    if mirror != nil {
+                        Button("Computers & Browsers…") { showingCompanions = true }
+                            .buttonStyle(.link)
+                    }
                     Button("Leave") { confirmingLeave = true }
                         .buttonStyle(.link)
                 }
@@ -183,6 +188,9 @@ private struct HubRow: View {
         }
         .sheet(isPresented: $showingUsers) {
             HubUsersSheet(hubName: pairing.hub?.name ?? "Noodle Hub", pairing: pairing, mirror: mirror)
+        }
+        .sheet(isPresented: $showingCompanions) {
+            if let mirror { HubCompanionsSheet(hubName: pairing.hub?.name ?? "Noodle Hub", mirror: mirror).environment(store) }
         }
         .sheet(isPresented: $editingPicture) {
             HubPictureEditor(pairing: pairing) { pictureProblem = $0 }
@@ -310,6 +318,215 @@ private struct HubArchivedSheet: View {
         }
         .frame(width: 420, height: 360)
         .noodleSheetSizing()
+    }
+}
+
+/// This Mac's user's computers and browsers on a Hub, whichever bots have them, as in Noodle Mobile:
+/// each renamed and described, or deleted.
+private struct HubCompanionsSheet: View {
+    @Environment(NoodleStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let hubName: String
+    let mirror: HubMirror
+    @State private var kind = Kind.computers
+    /// The lists the Hub gave: one that keeps no computers or browsers, or cannot list them now, shows none.
+    @State private var listed: [Kind] = []
+    @State private var loading = true
+    @State private var problem: String?
+    @State private var editing: Item?
+    @State private var deleting: Item?
+
+    enum Kind { case computers, browsers }
+
+    struct Item: Identifiable {
+        let id: UUID
+        let kind: Kind
+        let name: String
+        let description: String?
+        /// Under its name: its description, or else what it is doing.
+        let detail: String?
+        let avatar: CompanionAssignmentItem
+        let botIDs: [UUID]
+    }
+
+    private var items: [Item] {
+        switch kind {
+        case .computers:
+            mirror.computers.map {
+                Item(id: $0.id, kind: .computers, name: $0.name, description: $0.description, detail: $0.description ?? $0.state,
+                     avatar: CompanionAssignmentItem(id: $0.id, name: $0.name, state: $0.state, symbol: $0.symbol, colour: $0.colour, icon: $0.icon),
+                     botIDs: $0.botIDs)
+            }
+        case .browsers:
+            mirror.browsers.map {
+                Item(id: $0.id, kind: .browsers, name: $0.name, description: $0.description,
+                     detail: $0.description ?? ($0.paused ? "Paused" : nil),
+                     avatar: CompanionAssignmentItem(id: $0.id, name: $0.name, state: "", symbol: $0.symbol, colour: $0.colour, icon: $0.icon),
+                     botIDs: $0.botIDs)
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Computers & Browsers on \(hubName)").font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+            if listed.count > 1 {
+                Picker("Show", selection: $kind) {
+                    Text("Computers").tag(Kind.computers)
+                    Text("Browsers").tag(Kind.browsers)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .padding(.bottom, 12)
+            }
+            Divider()
+            Form {
+                if loading {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else if listed.contains(kind), items.isEmpty {
+                    Text(kind == .computers ? "No computers on this Hub" : "No browsers on this Hub").foregroundStyle(.secondary)
+                }
+                if listed.contains(kind) {
+                    ForEach(items) { row($0) }
+                }
+                if let problem {
+                    Text(problem).foregroundStyle(.orange).textSelection(.enabled)
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(width: 460, height: 420)
+        .noodleSheetSizing()
+        .task { await load() }
+        .sheet(item: $editing) { item in
+            HubCompanionEditor(title: item.kind == .computers ? "Edit Computer" : "Edit Browser", name: item.name,
+                               description: item.description ?? "") { name, description in
+                switch item.kind {
+                case .computers: _ = try await mirror.updateComputer(item.id, with: LinkComputerDraft(name: name, description: description))
+                case .browsers: _ = try await mirror.updateBrowser(item.id, with: LinkBrowserDraft(name: name, description: description))
+                }
+            }
+        }
+        .alert("Delete “\(deleting?.name ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+               presenting: deleting) { item in
+            Button("Delete", role: .destructive) { delete(item) }
+            Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
+        } message: { item in
+            Text(deletionSummary(item))
+        }
+    }
+
+    private func row(_ item: Item) -> some View {
+        HStack(spacing: 10) {
+            CompanionAssignmentAvatar(item: item.avatar, size: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name).lineLimit(1)
+                if let detail = item.detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            Menu {
+                Button("Edit…") { editing = item }
+                Divider()
+                Button("Delete", role: .destructive) { deleting = item }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("\(item.name) Actions")
+        }
+    }
+
+    /// Lists both again; a Hub that keeps neither says why.
+    private func load() async {
+        defer { loading = false }
+        var listed: [Kind] = [], failure: Error?
+        do { try await mirror.refreshComputers(); listed.append(.computers) } catch { failure = error }
+        do { try await mirror.refreshBrowsers(); listed.append(.browsers) } catch { failure = failure ?? error }
+        self.listed = listed
+        if let first = listed.first, !listed.contains(kind) { kind = first }
+        problem = listed.isEmpty ? failure?.localizedDescription : nil
+    }
+
+    private func deletionSummary(_ item: Item) -> String {
+        let bots = item.botIDs.compactMap { id in
+            mirror.localAgentID(remote: id).flatMap { local in store.agents.first { $0.id == local }?.displayName }
+        }
+        return item.kind == .computers ? LinkComputer.deletionSummary(bots: bots) : LinkBrowser.deletionSummary(bots: bots)
+    }
+
+    private func delete(_ item: Item) {
+        problem = nil
+        Task {
+            do {
+                switch item.kind {
+                case .computers: try await mirror.deleteComputer(item.id)
+                case .browsers: try await mirror.deleteBrowser(item.id)
+                }
+            } catch { problem = error.localizedDescription }
+        }
+    }
+}
+
+/// A computer's or browser's name and description, saved on the Hub; an empty description clears it.
+private struct HubCompanionEditor: View {
+    let title: String
+    let save: (_ name: String, _ description: String) async throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var description: String
+    @State private var saving = false
+    @State private var failure: String?
+
+    init(title: String, name: String, description: String, save: @escaping (_ name: String, _ description: String) async throws -> Void) {
+        self.title = title
+        self.save = save
+        _name = State(initialValue: name)
+        _description = State(initialValue: description)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
+                Spacer()
+                Text(title).font(.headline)
+                Spacer()
+                Button("Save", action: submit).keyboardShortcut(.defaultAction)
+                    .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.padding(16)
+            Divider()
+            Form {
+                TextField("Name", text: $name)
+                TextField("Description", text: $description, prompt: Text("Optional"), axis: .vertical).lineLimit(2...4)
+                if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
+            }.formStyle(.grouped).disabled(saving)
+        }
+        .frame(width: 420)
+        .noodleSheetSizing()
+    }
+
+    private func submit() {
+        saving = true
+        failure = nil
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { @MainActor in
+            defer { saving = false }
+            do {
+                try await save(name, description)
+                dismiss()
+            } catch { failure = error.localizedDescription }
+        }
     }
 }
 

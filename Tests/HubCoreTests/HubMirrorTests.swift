@@ -651,6 +651,22 @@ import XCTest
         XCTAssertEqual(mirror.browsers, [])
     }
 
+    /// Settings lists the Hub's browsers again when it opens, with the bots here that have each.
+    func testTheHubsBrowsersListAgainWithTheBotsHereThatHaveThem() async throws {
+        let f = try await fixture(browser: HubBrowsersTests.FakeBrowser())
+        let mirror = f.mirror()
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code"))
+        // Made on another device.
+        let made = try await f.hub.browsers.create(BrowserDraft(name: "Work"), for: f.ada)
+        XCTAssertEqual(mirror.browsers, [])
+        try await mirror.refreshBrowsers()
+        XCTAssertEqual(mirror.browsers.map(\.id), [made.id])
+        try await mirror.assignBrowsers([made.id], toAgent: agent.id)
+        let bot = try XCTUnwrap(mirror.browsers.first?.botIDs.first)
+        XCTAssertEqual(mirror.localAgentID(remote: bot), agent.id)
+        XCTAssertNil(mirror.localAgentID(remote: UUID()))
+    }
+
     /// A connected mirror, one of its connections, and the pages it asked the browser to open.
     private func signingIn(page: URL) async throws -> (Fixture, HubMirror, LinkConnection, opened: () -> [URL]) {
         let f = try await fixture()
