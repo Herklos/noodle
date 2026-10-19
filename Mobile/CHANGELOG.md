@@ -6,12 +6,23 @@
 
 - Tap …, choose Hubs and tap your Hub: it lists all your computers and browsers on it, whichever bots have them. Tap one to change its name and description, or swipe to delete it.
 
+### Changed
+
+- Tap a voice message to read its transcript, with its waveform to play it and tap or drag through it. The sentence being played is marked, roughly, since it follows the time rather than the words, and tapping a sentence plays from there. Copy copies the transcript. The play button still plays and pauses, and Show Transcript, when you touch and hold the message, opens the same.
+
 ### Fixed
 
 - Deleting a tool, computer or browser in a bot's settings asks first. It says which of your bots lose it, and that a computer moves to the Trash on the Hub or that a browser's sign-ins and history are erased for good.
 
 ### What to Test
 
+- Tap a voice message away from its play button: check its transcript opens with the waveform and the time. Tap Copy and paste somewhere: check the whole transcript arrives.
+- Play it there, and tap and drag along the waveform: check playback moves, the marked sentence follows roughly, and the message in the conversation shows the same progress once you close the transcript.
+- Tap a sentence: check playback jumps to about where it is said. In a long transcript, check the marked sentence stays in view as it plays.
+- Touch and hold a voice message and choose Show Transcript: check the same transcript opens.
+- Open a voice message sent without a transcript: check it says "No transcript was made for this voice message." and plays.
+- Open a voice message the moment it arrives, before its audio has downloaded: check the transcript shows straight away and play works once the audio is in.
+- With VoiceOver, check play is its own button and the message offers Show Transcript as an action.
 - In a bot's settings, open Tools, Computers and Browsers and swipe one to delete it: check a confirmation asks first and names the bots that use it. Check it says a computer moves to the Trash on the Hub and a browser's sign-ins and history are erased. Tap outside it and check nothing is deleted; delete one and check it goes.
 - Tap …, choose Hubs and tap your Hub: check Computers and Browsers show with how many you have. Open each and check every one is listed with its description, or a computer's state.
 - Tap one, change its name and description and tap Save: check the list shows them, and so do the bot's Computers or Browsers and Noodle on the Mac. Clear a description, save, and check it is gone.

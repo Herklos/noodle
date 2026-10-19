@@ -24,9 +24,13 @@ Switching chats stops recording and keeps the draft with its chat, even after yo
 relaunch Noodle. If transcription fails, choose **Retry Transcription** or
 **Send Audio Only**.
 
-Sent voice messages show an audio player. Right-click and choose
-**Show Transcript** to read or copy the text. Bots receive the audio and the
-transcript when there is one.
+Sent voice messages show an audio player. Click the message anywhere but its
+play button, or right-click and choose **Show Transcript**, to read the
+transcript. There you can play the message, click or drag along the waveform to
+move through it, and click a sentence to play from there. The sentence being
+played is marked, roughly, since the transcript has no timings of its own. Click
+**Copy** to copy the whole transcript, or select part of it. Bots receive the
+audio and the transcript when there is one.
 
 ## Voice calls
 
