@@ -41,8 +41,9 @@ read history and bookmarks while paused. **Resume Agents** lets them continue.
 
 ### Sound and media
 
-Browsers start muted, and muting also pauses video. New tabs and pop-ups follow
-the same setting. Use the speaker button to turn sound and playback back on.
+Browsers start muted. Muting only silences sound; video and audio keep playing.
+New tabs and pop-ups follow the same setting. Use the speaker button to turn
+sound back on.
 Websites cannot use your camera or microphone.
 
 ### History, bookmarks and downloads

@@ -177,8 +177,8 @@ enum BrowserToolGuidance {
         A site can expire a login or require MFA again. Noodle Browser is WebKit,
         not Safari; Safari profiles, extensions and passwords are not imported.
         Hidden pages may throttle animation or implement their own visibility rules.
-        Browsers are muted by default: native media suspension pauses video as well
-        as sound. Only the user changes this setting or resumes paused agent control.
+        Browsers are muted by default: muting silences sound, while video and audio
+        keep playing. Only the user changes this setting or resumes paused agent control.
         No command opens or activates the browser's window.
         Uploads/downloads use regular files up to 8 GiB inside your workspace.
         Parent folders must exist. Symlinks and overwrites are refused. Downloads

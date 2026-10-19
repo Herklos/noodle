@@ -246,7 +246,7 @@ private struct BrowserDetailView: View {
                 Button {
                     Task { do { try await presentation.runtime.setMuted(!profile.muted, browserID: profile.id) } catch { presentation.runtime.failure = error.localizedDescription } }
                 } label: { Label(profile.muted ? "Unmute" : "Mute", systemImage: profile.muted ? "speaker.slash" : "speaker.wave.2") }
-                    .help(profile.muted ? "Unmute and resume media" : "Mute and pause media")
+                    .help(profile.muted ? "Unmute" : "Mute")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {

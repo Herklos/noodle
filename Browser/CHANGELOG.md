@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Muting a browser only silences it. Video keeps playing, so sites that work with video in the page, such as TikTok making a cover for an upload, no longer stall in a muted browser.
+
 ## [0.20.0] - 2026-10-18
 
 ### Changed
