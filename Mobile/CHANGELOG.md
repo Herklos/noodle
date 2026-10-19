@@ -5,6 +5,8 @@
 ### Added
 
 - Tap …, choose Hubs and tap your Hub: it lists all your computers and browsers on it, whichever bots have them. Tap one to change its name and description, or swipe to delete it.
+- Touch and hold a text file in a conversation to Copy its text or Copy File, which pastes into other apps as the file.
+- Paste a copied file into the message field to attach it, instead of its text. Long pasted text, over 12 lines or 1,200 characters, is attached as a text file, as on the Mac.
 
 ### Changed
 
@@ -28,6 +30,10 @@
 - Tap one, change its name and description and tap Save: check the list shows them, and so do the bot's Computers or Browsers and Noodle on the Mac. Clear a description, save, and check it is gone.
 - Swipe one to delete it: check the confirmation names the bots that use it, and that after Delete it is gone from the list and from those bots.
 - With a Hub that cannot list computers or browsers, check those rows do not show.
+- Touch and hold a text file in a conversation: check Copy and Copy File show, and a picture or PDF shows neither. Choose Copy and paste into Notes: check its text arrives.
+- Choose Copy File and paste into the message field: check the file waits above the field with the same name, and sends. Paste it into Files or Mail: check it arrives as a file.
+- Copy a file in the Files app and paste it into the message field: check it is attached, not its text.
+- Paste text of more than 12 lines into the message field: check it is attached as Pasted Text.txt and the field stays as it was. Paste a short text: check it goes into the field as before. Copy a picture and paste it: check it is attached as before.
 
 ## [0.39.0] - 2026-10-18
 
