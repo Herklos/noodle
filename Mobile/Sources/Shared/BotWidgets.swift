@@ -9,11 +9,30 @@ struct WidgetBot: Identifiable, Codable, Hashable, Sendable {
     var hubName: String
     /// The avatar as the app draws it, as PNG.
     var image: Data?
+    /// Whether it takes voice calls, as the chat's Call button shows, so its widget offers a call.
+    var callable = false
 
     /// What iOS keeps for a widget showing this bot.
     var id: String { Self.id(hub: hub, conversationID: conversationID) }
 
     static func id(hub: String, conversationID: UUID) -> String { "\(hub)/\(conversationID.uuidString)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case hub, conversationID, name, hubName, image, callable
+    }
+}
+
+extension WidgetBot {
+    /// Bots an earlier version left have no `callable` and offer no call until the app runs again.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(hub: try container.decode(String.self, forKey: .hub),
+                  conversationID: try container.decode(UUID.self, forKey: .conversationID),
+                  name: try container.decode(String.self, forKey: .name),
+                  hubName: try container.decode(String.self, forKey: .hubName),
+                  image: try container.decodeIfPresent(Data.self, forKey: .image),
+                  callable: try container.decodeIfPresent(Bool.self, forKey: .callable) ?? false)
+    }
 }
 
 /// A space a widget can show: a Hub's own or one the person made, with its bots in the list's order.
@@ -48,33 +67,38 @@ struct WidgetShelf: Codable, Equatable, Sendable {
 }
 
 /// A widget's link to a bot's conversation: noodle://conversation/ID, as on the Mac, with its Hub's key.
+/// Its call button's is noodle://call/ID, which opens the conversation and calls the bot.
 struct WidgetLink: Equatable, Sendable {
     private static let host = "conversation"
+    private static let callHost = "call"
     /// What a Hub's key, which is base64, keeps unescaped in the link.
     private static let plain = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     let hub: String
     let conversationID: UUID
+    /// Whether it calls the bot as well.
+    let call: Bool
 
-    init(hub: String, conversationID: UUID) {
+    init(hub: String, conversationID: UUID, call: Bool = false) {
         self.hub = hub
         self.conversationID = conversationID
+        self.call = call
     }
 
-    init(_ bot: WidgetBot) { self.init(hub: bot.hub, conversationID: bot.conversationID) }
+    init(_ bot: WidgetBot, call: Bool = false) { self.init(hub: bot.hub, conversationID: bot.conversationID, call: call) }
 
     /// Nil for any other link, such as a Hub's invitation.
     init?(url: URL) {
-        guard url.host == Self.host, url.pathComponents.count == 2,
+        guard let host = url.host, host == Self.host || host == Self.callHost, url.pathComponents.count == 2,
               let conversationID = UUID(uuidString: url.pathComponents[1]),
               let hub = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "hub" })?.value,
               !hub.isEmpty else { return nil }
-        self.init(hub: hub, conversationID: conversationID)
+        self.init(hub: hub, conversationID: conversationID, call: host == Self.callHost)
     }
 
     var url: URL {
         let hub = hub.addingPercentEncoding(withAllowedCharacters: Self.plain) ?? hub
-        return URL(string: "noodle://\(Self.host)/\(conversationID.uuidString.lowercased())?hub=\(hub)")!
+        return URL(string: "noodle://\(call ? Self.callHost : Self.host)/\(conversationID.uuidString.lowercased())?hub=\(hub)")!
     }
 }
 

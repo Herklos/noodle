@@ -5,6 +5,7 @@
 ### Added
 
 - Tap …, choose Hubs and tap your Hub: it lists all your computers and browsers on it, whichever bots have them. Tap one to change its name and description, or swipe to delete it.
+- The small Bot widget has a Call button for a bot that takes voice calls. Tap it to open the chat and call the bot straight away; tap anywhere else to open the chat as before.
 
 ### Changed
 
@@ -28,6 +29,8 @@
 - Tap one, change its name and description and tap Save: check the list shows them, and so do the bot's Computers or Browsers and Noodle on the Mac. Clear a description, save, and check it is gone.
 - Swipe one to delete it: check the confirmation names the bots that use it, and that after Delete it is gone from the list and from those bots.
 - With a Hub that cannot list computers or browsers, check those rows do not show.
+- With a bot that takes voice calls, open Noodle, then add the small Bot widget for it, or edit one you have to show it: check a green Call button shows under its name. Tap Call, also with Noodle closed: check its chat opens and the call starts, asking for the microphone the first time, as the chat's Call button does, and you hear the bot.
+- Tap the widget away from Call: check only the chat opens. Choose a bot that cannot take calls: check there is no Call button. Use a tinted Home Screen: check Call can still be read. With VoiceOver, check the bot and "Call" with its name are read separately.
 
 ## [0.39.0] - 2026-10-18
 

@@ -51,7 +51,7 @@ struct BotWidget: Widget {
             BotWidgetView(entry: entry).containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("Bot")
-        .description("Open your chat with a bot you choose.")
+        .description("Open your chat with a bot you choose, or call it.")
         .supportedFamilies([.systemSmall, .accessoryCircular])
     }
 }
@@ -68,17 +68,23 @@ struct BotWidgetView: View {
                         AccessoryWidgetBackground()
                         BotPicture(bot: bot)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(bot.name)
                 } else {
-                    VStack(spacing: 8) {
-                        BotPicture(bot: bot).frame(width: 76, height: 76)
-                        Text(bot.name).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                    // With a call button the picture gives up the room it needs.
+                    VStack(spacing: bot.callable ? 6 : 8) {
+                        VStack(spacing: bot.callable ? 6 : 8) {
+                            BotPicture(bot: bot).frame(maxWidth: 76, maxHeight: 76)
+                            Text(bot.name).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(bot.name)
+                        if bot.callable { CallLink(bot: bot) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .widgetURL(WidgetLink(bot).url)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(bot.name)
         } else if family == .accessoryCircular {
             ZStack {
                 AccessoryWidgetBackground()
@@ -214,6 +220,36 @@ private struct BotLink<Content: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(bot.name)
+            }
+    }
+}
+
+/// Calls the bot, opening its chat, while a tap anywhere else opens the chat alone. Like `BotLink`, a clear link
+/// covers the button rather than wrapping it.
+private struct CallLink: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    let bot: WidgetBot
+
+    var body: some View {
+        // Tinted, the system draws every opaque colour the same, so the label is told from its capsule by opacity.
+        let fullColor = renderingMode == .fullColor
+        Label("Call", systemImage: "phone.fill")
+            .labelStyle(.titleAndIcon)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundStyle(fullColor ? Color.white : Color.primary)
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(fullColor ? Color.green : Color.primary.opacity(0.2), in: Capsule())
+            .widgetAccentable()
+            .accessibilityHidden(true)
+            .overlay {
+                Link(destination: WidgetLink(bot, call: true).url) {
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Call \(bot.name)")
             }
     }
 }
