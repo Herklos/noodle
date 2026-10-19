@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - Settings → Hub has Computers & Browsers… for each Noodle Hub you joined. It lists all your computers and browsers there, whichever bots have them. Edit… changes one's name and description, and Delete removes it after saying which bots lose it.
+- Forward… in a file's menu in a conversation sends the file to another bot or group, with an optional comment. It arrives there as your message, as if you had attached the file yourself.
 
 ### Changed
 

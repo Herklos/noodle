@@ -1636,6 +1636,33 @@ final class NoodleStore {
         }
     }
 
+    /// Sends a file on to another bot or group as one message from the person, with the comment as its
+    /// words, as if they had attached it there. What is being written there stays as it is. A conversation
+    /// on a Noodle Hub gets the copy as any file sent there: the Hub keeps each conversation's files apart,
+    /// so it goes up again from this Mac.
+    @discardableResult
+    func forward(_ attachment: ConversationAttachment, to conversationID: UUID, comment: String) throws -> ChatMessage {
+        guard let conversation = conversations.first(where: { $0.id == conversationID }) else {
+            throw WorkspaceError.missingConversation(conversationID)
+        }
+        guard AttachmentForwarding.canForward(attachment) else { throw WorkspaceError.invalidAttachment }
+        let copy = try repository.importAttachment(from: attachmentFileURL(attachment), into: conversationID,
+                                                   mediaType: attachment.mediaType, originalFilename: attachment.originalFilename)
+        attachmentsByConversation[conversationID, default: []].append(copy)
+        let body = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = try repository.sendUserMessage(conversationID: conversationID,
+                                                     body: body.isEmpty ? "Sent 1 attachment" : body, attachmentIDs: [copy.id])
+        messagesByConversation[conversationID, default: []].append(message)
+        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+            conversations[index].updatedAt = message.createdAt
+            conversations.sort { $0.updatedAt > $1.updatedAt }
+        }
+        runtime.notify(participants(for: conversation), repository: repository)
+        voiceCalls.shared(in: conversationID, body: body, attachmentNames: [copy.originalFilename])
+        sendToHub(conversationID)
+        return message
+    }
+
     @discardableResult
     func sendCommand(_ command: String, to conversationID: UUID) throws -> ChatMessage {
         guard let conversation = conversations.first(where: { $0.id == conversationID }) else {

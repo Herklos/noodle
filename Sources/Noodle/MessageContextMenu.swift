@@ -23,6 +23,8 @@ struct MessageContextMenu: NSViewRepresentable {
     /// For a table in the message, as it is shown.
     var copyTable: (() -> Void)? = nil
     var saveTable: (() -> Void)? = nil
+    /// For a file: sends it on to another bot or group.
+    var forward: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> MenuHost { MenuHost() }
 
@@ -78,6 +80,9 @@ struct MessageContextMenu: NSViewRepresentable {
             }
             if let reveal = configuration.reveal {
                 addItem("Show in Finder", symbol: "folder", to: menu, action: reveal)
+            }
+            if let forward = configuration.forward {
+                addItem("Forward…", symbol: "arrowshape.turn.up.right", to: menu, action: forward)
             }
             // Inspect only when opening the menu, not while scrolling the transcript.
             // Decode detection also covers real images with generic attachment MIME types.
