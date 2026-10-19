@@ -26,6 +26,8 @@ import XCTest
                 case .update:
                     let index = try XCTUnwrap(browsers.firstIndex { $0.id == request.browserID })
                     browsers[index].name = request.profile?.name ?? browsers[index].name
+                    // As Noodle Browser does: no description keeps the one it has, and an empty one clears it.
+                    if let description = request.profile?.description { browsers[index].description = description.isEmpty ? nil : description }
                     response.browser = browsers[index]
                 case .delete:
                     browsers.removeAll { $0.id == request.browserID }
@@ -142,6 +144,26 @@ import XCTest
         XCTAssertEqual(hub.browsers.assigned(to: alfred.id, for: ada), [])
     }
 
+    /// Its owner renames and describes a browser; no description keeps the one it has, and an empty one clears it.
+    func testOnlyItsOwnerRenamesOrDescribesABrowser() async throws {
+        let (hub, ada, bob) = try hub()
+        let made = try await hub.browsers.create(BrowserDraft(name: "Work", description: "Office sign-ins"), for: ada)
+        do {
+            _ = try await hub.browsers.update(made.id, with: BrowserDraft(name: "Mine", description: ""), for: bob)
+            XCTFail("Bob changed Ada's browser")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "That browser is not yours or no longer exists.")
+        }
+        XCTAssertEqual(hub.browsers.link(for: ada).map(\.name), ["Work"])
+        XCTAssertEqual(hub.browsers.link(for: ada).first?.description, "Office sign-ins")
+
+        let renamed = try await hub.browsers.update(made.id, with: BrowserDraft(name: "Office"), for: ada)
+        XCTAssertEqual(hub.browsers.link(renamed, for: ada).description, "Office sign-ins")
+        _ = try await hub.browsers.update(made.id, with: BrowserDraft(name: "Office", description: ""), for: ada)
+        XCTAssertEqual(hub.browsers.link(for: ada).map(\.name), ["Office"])
+        XCTAssertNil(hub.browsers.link(for: ada).first?.description)
+    }
+
     func testAPlanLimitsHowManyBrowsersEachUserKeeps() async throws {
         let (hub, ada, bob) = try hub()
         let family = try XCTUnwrap(hub.access.plans.first { $0.name == "Family" })
@@ -192,13 +214,20 @@ import XCTest
             return XCTFail("no bot")
         }
         _ = try await device.request(.assignBrowsers(botID: bot.id, browserIDs: [made.id]))
-        guard case .browser(let renamed) = try await device.request(.updateBrowser(id: made.id, LinkBrowserDraft(name: "Office"))) else {
+        guard case .browser(let renamed) = try await device.request(.updateBrowser(id: made.id, LinkBrowserDraft(name: "Office", description: "Sign-ins"))) else {
             return XCTFail("not renamed")
         }
         XCTAssertEqual(renamed.name, "Office")
+        XCTAssertEqual(renamed.description, "Sign-ins")
+        guard case .browser(let cleared) = try await device.request(.updateBrowser(id: made.id, LinkBrowserDraft(name: "Office", description: ""))) else {
+            return XCTFail("not changed")
+        }
+        XCTAssertNil(cleared.description)
         guard case .browsers(let listed) = try await device.request(.browsers) else { return XCTFail("not listed") }
         XCTAssertEqual(listed.map(\.id), [made.id])
         XCTAssertEqual(listed.first?.botIDs, [bot.id])
+        XCTAssertEqual(listed.first?.name, "Office")
+        XCTAssertNil(listed.first?.description)
         _ = try await device.request(.deleteBrowser(id: made.id))
         guard case .browsers(let left) = try await device.request(.browsers) else { return XCTFail("not listed") }
         XCTAssertEqual(left, [])

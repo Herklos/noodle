@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Deleting a tool, computer or browser in a bot's settings asks first. It says which of your bots lose it, and that a computer moves to the Trash on the Hub or that a browser's sign-ins and history are erased for good.
+
+### What to Test
+
+- In a bot's settings, open Tools, Computers and Browsers and swipe one to delete it: check a confirmation asks first and names the bots that use it. Check it says a computer moves to the Trash on the Hub and a browser's sign-ins and history are erased. Tap outside it and check nothing is deleted; delete one and check it goes.
+
 ## [0.39.0] - 2026-10-18
 
 ### Added

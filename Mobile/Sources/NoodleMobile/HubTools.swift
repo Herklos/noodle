@@ -102,6 +102,16 @@ extension HubChats {
         try await loadBrowsers()
     }
 
+    /// What deleting one of this user's connections, computers or browsers does, naming the bots that lose it.
+    func deletionSummary(_ kind: HubTool, _ id: UUID) -> String {
+        func bots(_ ids: [UUID]?) -> [String] { (ids ?? []).compactMap { agent($0)?.name } }
+        return switch kind {
+        case .connection: LinkConnection.deletionSummary(bots: bots(connections.first { $0.id == id }?.botIDs))
+        case .computer: LinkComputer.deletionSummary(bots: bots(computers.first { $0.id == id }?.botIDs))
+        case .browser: LinkBrowser.deletionSummary(bots: bots(browsers.first { $0.id == id }?.botIDs))
+        }
+    }
+
     // MARK: Assignments
 
     /// Gives a bot one of this user's connections, computers or browsers, or takes it away.
@@ -244,6 +254,8 @@ struct HubToolsScreen: View {
     @State private var busy: UUID?
     @State private var settingImageGeneration = false
     @State private var problem: String?
+    /// The row whose Delete waits for confirmation.
+    @State private var deleting: UUID?
 
     private var title: String {
         switch kind {
@@ -292,7 +304,7 @@ struct HubToolsScreen: View {
                     }
                 }
                 .swipeActions {
-                    Button("Delete", role: .destructive) { run(row.id) { try await delete(row.id) } }
+                    Button("Delete", role: .destructive) { deleting = row.id }
                 }
             }
             if let problem {
@@ -307,6 +319,13 @@ struct HubToolsScreen: View {
         }
         .sheet(isPresented: $adding) {
             NewHubToolSheet(chats: chats, agent: agent, kind: kind)
+        }
+        .confirmationDialog("Delete “\(rows.first(where: { $0.id == deleting })?.name ?? "")”?",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { id in
+            Button("Delete", role: .destructive) { run(id) { try await delete(id) } }
+        } message: { id in
+            Text(chats.deletionSummary(kind, id))
         }
         .wordmarkRefreshable { try? await chats.loadTools() }
     }
