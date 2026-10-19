@@ -1,0 +1,18 @@
+<!doctype html>
+<title>Muted video</title>
+<video id="video" playsinline loop></video>
+<canvas id="canvas" width="16" height="16"></canvas>
+<script>
+// Plays the video whose bytes the test passes in, so the page needs no network.
+function start(base64) {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  video.src = URL.createObjectURL(new Blob([bytes], {type: 'video/mp4'}));
+  video.play().then(() => window.started = 'playing', error => window.started = error.name);
+}
+// Draws the current frame, as a page making a cover or thumbnail does, and returns its middle pixel.
+function frame() {
+  const context = canvas.getContext('2d');
+  context.drawImage(video, 0, 0, 16, 16);
+  return Array.from(context.getImageData(8, 8, 1, 1).data);
+}
+</script>

@@ -72,7 +72,7 @@ import WebKit
         surface.hidesOnDeactivate = false
         surface.contentView = web
         web.navigationDelegate = self; web.uiDelegate = self
-        web.setAllMediaPlaybackSuspended((try? runtime.library.profile(browserID).muted) ?? true, completionHandler: nil)
+        mute((try? runtime.library.profile(browserID).muted) ?? true)
         inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .mouseMoved, .scrollWheel, .keyDown]) { [weak self] event in
             guard let self, event.window === self.web.window, event.window?.isVisible == true else { return event }
             var used = false
@@ -122,7 +122,19 @@ import WebKit
     }
     func beginAgentInteraction() { humanInput = false; viewerInput = false }
     func resetPointer() { inputGeneration += 1; pointer.reset() }
-    func mute(_ muted: Bool) async { await web.setAllMediaPlaybackSuspended(muted) }
+    /// Muting is WebKit's own page mute, as in Safari: media elements and Web Audio in every frame
+    /// go silent but keep playing, so pages that decode video, such as an upload making its cover,
+    /// keep working. Pages are not told; WebKit has no public call for this, so it is looked up.
+    func mute(_ muted: Bool) {
+        let selector = NSSelectorFromString("_setPageMuted:")
+        typealias PageMuted = @convention(c) (AnyObject, Selector, UInt) -> Void
+        guard let method = class_getInstanceMethod(WKWebView.self, selector) else {
+            // A WebKit without page muting only offers suspending playback, which pauses video too.
+            web.setAllMediaPlaybackSuspended(muted, completionHandler: nil); return
+        }
+        // 1 is WebKit's audio-muted bit; cameras and microphones are refused anyway.
+        unsafeBitCast(method_getImplementation(method), to: PageMuted.self)(web, selector, muted ? 1 : 0)
+    }
     func restoreSurface() {
         if !stopped && web.window == nil {
             // Keep the visible tab's viewport when parking it for background

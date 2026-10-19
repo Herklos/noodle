@@ -241,7 +241,7 @@ import WebKit
     }
     func setMuted(_ value: Bool, browserID: UUID) async throws {
         var profile = try library.profile(browserID); profile.muted = value; try library.update(profile)
-        for tab in tabs.values where tab.browserID == browserID { await tab.mute(value) }
+        for tab in tabs.values where tab.browserID == browserID { tab.mute(value) }
     }
     func setPaused(_ value: Bool, browserID: UUID) throws {
         var profile = try library.profile(browserID); profile.paused = value; try library.update(profile)
