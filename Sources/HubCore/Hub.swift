@@ -22,6 +22,7 @@ import NoodleRuntime
     public let harnessProfiles: HarnessProfilesController
     public let usage: UsageHistory
     public let access: HubAccess
+    public let tokenLimits: HubTokenLimits
     public let connections: HubConnections
     public let computers: HubComputers
     public let browsers: HubBrowsers
@@ -47,10 +48,18 @@ import NoodleRuntime
         self.runtime.remoteModels = RemoteModelAccountStore(repository: root)
         harnessProfiles = HarnessProfilesController(store: repository.harnessProfiles)
         usage = UsageHistory(url: root.appendingPathComponent("usage.sqlite"))
-        self.runtime.onUsage = { [usage] in usage.record($0) }
-        self.runtime.recordedUsage = { [usage] in usage.recorded(session: $0) }
         access = HubAccess(url: root.appendingPathComponent("access.json"))
         access.log = HubActivityLog(url: root.appendingPathComponent("activity.jsonl"))
+        tokenLimits = HubTokenLimits(access: access, usage: usage)
+        // Tokens count against the plan of whoever owns the bot when it uses them.
+        self.runtime.onUsage = { [usage, access, tokenLimits] sample in
+            var sample = sample
+            sample.owner = access.owner(ofBot: sample.agentID)
+            usage.record(sample)
+            tokenLimits.check()
+        }
+        self.runtime.recordedUsage = { [usage] in usage.recorded(session: $0) }
+        access.onTokenLimitsChange = { [tokenLimits] in tokenLimits.check() }
         // One broker serves every tool a bot is given here, whichever kind it is.
         let tools = ToolProviderRegistry(), assignments = ToolAssignmentStore()
         connections = HubConnections(root: root, access: access,
@@ -82,6 +91,10 @@ import NoodleRuntime
             bots?.synchronizeToolSkills()
         }
         bots.imageGeneration = imageGeneration
+        bots.tokenLimits = tokenLimits
+        tokenLimits.onChange = { [weak bots] in bots?.applyTokenLimits() }
+        // Whoever ran out before the Hub last quit stays held.
+        tokenLimits.check()
         let imageHelper = ImageGenerationHelper(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NoodleAppleAgent"))
         try? tools.register(ImageToolProvider(library: { [root] in ImageLibrary.load(root: root) }, generate: { try await imageHelper.png($0) }))
         access.onOwnersChange = { [weak bots, weak computers, weak browsers] in

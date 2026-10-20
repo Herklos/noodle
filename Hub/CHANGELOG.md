@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- A plan can limit how many tokens each of its users' bots use over a number of hours, days, weeks or months, counted over a rolling period. A user who reaches it is told when their bots can continue; a turn under way finishes, and their bots take no new turn until then. Settings → Users shows how much each user used.
+
 ## [0.36.1] - 2026-10-19
 
 ### Fixed

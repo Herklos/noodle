@@ -25,6 +25,11 @@ public final class UsageHistory {
         (try? ledger?.recorded(session: session)) ?? [:]
     }
 
+    /// What one person's bots used after `start`, oldest first, as a Hub plan's token limit counts it.
+    public func spending(owner: UUID, after start: Date) -> [UsageSpend] {
+        (try? ledger?.spending(owner: owner, after: start)) ?? []
+    }
+
     public func days(from start: Date, to end: Date, agentID: UUID?) -> [UsageDay] {
         queries += 1
         return (try? ledger?.days(from: start, to: end, agentID: agentID)) ?? []
