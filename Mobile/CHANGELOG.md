@@ -5,10 +5,15 @@
 ### Added
 
 - Hub admins can suspend and restore regular users from their user details, keeping their plan, data and paired devices.
+- Sign in to a page in a browser you watch live with your iPhone's own fields: tap the key, pick your login from Passwords or type it, and tap Fill. Codes from Messages are offered too. Turn on Submit to send the form as well. Needs a Hub and Noodle Browser that offer it.
 
 ### What to Test
 
 - As a Hub admin, open Users, select a regular user and turn on Suspended. Their bots stop and devices lose access. Turn it off to restore access without pairing again. Admin users cannot be suspended from a device.
+- Open a browser a bot shared at a sign-in page and tap the key: check the sheet names the site with a lock, and offers only the fields the page has. Pick a login from Passwords, tap Fill, and check the page shows the username and dots for the password, and is not submitted. Repeat with Submit on and check it signs in.
+- On a page asking for a code sent by text message, tap the key: check the code from Messages is offered above the keyboard and fills the page's boxes.
+- Fill a password without signing in and close the live view: open it again and check the password field is empty.
+- On a page with no sign-in fields, tap the key: check it says none were found. With a Hub or Noodle Browser that cannot sign in, check the key does not show or the message names what to update.
 
 ## [0.40.0] - 2026-10-20
 

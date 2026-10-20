@@ -921,6 +921,10 @@ struct LiveSurfaceScreen: View {
     @State private var tvAvailable = false
     @State private var connectingTV = false
     @State private var gameMenu = GameMenu()
+    /// The sign-in fields of the page shown, while the sheet for them is open.
+    @State private var signInForm: LinkSignInForm?
+    @State private var findingSignIn = false
+    @State private var signInProblem: String?
     @Environment(\.noodletMenu) private var noodletMenu
     @Environment(\.verticalSizeClass) private var verticalSize
 
@@ -954,6 +958,9 @@ struct LiveSurfaceScreen: View {
                 Button("Controls", systemImage: showsControls ? "gamecontroller.fill" : "gamecontroller") { showsControls.toggle() }
             }
             Button("Keyboard", systemImage: "keyboard") { feed.toggleKeyboard() }
+        }
+        if attachment.liveKind == .browser, chats.signsInToBrowsers, showing {
+            Button("Sign In…", systemImage: "key", action: findSignIn).disabled(findingSignIn)
         }
         if let runHere { Button("Run on \(UIDevice.current.model)", systemImage: "iphone", action: runHere) }
     }
@@ -1003,6 +1010,16 @@ struct LiveSurfaceScreen: View {
             GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu)
         }
         .tvConnectionAlert(isPresented: $connectingTV)
+        .sheet(isPresented: Binding(get: { signInForm != nil }, set: { if !$0 { signInForm = nil } })) {
+            if let form = signInForm {
+                BrowserSignInSheet(form: form) { entry in
+                    try await chats.fillSignIn(entry.fill(form, conversationID: thread.conversationID, attachmentID: attachment.id))
+                }
+            }
+        }
+        .alert("Can't Sign In", isPresented: Binding(get: { signInProblem != nil }, set: { if !$0 { signInProblem = nil } })) {
+            Button("OK") {}
+        } message: { Text(signInProblem ?? "") }
         .task { await follow() }
         // The phone turns sideways as a controller does.
         .onChange(of: onTV) {
@@ -1014,6 +1031,16 @@ struct LiveSurfaceScreen: View {
         .onDisappear {
             hardware.detach(); channel?.cancel(); ScreenOrientation.hold(nil)
             KeepAwake.set(false)
+        }
+    }
+
+    /// Asks the Hub, once, for the sign-in fields of the page shown.
+    private func findSignIn() {
+        findingSignIn = true
+        Task {
+            defer { findingSignIn = false }
+            do { signInForm = try await chats.signInForm(attachment, in: thread) }
+            catch { signInProblem = error.localizedDescription }
         }
     }
 
