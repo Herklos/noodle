@@ -87,6 +87,9 @@ import NIOCore
     var replay = TerminalReplay()
     var exited = false
     var touched = Date()
+    var opened = Date()
+    /// The person's own terminal, never closed for being idle.
+    var person = false
     private var channel: Channel?
 
     private init(computerID: UUID, owner: String, connection: SSHConnection) {

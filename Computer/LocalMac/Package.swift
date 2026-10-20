@@ -12,5 +12,5 @@ let package = Package(name: "LocalMac", platforms: [.macOS("26.0")], products: [
     .executableTarget(name: "LocalMacService", dependencies: ["LocalMacCore"]),
     .executableTarget(name: "LocalMacDesktop", dependencies: ["LocalMacCore"]),
     .executableTarget(name: "LocalMacSetup", dependencies: ["LocalMacCore"]),
-    .testTarget(name: "LocalMacCoreTests", dependencies: ["LocalMacCore"])
+    .testTarget(name: "LocalMacCoreTests", dependencies: ["LocalMacCore", "LocalMacPrivate"])
 ], swiftLanguageModes: [.v5])

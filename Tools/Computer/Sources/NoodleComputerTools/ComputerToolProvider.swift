@@ -59,7 +59,9 @@ public struct ComputerToolProvider: ToolProvider {
         if entry.operation == .list {
             tool["_meta"] = ["noodle/timeout": entry.operation.timeout + 30, "noodle/resource-list": ["kind": "computer", "path": "computers"]]
         }
-        if [.list, .terminalRead].contains(entry.operation) { tool["annotations"] = ["readOnlyHint": true, "idempotentHint": entry.operation == .list] }
+        if [.list, .terminalRead, .terminalList].contains(entry.operation) {
+            tool["annotations"] = ["readOnlyHint": true, "idempotentHint": entry.operation != .terminalRead]
+        }
         return tool
     }
 
@@ -99,6 +101,7 @@ public struct ComputerToolProvider: ToolProvider {
         try ComputerCapabilities.requireCompatible(capabilities)
         if request.operation.isFileTransfer { try ComputerCapabilities.requireFileTransfer(capabilities) }
         if request.operation == .preview { try ComputerCapabilities.requireDocumentPreview(capabilities) }
+        if request.operation == .terminalList { try ComputerCapabilities.requireTerminalList(capabilities) }
         // The handshake, and any staging before it, took time. Ask Noodle again before the
         // step that cannot be taken back.
         try await authorize()
@@ -189,7 +192,10 @@ public struct ComputerToolProvider: ToolProvider {
     }
 
     private static func object(_ response: ComputerResponse) throws -> [String: Any] {
-        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any] ?? [:]
+        // Times a bot can read, as when a terminal was opened and last used.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try JSONSerialization.jsonObject(with: encoder.encode(response)) as? [String: Any] ?? [:]
         // Compatibility details are for Noodle, and display credentials are never for bots.
         object["capabilities"] = nil; object["display"] = nil; object["version"] = nil
         return object

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bots can list their own terminals on a computer with `terminals`: when each was opened and last used, whether a command is running in it and whether it has exited, so they can find and close terminals they lost track of. Apps outside Noodle get the same command in noodle-computer.
+
 ### Changed
 
 - A Local Mac's desktop and windows update up to 60 times a second instead of 12, and mouse and keyboard input reaches them without waiting on each earlier event. They arrive through memory Noodle Computer shares with the Local Mac, not as compressed images, so the picture is exact, with no compression blur.
@@ -9,6 +13,8 @@
 ### Fixed
 
 - Copy in the Edit menu and ⌘C copy the text selected in a computer's terminal. Copy used to stay dimmed and nothing reached the clipboard. With nothing selected ⌘C does nothing, and ⌃C still interrupts the running command.
+- Terminals that bots lost track of, for example after a restart, no longer fill a computer until no bot can open one, which failed with "Too many terminal sessions". A bot's terminal sitting idle at its prompt that nothing has read or written for 30 minutes is closed; one running a command, such as a long build, is kept however long it takes. SSH and Windows computers cannot tell whether a command is running, so there an unused terminal is kept for six hours, as on a Local Mac until it is restarted after this update. Your own terminals are never closed.
+- Control-C interrupts the command running in a Local Mac terminal. Its shell had no controlling terminal, so Control-C did not reach the command.
 
 ## [0.32.2] - 2026-10-18
 

@@ -12,7 +12,8 @@ enum ComputerToolGuidance {
         case "read": "Read terminal output from --offset. Returns UTF-8 text, the next byte offset, truncated and exited. Keep the returned offset; each reader has its own cursor."
         case "write": "Send --text followed by Enter, or --base64 for exact bytes (Aw== sends Control-C). Use one of them."
         case "resize": "Resize a terminal to --columns 1–500 and --rows 1–200."
-        case "close": "End only the named terminal. After a shell exits, open a new one."
+        case "close": "End only the named terminal. Close each terminal once you no longer need it. After a shell exits, open a new one."
+        case "terminals": "List your own terminals on the computer: each terminalID, when it was opened and last used, whether a command is running in it and whether it has exited. Use it to find terminals you lost track of, then close the ones you no longer need."
         case "present": "Post a saved preview of the computer into a conversation you participate in: the named --terminal's recent text, or its web display. Opening the attachment selects and starts the computer in Noodle Computer."
         case "upload": "Copy one workspace file (--source) to an absolute guest path (--destination)."
         case "download": "Copy one guest file (--source, absolute) to a new workspace file (--destination)."
@@ -31,6 +32,13 @@ enum ComputerToolGuidance {
         that computer is for. When several computers are assigned,
         choose by name, kind and description; ask the user when none identifies the
         right one.
+
+        Close terminals you no longer need: each computer allows a limited number, shared
+        by all its agents. If you lost track of your terminal IDs, for example after a
+        restart, use terminals to list yours and close the ones you no longer need. A
+        terminal idle at its prompt that nothing has read or written for 30 minutes is
+        closed for you; one running a command is kept. On SSH and Windows computers,
+        which cannot tell, an unused terminal is kept for six hours.
 
         Transfers copy individual regular files up to 8 GiB and preserve exact bytes.
         Workspace paths are relative to the current directory and cannot traverse

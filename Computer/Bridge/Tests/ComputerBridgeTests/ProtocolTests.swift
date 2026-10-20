@@ -202,6 +202,25 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(ComputerCapabilities().features.contains(SurfaceSocket.feature))
     }
 
+    /// A bot lists its own terminals on a computer; an older Noodle Computer is asked to update first.
+    func testTerminalsIsABotOperationThatNeedsANewerComputer() throws {
+        XCTAssertEqual(ComputerOperation.terminalList.command, "terminals")
+        XCTAssertEqual(ComputerOperation.terminalList.options, [])
+        XCTAssertTrue(ComputerOperation.agentCases.contains(.terminalList))
+        XCTAssertThrowsError(try ComputerRequest(.terminalList).validate(), "terminals names its computer")
+        XCTAssertNoThrow(try ComputerRequest(.terminalList, computerID: UUID()).validate())
+        XCTAssertNoThrow(try ComputerCapabilities.requireTerminalList(ComputerCapabilities()))
+        var older = ComputerCapabilities()
+        older.features.remove("terminal-list-v1")
+        XCTAssertNoThrow(try ComputerCapabilities.requireCompatible(older))
+        XCTAssertThrowsError(try ComputerCapabilities.requireTerminalList(older)) { error in
+            XCTAssertEqual(error.localizedDescription, "Update Noodle Computer to list your terminals.")
+        }
+        var response = ComputerResponse()
+        response.terminals = [RemoteTerminal(id: UUID(), opened: Date(timeIntervalSince1970: 100), used: Date(timeIntervalSince1970: 200), running: nil, exited: false)]
+        XCTAssertEqual(try JSONDecoder().decode(ComputerResponse.self, from: JSONEncoder().encode(response)).terminals, response.terminals)
+    }
+
     func testSurfacesNameTheirComputer() throws {
         XCTAssertThrowsError(try ComputerRequest(.surfaceStream).validate())
         XCTAssertNoThrow(try ComputerRequest(.surfaceStream, computerID: UUID()).validate())

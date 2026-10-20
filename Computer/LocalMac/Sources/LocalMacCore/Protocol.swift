@@ -188,6 +188,9 @@ public struct LocalMacReply: Codable, Sendable {
     public var terminalID: UUID?
     public var offset: Int64?
     public var exited: Bool?
+    /// For a terminal read: whether a command runs in the foreground, rather than the shell
+    /// waiting at its prompt. Nil when the terminal cannot tell, and from helpers older than this.
+    public var running: Bool?
     public var files: [LocalMacFile]?
     public var homeDirectory: String?
     public var transferID: UUID?

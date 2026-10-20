@@ -88,22 +88,38 @@ pid_t NLMSpawnTerminal(NSString *home, int *masterFD) {
     struct winsize size = { .ws_row = 24, .ws_col = 80 };
     if (openpty(&master, &slave, name, NULL, &size)) return -1;
     fcntl(master, F_SETFD, FD_CLOEXEC);
-    posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
-    posix_spawnattr_t attrs; posix_spawnattr_init(&attrs);
-    posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT);
-    posix_spawn_file_actions_addopen(&actions, 0, name, O_RDWR, 0);
-    posix_spawn_file_actions_adddup2(&actions, 0, 1);
-    posix_spawn_file_actions_adddup2(&actions, 0, 2);
-    posix_spawn_file_actions_addchdir(&actions, [home stringByAppendingPathComponent:@"workspace"].fileSystemRepresentation);
+    NSString *workspace = [home stringByAppendingPathComponent:@"workspace"];
+    const char *directory = workspace.fileSystemRepresentation;
     char *arguments[] = {"/bin/zsh", "-l", "-i", NULL};
     NSString *user = NSUserName();
     NSArray *environment = @[[ @"HOME=" stringByAppendingString:home], [@"USER=" stringByAppendingString:user],
         [@"LOGNAME=" stringByAppendingString:user], @"SHELL=/bin/zsh", @"TERM=xterm-256color", @"PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", @"LANG=en_US.UTF-8"];
     char *env[8]; for (NSUInteger i = 0; i < environment.count; i++) env[i] = (char *)[environment[i] UTF8String]; env[7] = NULL;
-    pid_t pid = -1;
-    int result = posix_spawn(&pid, "/bin/zsh", &actions, &attrs, arguments, env);
-    posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attrs); close(slave);
-    if (result) { close(master); return -1; }
+    // The shell must lead a session on its own terminal, as in Terminal: then the terminal sends
+    // Control-C to the command in front, and says which command that is. posix_spawn cannot make
+    // a terminal controlling, so fork. The exec pipe reports a failed start, and returning only
+    // once it closes means the shell already owns its terminal.
+    int exec[2];
+    if (pipe(exec)) { close(master); close(slave); return -1; }
+    fcntl(exec[0], F_SETFD, FD_CLOEXEC); fcntl(exec[1], F_SETFD, FD_CLOEXEC);
+    int limit = getdtablesize();
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Only async-signal-safe calls until exec: the helper has other threads.
+        if (setsid() < 0 || ioctl(slave, TIOCSCTTY, 0) < 0 || dup2(slave, 0) < 0 || dup2(slave, 1) < 0 || dup2(slave, 2) < 0
+            || chdir(directory) < 0) {
+            int code = errno; (void)write(exec[1], &code, sizeof code); _exit(127);
+        }
+        for (int fd = 3; fd < limit; fd++) if (fd != exec[1]) close(fd);
+        execve("/bin/zsh", arguments, env);
+        int code = errno; (void)write(exec[1], &code, sizeof code); _exit(127);
+    }
+    close(slave); close(exec[1]);
+    if (pid < 0) { close(exec[0]); close(master); return -1; }
+    int code = 0; ssize_t got;
+    while ((got = read(exec[0], &code, sizeof code)) < 0 && errno == EINTR) {}
+    close(exec[0]);
+    if (got != 0) { int status; while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {} close(master); return -1; }
     *masterFD = master; return pid;
 }
 static BOOL removalFailure(NSError **error, int code, NSString *path, NSString *operation, BOOL preflight) {

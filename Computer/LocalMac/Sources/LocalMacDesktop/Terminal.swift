@@ -38,6 +38,7 @@ final class Terminal {
         var value = LocalMacReply(); value.terminalID = id
         value.data = Data(bytes.dropFirst(Int(position - start)).prefix(65_536))
         value.offset = position + Int64(value.data!.count); value.exited = exited && value.offset == end
+        if !exited && !closed { value.running = LocalMacShellForeground.runsCommand(master: handle.fileDescriptor, shell: pid) }
         return value
     }
     func write(_ data: Data) throws { try handle.write(contentsOf: data) }
