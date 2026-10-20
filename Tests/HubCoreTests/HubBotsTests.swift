@@ -165,26 +165,62 @@ import XCTest
     func testBotsOnlyUseModelsTheirUsersPlanLends() async throws {
         let f = try await fixture()
         f.hub.access.setModels(["sonnet"], for: claude, in: f.hub.access.plans[1])
-        for model in [nil, "opus"] {
-            do {
-                _ = try await f.device.request(.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code", model: model)))
-                XCTFail("Created a bot on a model the plan does not lend")
-            } catch {
-                XCTAssertEqual((error as? LinkError)?.message,
-                               model.map { "Your plan does not lend \($0) on Claude Code." } ?? "Your plan needs a model chosen for Claude Code.")
-            }
+        do {
+            _ = try await f.device.request(.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code", model: "opus")))
+            XCTFail("Created a bot on a model the plan does not lend")
+        } catch {
+            XCTAssertEqual((error as? LinkError)?.message, "Your plan does not lend opus on Claude Code.")
         }
         guard case .bot(let bot) = try await f.device.request(.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code",
                                                                                      model: "sonnet"))) else {
             return XCTFail("unexpected answer")
         }
         f.hub.access.setModels(["haiku"], for: claude, in: f.hub.access.plans[1])
-        do {
-            _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: bot.conversationID, id: UUID(), body: "Hi", attachmentIDs: [])))
-            XCTFail("Sent through a model the plan no longer lends")
-        } catch {
-            XCTAssertEqual((error as? LinkError)?.message, "Your plan no longer lends sonnet on Claude Code.")
+        _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: bot.conversationID, id: UUID(), body: "Hi", attachmentIDs: [])))
+        guard case .messages(let page) = try await f.device.request(.messages(conversationID: bot.conversationID, after: 0)) else {
+            return XCTFail("no messages")
         }
+        XCTAssertEqual(page.messages.last?.body, "Hi")
+        // Kept unread, for when the bot can run again.
+        XCTAssertEqual(try f.hub.repository.latestMessages(for: bot.id, consuming: false).map(\.message.body), ["Hi"])
+    }
+
+    /// A bot the plan no longer lends cannot answer, so it shows as failed whatever its runtime does.
+    func testABotThePlanNoLongerLendsShowsAsFailed() async throws {
+        let f = try await fixture()
+        f.hub.access.setModels(["sonnet", "haiku"], for: claude, in: f.hub.access.plans[1])
+        guard case .bot(let alfred) = try await f.device.request(.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code", model: "sonnet"))) else {
+            return XCTFail("no bot")
+        }
+        XCTAssertNotEqual(alfred.phase, .failed)
+        f.hub.access.setModels(["haiku"], for: claude, in: f.hub.access.plans[1])
+        guard case .bots(let bots) = try await f.device.request(.bots) else { return XCTFail("no bots") }
+        XCTAssertEqual(bots.first { $0.id == alfred.id }?.phase, .failed)
+    }
+
+    /// A bot without a model runs on the harness default, whichever models the plan lists.
+    func testABotWithoutAModelRunsOnTheHarnessDefault() async throws {
+        let f = try await fixture()
+        f.hub.access.setModels(["sonnet"], for: claude, in: f.hub.access.plans[1])
+        let bot = try await createBot(f)
+        _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: bot.conversationID, id: UUID(), body: "Hi")))
+    }
+
+    /// A bot the plan no longer lends does not keep a group's message from the others.
+    func testAGroupMessageGoesToTheBotsThatCanTakeIt() async throws {
+        let f = try await fixture()
+        f.hub.access.setModels(["sonnet", "haiku"], for: claude, in: f.hub.access.plans[1])
+        guard case .bot(let alfred) = try await f.device.request(.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code", model: "sonnet"))),
+              case .bot(let jeeves) = try await f.device.request(.createBot(LinkBotDraft(name: "Jeeves", provider: "claude-code", model: "haiku"))) else {
+            return XCTFail("no bots")
+        }
+        let group = try await createGroup(f, of: [alfred, jeeves])
+        f.hub.access.setModels(["haiku"], for: claude, in: f.hub.access.plans[1])
+        _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: group.id, id: UUID(), body: "Dinner at eight.")))
+        guard case .messages(let page) = try await f.device.request(.messages(conversationID: group.id, after: 0)) else {
+            return XCTFail("no messages")
+        }
+        XCTAssertEqual(page.messages.map(\.body), ["Dinner at eight."])
     }
 
     func testTheStatusSaysWhichModelsThePlanLends() async throws {
@@ -457,12 +493,11 @@ import XCTest
         let f = try await fixture()
         let bot = try await createBot(f)
         f.hub.access.move(f.ada, to: f.hub.access.plans[0])
-        do {
-            _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: bot.conversationID, id: UUID(), body: "Hello", attachmentIDs: [])))
-            XCTFail("Sent through a harness the plan no longer lends")
-        } catch {
-            XCTAssertEqual((error as? LinkError)?.message, "Your plan no longer lends Claude Code.")
+        _ = try await f.device.request(.send(LinkOutgoingMessage(conversationID: bot.conversationID, id: UUID(), body: "Hello", attachmentIDs: [])))
+        guard case .messages(let page) = try await f.device.request(.messages(conversationID: bot.conversationID, after: 0)) else {
+            return XCTFail("no messages")
         }
+        XCTAssertEqual(page.messages.last?.body, "Hello")
     }
 
     func testDeletingABotOrItsUserRemovesItFromTheHub() async throws {
@@ -1322,12 +1357,11 @@ import XCTest
         _ = try await share(bot, with: [grace.user], f)
         guard let graces = try await bots(of: grace.device).first else { return XCTFail("not shared") }
         f.hub.access.move(f.ada, to: f.hub.access.plans[0])
-        do {
-            _ = try await grace.device.request(.send(LinkOutgoingMessage(conversationID: graces.conversationID, id: UUID(), body: "Hi")))
-            XCTFail("Talked with a bot its owner's plan no longer lends")
-        } catch {
-            XCTAssertEqual((error as? LinkError)?.message, "Alfred cannot take messages right now.")
+        _ = try await grace.device.request(.send(LinkOutgoingMessage(conversationID: graces.conversationID, id: UUID(), body: "Hi")))
+        guard case .messages(let page) = try await grace.device.request(.messages(conversationID: graces.conversationID, after: 0)) else {
+            return XCTFail("no messages")
         }
+        XCTAssertEqual(page.messages.last?.body, "Hi")
     }
 
     /// The recent history a bot is woken with names whoever it is talking with.

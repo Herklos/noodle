@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A bot without a model runs on its harness's default model, even when the plan lists the models it lends, instead of turning messages away.
+- A message to a bot the plan no longer lends is kept instead of showing as not delivered, and the bot reads it once it runs again. In a group, the other bots get it at once.
+- A bot the plan no longer lends shows as failed instead of ready.
+
 ## [0.37.0] - 2026-10-20
 
 ### Added

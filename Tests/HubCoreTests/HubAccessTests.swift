@@ -99,8 +99,8 @@ import XCTest
         XCTAssertEqual(access.models(on: codex, for: access.users[0]), ["gpt-5-mini"])
         XCTAssertTrue(access.lends(codex, model: "gpt-5-mini", to: user))
         XCTAssertFalse(access.lends(codex, model: "gpt-5", to: user))
-        // The harness default could be any model.
-        XCTAssertFalse(access.lends(codex, model: nil, to: user))
+        // A bot without a model runs on the harness default.
+        XCTAssertTrue(access.lends(codex, model: nil, to: user))
         XCTAssertEqual(HubAccess(url: url).plans, access.plans)
 
         access.setModels(nil, for: codex, in: family)

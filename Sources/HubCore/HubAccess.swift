@@ -217,7 +217,7 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     public func lends(_ harness: HubHarness, model: String?, to user: HubUser) -> Bool {
         guard lends(harness, to: user), let current = users.first(where: { $0.id == user.id }) else { return false }
         guard let allowed = models(on: harness, for: current) else { return true }
-        return model.map(allowed.contains) ?? false
+        return model.map(allowed.contains) ?? true
     }
 
     /// The owner of everything on a personal Mac.
