@@ -76,7 +76,7 @@ import XCTest
         let held = f.runtime.snapshot(for: f.kai.id)
         XCTAssertEqual(held.phase, .offline)
         XCTAssertNil(held.failure)
-        XCTAssertEqual(f.hub.bots.phase(of: f.kai.id), .offline)
+        XCTAssertEqual(f.hub.bots.phase(of: f.kai), .offline)
         XCTAssertTrue(held.detail.hasPrefix("Token limit reached."), held.detail)
 
         // A message still goes through and waits for the bot; nothing starts it meanwhile.
