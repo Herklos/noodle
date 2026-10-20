@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Harness shows how much of the plan limits of each signed-in Codex and Claude Code account is used, and when each resets.
+
 ## [0.36.1] - 2026-10-19
 
 ### Fixed

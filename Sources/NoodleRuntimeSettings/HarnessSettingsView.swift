@@ -181,7 +181,7 @@ public struct HarnessInstallationRow: View {
                 if installation.isAvailable {
                     versionDetails
                 }
-                if installation.isAvailable, setup.authentication[id] == .authenticated {
+                if installation.isAvailable, setup.authentication[id] == .authenticated, SubscriptionUsage.isReported(by: id) {
                     SubscriptionUsageView(usage: store.runtime.subscriptionUsage.usage(id, profile: nil))
                 }
                 if needsSignIn, setup.authentication[id] == .managedExternally {

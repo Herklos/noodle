@@ -40,9 +40,10 @@ import UniformTypeIdentifiers
     /// Copy File on a text file in the conversation pastes back as that file, named as it was, not as its text.
     @Test func aCopiedFilePastesAsTheFile() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let url = folder.appendingPathComponent("notes.txt")
+        let hubs = folder.appendingPathComponent("Hubs", isDirectory: true)
+        let url = hubs.appendingPathComponent("Hub/Files/\(UUID().uuidString)/notes.txt")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("A few words".utf8).write(to: url)
         let board = pasteboard()
         defer { UIPasteboard.remove(withName: board.name) }
@@ -50,12 +51,39 @@ import UniformTypeIdentifiers
         AttachmentClipboard.copyFile(url, named: "notes.txt", to: board)
 
         guard case .files(let providers)? = ComposerPaste.read(from: board) else { Issue.record("the file did not paste as a file"); return }
-        let files = await ComposerPaste.load(providers)
+        let files = await ComposerPaste.load(providers, hubs: hubs, ownFolders: [folder])
         #expect(files.map(\.filename) == ["notes.txt"])
         #expect(files.first?.mediaType == "text/plain")
         let file = try #require(files.first)
         #expect(file.url != url, "the pasted file is a copy that stays until sent")
         #expect(try String(contentsOf: file.url, encoding: .utf8) == "A few words")
+    }
+
+    /// Any app can put a file's location on the pasteboard, so Noodle's own files, such as a Hub's
+    /// key, are not read from one; only a conversation's files, which Copy File copies, are.
+    @Test func aPastedLocationInsideNoodleIsReadOnlyFromAConversationsFiles() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let hubs = folder.appendingPathComponent("Hubs", isDirectory: true)
+        let key = hubs.appendingPathComponent("Hub/identity.key")
+        try FileManager.default.createDirectory(at: key.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("secret".utf8).write(to: key)
+        func pasted(ownFolders: [URL]) async -> [String] {
+            await ComposerPaste.load([NSItemProvider(object: key as NSURL)], hubs: hubs, ownFolders: ownFolders)
+                .compactMap { try? String(contentsOf: $0.url, encoding: .utf8) }
+        }
+
+        let inside = await pasted(ownFolders: [folder])
+        #expect(!inside.contains("secret"))
+        let outside = await pasted(ownFolders: [])
+        #expect(outside.contains("secret"), "the same file outside Noodle is read")
+
+        let files = hubs.appendingPathComponent("Hub/Files", isDirectory: true)
+        #expect(ComposerPaste.mayRead(files.appendingPathComponent("\(UUID().uuidString)/notes.txt"), hubs: hubs, ownFolders: [folder]))
+        #expect(!ComposerPaste.mayRead(files.appendingPathComponent("x/../../identity.key"), hubs: hubs, ownFolders: [folder]))
+        #expect(!ComposerPaste.mayRead(files.appendingPathComponent("x/y/notes.txt"), hubs: hubs, ownFolders: [folder]))
+        #expect(!ComposerPaste.mayRead(folder.appendingPathComponent("Library/Preferences/settings.plist"), hubs: hubs, ownFolders: [folder]))
+        #expect(ComposerPaste.mayRead(URL(fileURLWithPath: "/Elsewhere/notes.txt"), hubs: hubs, ownFolders: [folder]))
     }
 
     /// Another app's copied file comes with its name; copied words come without one, or with a name

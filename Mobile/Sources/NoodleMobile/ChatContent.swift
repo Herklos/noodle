@@ -891,12 +891,14 @@ final class PastingTextView: UITextView {
     }
 
     /// Copies of the pasted files, kept until sent; a file that cannot be read is left out.
-    static func load(_ providers: [NSItemProvider]) async -> [OutgoingFile] {
+    static func load(_ providers: [NSItemProvider], hubs: URL = ComposerPaste.hubsFolder,
+                     ownFolders: [URL] = ComposerPaste.ownFolders) async -> [OutgoingFile] {
         var files: [OutgoingFile] = []
         for provider in providers {
             // Noodle's own Copy File leaves where the file is, for Noodle only.
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
                let url = await SharedItems.object(URL.self, from: provider), url.isFileURL,
+               mayRead(url, hubs: hubs, ownFolders: ownFolders),
                let file = try? PickedFiles.copy(url, named: provider.suggestedName ?? url.lastPathComponent) {
                 files.append(file)
             } else if let type = provider.registeredContentTypes.first(where: { $0.conforms(to: .data) && !$0.conforms(to: .url) }),
@@ -905,6 +907,32 @@ final class PastingTextView: UITextView {
             }
         }
         return files
+    }
+
+    /// Where the app keeps the Hubs it joined, as `NoodleMobileApp` does.
+    static var hubsFolder: URL {
+        AppGroup.hubs ?? URL.applicationSupportDirectory.appendingPathComponent("Hubs", isDirectory: true)
+    }
+
+    /// The app's own container and the one it shares with its extensions.
+    static var ownFolders: [URL] {
+        [URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+         AppGroup.identifier.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }]
+            .compactMap { $0 }
+    }
+
+    /// Any app can put a file's location on the pasteboard, so inside Noodle's own folders only a
+    /// conversation's file, as Copy File copies, is read: never a Hub's keys or other private data.
+    static func mayRead(_ url: URL, hubs: URL, ownFolders: [URL]) -> Bool {
+        func components(_ url: URL) -> [String] { url.standardizedFileURL.resolvingSymlinksInPath().pathComponents }
+        let path = components(url)
+        func below(_ folder: URL) -> ArraySlice<String>? {
+            let folder = components(folder)
+            return path.count > folder.count && Array(path.prefix(folder.count)) == folder ? path.dropFirst(folder.count) : nil
+        }
+        // <Hub>/Files/<attachment>/<name>, as the conversations keep their files.
+        if let rest = below(hubs), rest.count == 4, rest.dropFirst().first == "Files" { return true }
+        return !ownFolders.contains { below($0) != nil }
     }
 
     static func textFile(_ text: String) throws -> OutgoingFile {

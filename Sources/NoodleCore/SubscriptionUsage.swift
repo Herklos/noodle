@@ -36,6 +36,11 @@ public struct SubscriptionUsage: Codable, Hashable, Sendable {
         windows.filter { ($0.resetsAt ?? .distantFuture) > date }
     }
 
+    /// Whether `provider` reports plan limits at all, so Settings shows them only for its accounts.
+    public static func isReported(by provider: HarnessProvider) -> Bool {
+        provider == .codex || provider == .claudeCode
+    }
+
     /// Whether a runtime message carries plan limits for `provider`.
     public static func isReport(_ message: [String: Any], provider: HarnessProvider) -> Bool {
         switch provider {

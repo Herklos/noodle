@@ -116,6 +116,12 @@ final class SubscriptionUsageTests: XCTestCase {
         }
     }
 
+    /// Settings shows plan limits only for harnesses that report them; a signed-in Muse Code or
+    /// Antigravity account would otherwise always read Not available.
+    func testOnlyCodexAndClaudeCodeShowPlanLimits() {
+        XCTAssertEqual(HarnessProvider.allCases.filter(SubscriptionUsage.isReported(by:)), [.codex, .claudeCode])
+    }
+
     // MARK: - Settings text
 
     func testWindowsThatHaveResetAreNoLongerShown() {

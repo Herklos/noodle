@@ -95,7 +95,7 @@ struct ForwardSheet: View {
             .navigationTitle("Forward")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(sending) }
                 ToolbarItem(placement: .confirmationAction) {
                     if sending {
                         ProgressView()
@@ -105,6 +105,8 @@ struct ForwardSheet: View {
                     }
                 }
             }
+            // Once sending, the message goes whatever happens to the sheet, so it cannot be cancelled.
+            .interactiveDismissDisabled(sending)
         }
     }
 
