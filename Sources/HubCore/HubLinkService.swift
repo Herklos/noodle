@@ -1026,9 +1026,7 @@ import os
         return LinkStatus(hubName: hubName, userName: user?.name ?? "", planName: plan?.name ?? "",
                           harnesses: harnesses, endpoints: endpoints, canPairDevices: user?.canPairDevices ?? false,
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
-                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil,
-                          // This Mac as a Hub leaves its bots' calls to Noodle, which rings them itself.
-                          ringsCalls: bots != nil && !access.isPersonal)
+                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil)
     }
 
     /// Opens the port on the router, then keeps it open.

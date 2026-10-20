@@ -45,7 +45,7 @@ final class LinkCallTests: XCTestCase {
     }
 
     func testBotsCallsRingOverTheLinkAndOlderPayloadsStillDecode() throws {
-        let call = LinkIncomingCall(id: UUID(), botID: UUID(), conversationID: UUID(), reason: "The build is broken", expiresAt: date)
+        let call = LinkIncomingCall(id: UUID(), botID: UUID(), conversationID: UUID(), reason: "The build is broken", secondsLeft: 44)
         for event in [LinkEvent.callRinging(call), .callStopped(id: call.id)] {
             XCTAssertEqual(LinkProtocol.decodeEvent(LinkProtocol.encode(event)), event)
         }
@@ -62,7 +62,10 @@ final class LinkCallTests: XCTestCase {
         // What devices and Hubs from before calls could ring send.
         let decoder = JSONDecoder()
         XCTAssertNil(try decoder.decode(LinkCallStart.self, from: Data(#"{"conversationID":"\#(call.conversationID)"}"#.utf8)).answering)
-        XCTAssertFalse(try decoder.decode(LinkStatus.self, from: Data(#"{"hubName":"Mac mini"}"#.utf8)).ringsCalls)
+        // A ringing call with a time rather than seconds left is read against this device's clock.
+        let soon = Date().addingTimeInterval(30).timeIntervalSinceReferenceDate
+        let timed = try decoder.decode(LinkIncomingCall.self, from: Data(#"{"id":"\#(call.id)","botID":"\#(call.botID)","conversationID":"\#(call.conversationID)","reason":"Hi","expiresAt":\#(soon)}"#.utf8))
+        XCTAssertEqual(timed.secondsLeft, 30, accuracy: 5)
         let bot = call.botID.uuidString
         XCTAssertNil(try decoder.decode(LinkCallRecord.self, from: Data(#"{"botID":"\#(bot)","lines":[]}"#.utf8)).unanswered)
         let declinedCard = try decoder.decode(LinkCallRecord.self, from: Data(#"{"botID":"\#(bot)","unanswered":"declined","reason":"Why"}"#.utf8))

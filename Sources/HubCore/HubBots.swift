@@ -129,6 +129,7 @@ import NoodleVoicePeer
         let now = Date()
         agents.forEach { runtime.seedHeartbeatActivity(for: $0.id, at: now) }
         runtime.startAll(agents: agents, repository: repository)
+        ringPendingCalls(now: now)
         // Devices are offered the models the Hub finds.
         runtime.refreshCapabilities()
         applets.start(agents: agents)
@@ -951,6 +952,8 @@ import NoodleVoicePeer
         let peer: any VoiceCallPeering
         var cardID: UUID?
         var lines: [VoiceCallLine] = []
+        /// The call the bot placed that this answers, until it connects.
+        var answered: AgentCallRequest?
         init(agentID: UUID, conversationID: UUID, peer: any VoiceCallPeering) {
             self.agentID = agentID
             self.conversationID = conversationID
@@ -1000,12 +1003,17 @@ import NoodleVoicePeer
             VoiceCallIdentity(name: agent.displayName, description: agent.publicDescription, backstory: $0)
         }
         // Answering is checked last, after waiting for the voice, so two devices cannot both answer.
-        let answeredCallReason = try answer(start.answering, in: conversation, for: user)
+        let answered = try answer(start.answering, in: conversation, for: user)
         if let previous = calls[conversation.id] { finish(previous, failure: nil, hangingUp: true) }
         runtime.start(agent: agent, repository: repository)
         let peer = makeCallPeer()
-        let audio = try HubCallAudio(peer: peer, send: sendAudio)
+        let audio: HubCallAudio
+        do { audio = try HubCallAudio(peer: peer, send: sendAudio) } catch {
+            if let answered { leaveUnanswered(answered, .missed, at: Date()) }
+            throw error
+        }
         let call = Call(agentID: agent.id, conversationID: conversation.id, peer: peer)
+        call.answered = answered
         calls[conversation.id] = call
         peer.onFailure = { [weak self, weak call] in
             guard let self, let call, self.calls[call.conversationID] === call else { return }
@@ -1018,7 +1026,7 @@ import NoodleVoicePeer
                 try runtime.startVoiceCall(agentID: agent.id, VoiceCallRequest(
                     offer: offer, voice: voice, conversationID: conversation.id,
                     personName: user.name, identity: identity, recentLines: Array(recentLines),
-                    answeredCallReason: answeredCallReason
+                    answeredCallReason: answered?.reason
                 ), events: events)
             }) { [weak self, weak call] event in
                 guard let self, let call, self.calls[call.conversationID] === call else { return }
@@ -1028,6 +1036,7 @@ import NoodleVoicePeer
                 case .started:
                     // Only a call that connected gets its card in the conversation.
                     if call.cardID == nil {
+                        call.answered = nil
                         call.cardID = try? self.repository.recordVoiceCall(agentID: call.agentID, conversationID: call.conversationID).id
                         self.checkForChanges()
                     }
@@ -1044,6 +1053,7 @@ import NoodleVoicePeer
         } catch {
             if calls[conversation.id] === call { calls[conversation.id] = nil }
             peer.close()
+            leaveMissedIfAnswered(call)
             throw error
         }
         return HubCall(hear: audio.receive) { [weak self, weak call] in
@@ -1054,6 +1064,7 @@ import NoodleVoicePeer
 
     private func finish(_ call: Call, failure: String?, hangingUp: Bool) {
         calls[call.conversationID] = nil
+        leaveMissedIfAnswered(call)
         call.peer.onFailure = nil
         call.peer.close()
         if hangingUp { runtime.endVoiceCall(agentID: call.agentID) }
@@ -1076,11 +1087,16 @@ import NoodleVoicePeer
             return endUnansweredCall(request, .missed, at: now)
         }
         ringing[request.id] = request
-        onChange?(owner, .callRinging(LinkIncomingCall(request)))
+        onChange?(owner, .callRinging(LinkIncomingCall(request, now: now)))
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(max(0, request.expiresAt.timeIntervalSince(now))))
             self?.expireCalls(at: Date())
         }
+    }
+
+    /// Calls that rang when the Hub stopped ring on for what is left of them, or are left as missed.
+    public func ringPendingCalls(now: Date = Date()) {
+        for agent in (try? repository.loadAgents()) ?? [] { ringCall(of: agent.id, now: now) }
     }
 
     /// Ends the calls that rang for too long as missed.
@@ -1089,41 +1105,54 @@ import NoodleVoicePeer
     }
 
     /// The calls ringing for a user now, oldest first, for a device that subscribes while they ring.
-    public func ringingCalls(for user: UUID) -> [LinkIncomingCall] {
+    public func ringingCalls(for user: UUID, now: Date = Date()) -> [LinkIncomingCall] {
         ringing.values.filter { access.owner(ofBot: $0.agentID) == user }
-            .sorted { $0.requestedAt < $1.requestedAt }.map(LinkIncomingCall.init)
+            .sorted { $0.requestedAt < $1.requestedAt }.map { LinkIncomingCall($0, now: now) }
     }
 
+    /// Declining a call that no longer rings does nothing: another device may have answered or declined it first.
     public func declineCall(_ id: UUID, for user: HubUser) throws {
-        guard let request = ringing[id], access.owner(ofBot: request.agentID) == user.id else {
-            throw LinkError("That call is no longer ringing.")
-        }
+        guard let request = ringing[id] else { return }
+        guard access.owner(ofBot: request.agentID) == user.id else { throw LinkError("That call is not yours.") }
         endUnansweredCall(request, .declined, at: Date())
     }
 
-    /// Takes the ringing call a device answers, once, and says why the bot called. Every device stops ringing.
-    private func answer(_ id: UUID?, in conversation: BotConversation, for user: HubUser) throws -> String? {
+    /// Takes the ringing call a device answers, once. Every device stops ringing.
+    private func answer(_ id: UUID?, in conversation: BotConversation, for user: HubUser) throws -> AgentCallRequest? {
         guard let id else { return nil }
         guard let request = ringing[id], request.conversationID == conversation.id,
               access.owner(ofBot: request.agentID) == user.id else { throw LinkError("That call is no longer ringing.") }
         ringing[id] = nil
         onChange?(user.id, .callStopped(id: id))
         _ = try? repository.endCall(agentID: request.agentID, id: id)
-        return request.reason
+        return request
     }
 
-    /// Leaves the card in the bot's conversation and tells the bot, once per call.
+    /// Stops a call ringing and leaves it unanswered, once per call.
     private func endUnansweredCall(_ request: AgentCallRequest, _ outcome: UnansweredCall, at now: Date) {
         ringing[request.id] = nil
-        let owner = access.owner(ofBot: request.agentID)
-        if let owner { onChange?(owner, .callStopped(id: request.id)) }
+        if let owner = access.owner(ofBot: request.agentID) { onChange?(owner, .callStopped(id: request.id)) }
         guard (try? repository.endCall(agentID: request.agentID, id: request.id)) != nil else { return }
+        leaveUnanswered(request, outcome, at: now)
+    }
+
+    /// Leaves the card in the bot's conversation and tells the bot. A bot deleted or archived meanwhile
+    /// has nobody to tell, so its call ends quietly.
+    private func leaveUnanswered(_ request: AgentCallRequest, _ outcome: UnansweredCall, at now: Date) {
+        guard (try? repository.loadAgents())?.contains(where: { $0.id == request.agentID && $0.archivedAt == nil }) == true else { return }
         _ = try? repository.recordUnansweredCall(request, outcome, at: now)
         checkForChanges()
-        let personName = owner.flatMap { id in access.users.first { $0.id == id }?.name } ?? "Your person"
+        let personName = access.owner(ofBot: request.agentID).flatMap { id in access.users.first { $0.id == id }?.name } ?? "Your person"
         runtime.wake(request.agentID, note: AgentCallDocumentation.unansweredNote(outcome, personName: personName, reason: request.reason,
                                                                                  conversationID: request.conversationID),
                      repository: repository)
+    }
+
+    /// A call the person answered that never connected is left as missed, so the bot still hears of it.
+    private func leaveMissedIfAnswered(_ call: Call) {
+        guard let answered = call.answered else { return }
+        call.answered = nil
+        leaveUnanswered(answered, .missed, at: Date())
     }
 
     private func attachments(in conversationID: UUID) throws -> [UUID: ConversationAttachment] {
@@ -1750,8 +1779,8 @@ final class HubCallAudio: @unchecked Sendable {
 }
 
 extension LinkIncomingCall {
-    init(_ request: AgentCallRequest) {
+    init(_ request: AgentCallRequest, now: Date) {
         self.init(id: request.id, botID: request.agentID, conversationID: request.conversationID, reason: request.reason,
-                  expiresAt: request.expiresAt)
+                  secondsLeft: max(0, request.expiresAt.timeIntervalSince(now)))
     }
 }

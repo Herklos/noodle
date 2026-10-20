@@ -156,7 +156,8 @@ import XCTest
         XCTAssertEqual(ringing.agentID, agent.id)
         XCTAssertEqual(ringing.conversationID, local.id)
         XCTAssertEqual(ringing.reason, "The build is broken")
-        XCTAssertEqual(ringing.expiresAt, request.expiresAt)
+        // Seconds left travel, not a time, so it ends here when it ends on the Hub, give or take the trip.
+        XCTAssertEqual(ringing.expiresAt.timeIntervalSince(request.expiresAt), 0, accuracy: 5)
 
         try await mirror.declineCall(request.id)
         for _ in 0..<50 where stopped.isEmpty { try await Task.sleep(for: .milliseconds(100)) }

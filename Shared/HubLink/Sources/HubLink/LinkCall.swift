@@ -23,11 +23,35 @@ public struct LinkIncomingCall: Codable, Equatable, Identifiable, Sendable {
     public var conversationID: UUID
     /// Why the bot is calling.
     public var reason: String
-    /// When ringing stops and the call counts as missed.
-    public var expiresAt: Date
+    /// How long it rings on from when the Hub sent it before it counts as missed. Seconds left rather than a
+    /// time, so a device whose clock is off rings as long as the Hub.
+    public var secondsLeft: TimeInterval
 
-    public init(id: UUID, botID: UUID, conversationID: UUID, reason: String, expiresAt: Date) {
-        self.id = id; self.botID = botID; self.conversationID = conversationID; self.reason = reason; self.expiresAt = expiresAt
+    public init(id: UUID, botID: UUID, conversationID: UUID, reason: String, secondsLeft: TimeInterval) {
+        self.id = id; self.botID = botID; self.conversationID = conversationID; self.reason = reason; self.secondsLeft = secondsLeft
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, botID, conversationID, reason, secondsLeft, expiresAt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        botID = try c.decode(UUID.self, forKey: .botID)
+        conversationID = try c.decode(UUID.self, forKey: .conversationID)
+        reason = try c.decode(.reason, or: "")
+        // Hubs that sent a time instead are read as well as this device's clock allows.
+        if let seconds = try c.decodeIfPresent(TimeInterval.self, forKey: .secondsLeft) { secondsLeft = seconds }
+        else if let expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt) { secondsLeft = expiresAt.timeIntervalSinceNow }
+        else { secondsLeft = 45 }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(botID, forKey: .botID)
+        try c.encode(conversationID, forKey: .conversationID)
+        try c.encode(reason, forKey: .reason)
+        try c.encode(secondsLeft, forKey: .secondsLeft)
     }
 }
 

@@ -659,7 +659,7 @@ import Observation
                         guard let agent = entries.first(where: { $0.remote == call.botID })?.agent,
                               let thread = thread(remote: call.conversationID) else { break }
                         onCallRinging?(AgentCallRequest(id: call.id, agentID: agent, conversationID: thread.local, reason: call.reason,
-                                                        requestedAt: Date(), expiresAt: call.expiresAt))
+                                                        requestedAt: Date(), expiresAt: Date().addingTimeInterval(call.secondsLeft)))
                     case .callStopped(let id):
                         onCallStopped?(id)
                     }
