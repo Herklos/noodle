@@ -178,10 +178,18 @@ private struct ConversationRow: View {
                         .foregroundStyle(.tertiary)
                 }
 
+                // In place of the preview's first line, so the row keeps its height.
+                if let pause {
+                    Text(pause)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
+
                 Text(store.preview(for: conversation))
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(pause == nil ? 2 : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -212,9 +220,12 @@ private struct ConversationRow: View {
 
     private var runtimeHelp: String { store.runtimeHelp(for: conversation) }
 
+    private var pause: String? { store.pauseSummary(for: conversation) }
+
     private var accessibilityLabel: String {
         let unread = store.hasUnreadMessages(in: conversation) ? "Unread, " : ""
-        return "\(unread)\(store.title(for: conversation)), \(store.preview(for: conversation))"
+        let paused = pause.map { "\($0), " } ?? ""
+        return "\(unread)\(store.title(for: conversation)), \(paused)\(store.preview(for: conversation))"
     }
 }
 

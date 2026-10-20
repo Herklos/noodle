@@ -71,6 +71,10 @@ struct ConversationWindowView: View {
                 .sharedBackgroundVisibility(.hidden)
 
             ToolbarItem(placement: .primaryAction) {
+                if let conversation { ConversationPauseControl(conversation: conversation) }
+            }
+
+            ToolbarItem(placement: .primaryAction) {
                 if let conversation { VoiceCallToolbarControl(conversation: conversation) }
             }
 

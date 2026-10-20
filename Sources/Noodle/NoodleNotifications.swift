@@ -98,6 +98,28 @@ enum NoodleNotifications {
         }
     }
 
+    /// Only while Noodle is in the background: in front, the sidebar and the conversation show it.
+    @MainActor
+    static func postPaused(_ agent: AgentRecord, summary: String, detail: String, conversationID: UUID?) {
+        guard shouldPresentActivity else { return }
+        let content = UNMutableNotificationContent()
+        content.title = agent.displayName
+        content.subtitle = summary
+        content.body = detail
+        content.sound = .default
+        if let conversationID { content.userInfo = [conversationIDKey: conversationID.uuidString] }
+        if let avatar = avatarAttachment(for: agent, messageID: UUID()) {
+            content.attachments = [avatar]
+        }
+        // One per bot: a later pause replaces the earlier banner.
+        let request = UNNotificationRequest(identifier: "paused-\(agent.id.uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                logger.error("Unable to deliver notification: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     @MainActor
     private static func avatarAttachment(
         for agent: AgentRecord,
