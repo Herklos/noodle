@@ -8,6 +8,7 @@
 - Touch and hold a file in a conversation and choose Forward… to send it to another bot or group, with an optional comment. It arrives there as your message, as if you had attached the file yourself.
 - Touch and hold a text file in a conversation to Copy its text or Copy File, which pastes into other apps as the file.
 - Paste a copied file into the message field to attach it, instead of its text. Long pasted text, over 12 lines or 1,200 characters, is attached as a text file, as on the Mac.
+- The small Bot widget has a Call button for a bot that takes voice calls. Tap it to open the chat and call the bot straight away; tap anywhere else to open the chat as before.
 
 ### Changed
 
@@ -42,6 +43,8 @@
 - Choose Copy File and paste into the message field: check the file waits above the field with the same name, and sends. Paste it into Files or Mail: check it arrives as a file.
 - Copy a file in the Files app and paste it into the message field: check it is attached, not its text.
 - Paste text of more than 12 lines into the message field: check it is attached as Pasted Text.txt and the field stays as it was. Paste a short text: check it goes into the field as before. Copy a picture and paste it: check it is attached as before.
+- With a bot that takes voice calls, open Noodle, then add the small Bot widget for it, or edit one you have to show it: check a green Call button shows under its name. Tap Call, also with Noodle closed: check its chat opens and the call starts, asking for the microphone the first time, as the chat's Call button does, and you hear the bot.
+- Tap the widget away from Call: check only the chat opens. Choose a bot that cannot take calls: check there is no Call button. Use a tinted Home Screen: check Call can still be read. With VoiceOver, check the bot and "Call" with its name are read separately.
 
 ## [0.39.0] - 2026-10-18
 

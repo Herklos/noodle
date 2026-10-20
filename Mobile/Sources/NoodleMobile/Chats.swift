@@ -1601,12 +1601,21 @@ struct AgentsView: View {
     }
 
     /// Opens a tapped notification's or widget's conversation once its Hub's bots have loaded, whichever space is shown.
+    /// A widget's call button calls the bot as well, as the chat's Call button does.
     private func open() {
         guard let route = opening,
               let hub = chats.first(where: { PushTopic.topic(for: $0.pairing) == route.topic }),
               let thread = hub.listedThreads.first(where: { $0.conversationID == route.conversation }) else { return }
         path = [ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread.id)]
         opening = nil
+        if Self.startsCall(route, to: thread, calling: hub.calls.call?.threadID) {
+            hub.calls.start(threadID: thread.id, conversationID: thread.conversationID, name: thread.name)
+        }
+    }
+
+    /// Whether opening a conversation calls its bot: only for a call button, while the bot takes calls and is not on one already.
+    static func startsCall(_ route: NotificationRoute, to thread: HubThread, calling: UUID?) -> Bool {
+        route.call && thread.bot?.canCall == true && calling != thread.id
     }
 
     /// What the widgets show, once every Hub's list is known or could not be, so they never show a Hub's bots gone.

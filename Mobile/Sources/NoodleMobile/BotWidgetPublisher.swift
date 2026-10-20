@@ -13,6 +13,8 @@ import WidgetKit
             var hubName: String
             var conversationID: UUID
             var face: BotFace
+            /// Whether it takes voice calls, as the chat's Call button shows.
+            var canCall = false
 
             var id: String { WidgetBot.id(hub: hub, conversationID: conversationID) }
         }
@@ -27,7 +29,7 @@ import WidgetKit
         func bots(_ threads: [(HubChats, HubThread)]) -> [Source.Bot] {
             threads.compactMap { hub, thread in
                 thread.bot.map { Source.Bot(hub: CurrentHub.space(of: hub.pairing), hubName: hub.pairing.hubName,
-                                            conversationID: $0.conversationID, face: BotFace($0)) }
+                                            conversationID: $0.conversationID, face: BotFace($0), canCall: $0.canCall) }
             }
         }
         let all = bots(HubChats.sorted(chats.flatMap { hub in hub.listedThreads.map { (hub, $0) } }))
@@ -60,7 +62,7 @@ import WidgetKit
         published = source
         let bots = source.bots.map { bot in
             WidgetBot(hub: bot.hub, conversationID: bot.conversationID, name: bot.face.name, hubName: bot.hubName,
-                      image: picture(of: bot))
+                      image: picture(of: bot), callable: bot.canCall)
         }
         let shown = Set(bots.map(\.id))
         pictures = pictures.filter { shown.contains($0.key) }
