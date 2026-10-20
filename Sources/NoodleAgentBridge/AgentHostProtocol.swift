@@ -93,4 +93,6 @@ public enum AgentHostIdentity {
     func receive(_ data: Data, isError: Bool)
     func terminated(_ status: Int32)
     func signInChallenge(_ url: String, code: String)
+    /// A Codex account check read the account's plan limits: a JSON-encoded SubscriptionUsage.
+    func accountUsage(_ data: Data)
 }

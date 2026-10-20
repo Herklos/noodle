@@ -76,6 +76,8 @@ public enum HarnessStorage {
 @MainActor public final class CodexSetupProvider: HarnessSetupProviding {
     private let codexHome: URL
     private let environment: [String: String]?
+    /// Receives the account's plan limits, read with each sign-in check of a signed-in account.
+    public var onUsage: (@MainActor (SubscriptionUsage) -> Void)?
     /// The Agent Host passes its own fixed environment; the app uses its own.
     public init(codexHome: URL, environment: [String: String]? = nil) {
         self.codexHome = codexHome
@@ -88,7 +90,7 @@ public enum HarnessStorage {
     }
 
     public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
-        try await session(for: installation).run()
+        try await session(for: installation, onUsage: onUsage).run()
     }
 
     public func signIn(for installation: HarnessInstallation,
@@ -109,11 +111,13 @@ public enum HarnessStorage {
         )
     }
 
-    private func session(for installation: HarnessInstallation, refresh: Bool = false) throws -> CodexAccountSession {
+    private func session(for installation: HarnessInstallation, refresh: Bool = false,
+                         onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil) throws -> CodexAccountSession {
         guard installation.provider == .codex, let path = installation.executablePath else {
             throw HarnessSetupError("Install the harness first.")
         }
-        return CodexAccountSession(executableURL: URL(fileURLWithPath: path), codexHome: codexHome, environment: environment, refresh: refresh)
+        return CodexAccountSession(executableURL: URL(fileURLWithPath: path), codexHome: codexHome, environment: environment,
+                                   refresh: refresh, onUsage: onUsage)
     }
 }
 
@@ -174,12 +178,18 @@ enum CodexAccountResponse {
     }
 
     private let refresh: Bool
+    private let onUsage: (@MainActor (SubscriptionUsage) -> Void)?
+    /// The sign-in status already read while the plan limits are asked for. The
+    /// limits are extra: if they cannot be read, the check still reports this.
+    private var readStatus: HarnessAuthenticationStatus?
 
-    init(executableURL: URL, codexHome: URL, environment: [String: String]? = nil, refresh: Bool = false) {
+    init(executableURL: URL, codexHome: URL, environment: [String: String]? = nil, refresh: Bool = false,
+         onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil) {
         self.executableURL = executableURL
         self.codexHome = codexHome
         baseEnvironment = environment
         self.refresh = refresh
+        self.onUsage = onUsage
     }
 
     func run(onChallenge: (@MainActor (HarnessSignInChallenge) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
@@ -267,6 +277,11 @@ enum CodexAccountResponse {
                     if onChallenge != nil, !loginCompleted {
                         send("account/login/start", id: 3, params: ["type": "chatgptDeviceCode"])
                         setTimeout(seconds: 30)
+                    } else if status == .authenticated, onUsage != nil {
+                        // Older Codex takes no parameters here, so none are sent.
+                        readStatus = status
+                        send("account/rateLimits/read", id: 5, params: nil)
+                        setTimeout(seconds: 10)
                     } else { finish(.success(status)) }
                 case 3:
                     guard let id = result["loginId"] as? String, !id.isEmpty else {
@@ -276,6 +291,9 @@ enum CodexAccountResponse {
                     let challenge = try CodexAccountResponse.challenge(result)
                     setTimeout(seconds: 600)
                     onChallenge?(challenge)
+                case 5:
+                    if let usage = SubscriptionUsage.codexRead(result, at: Date()) { onUsage?(usage) }
+                    finish(.success(readStatus ?? .authenticated))
                 default: break
                 }
             } catch { finish(.failure(error)) }
@@ -293,8 +311,9 @@ enum CodexAccountResponse {
         }
     }
 
-    private func send(_ method: String, id: Int? = nil, params: [String: Any] = [:]) {
-        var message: [String: Any] = ["method": method, "params": params]
+    private func send(_ method: String, id: Int? = nil, params: [String: Any]? = [:]) {
+        var message: [String: Any] = ["method": method]
+        if let params { message["params"] = params }
         if let id { message["id"] = id }
         guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
         input?.write(data + Data([10])) { [weak self] _ in
@@ -313,6 +332,8 @@ enum CodexAccountResponse {
 
     private func finish(_ result: Result<HarnessAuthenticationStatus, Error>) {
         guard let continuation else { return }
+        var result = result
+        if case .failure(let error) = result, !(error is CancellationError), let readStatus { result = .success(readStatus) }
         self.continuation = nil
         if let loginID { send("account/login/cancel", id: 4, params: ["loginId": loginID]) }
         loginID = nil

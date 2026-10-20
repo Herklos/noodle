@@ -229,6 +229,7 @@ final class NoodleStore {
                               deviceName: Host.current().localizedName ?? "Mac")
         harnessSetup = HarnessSetupController(versionChecker: HarnessVersionChecker(),
             installer: repository == nil ? ManagedHarnessInstaller(store: self.repository.managedHarnesses) : nil)
+        harnessSetup.subscriptionUsage = self.runtime.subscriptionUsage
 
         transcriptPositions = TranscriptPositionStore(fileURL: self.repository.rootURL.appendingPathComponent("scroll-positions.json"))
         patchReviewState = PatchReviewStore(fileURL: self.repository.rootURL.appendingPathComponent("patch-reviews.json"))
@@ -297,6 +298,7 @@ final class NoodleStore {
         }
         noodletAnnotations = NoodletAnnotations(applets: applets)
         harnessProfiles = HarnessProfilesController(store: self.repository.harnessProfiles)
+        harnessProfiles.subscriptionUsage = self.runtime.subscriptionUsage
         thisMac = ThisMacHub(repository: self.repository, runtime: self.runtime, applets: applets, profiles: harnessProfiles,
                              service: mcp.service)
         thisMac.imageGeneration = imageGeneration

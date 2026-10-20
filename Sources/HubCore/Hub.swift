@@ -46,6 +46,7 @@ import NoodleRuntime
         }
         self.runtime.remoteModels = RemoteModelAccountStore(repository: root)
         harnessProfiles = HarnessProfilesController(store: repository.harnessProfiles)
+        harnessProfiles.subscriptionUsage = self.runtime.subscriptionUsage
         usage = UsageHistory(url: root.appendingPathComponent("usage.sqlite"))
         self.runtime.onUsage = { [usage] in usage.record($0) }
         self.runtime.recordedUsage = { [usage] in usage.recorded(session: $0) }

@@ -25,6 +25,14 @@ public final class HarnessSetupController {
     public private(set) var checking: Set<HarnessProvider> = []
     public private(set) var snapshots: [HarnessProvider: HarnessPresentationSnapshot]
     private let providers: [HarnessProvider: any HarnessSetupProviding]
+    /// Where the system login's plan limits go when a sign-in check reads them.
+    @ObservationIgnored public var subscriptionUsage: SubscriptionUsageStore? {
+        didSet {
+            (providers[.codex] as? CodexAccountProvider)?.onUsage = { [weak usage = self.subscriptionUsage] in
+                usage?.record($0, provider: .codex, profile: nil)
+            }
+        }
+    }
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let versionChecker: (any HarnessVersionChecking)?
     @ObservationIgnored private let installer: (any HarnessInstalling)?
