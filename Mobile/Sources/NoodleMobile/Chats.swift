@@ -812,6 +812,9 @@ enum HubThread: HubConversation {
         case .effectWaiting(let id):
             waitingEffects.insert(id)
             return
+        // Calls ring on iPhone and iPad in a later version.
+        case .callRinging, .callStopped:
+            return
         }
         saveCache()
     }

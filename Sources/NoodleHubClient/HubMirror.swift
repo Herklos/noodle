@@ -58,6 +58,10 @@ import Observation
     @ObservationIgnored public var onRead: ((_ conversation: UUID, _ upTo: Date) -> Void)?
     /// Runs with a conversation here whose background changed to the Hub's.
     @ObservationIgnored public var onBackgroundChanged: ((_ conversation: UUID) -> Void)?
+    /// One of this Mac's user's bots on the Hub is calling them, with the bot and conversation here.
+    @ObservationIgnored public var onCallRinging: ((AgentCallRequest) -> Void)?
+    /// A call that rang was answered on some device, declined, or not answered in time.
+    @ObservationIgnored public var onCallStopped: ((_ id: UUID) -> Void)?
     /// This Mac's user's tool connections on the Hub, as last listed.
     public private(set) var connections: [LinkConnection] = []
     /// This Mac's user's computers on the Hub, as last listed.
@@ -154,9 +158,15 @@ import Observation
 
     /// Calls the bot of a conversation here on the Hub. What happens comes down the channel as
     /// `LinkCallEvent`s among the bot's `LinkCallAudio`, which the person's goes up; cancelling it hangs up.
-    public func openCall(in conversation: UUID) async throws -> LinkChannel {
+    /// `answering` names the call the bot placed, as `onCallRinging` gave it, when this answers it.
+    public func openCall(in conversation: UUID, answering: UUID? = nil) async throws -> LinkChannel {
         guard let thread = thread(local: conversation) else { throw LinkError("That conversation is not on this Hub.") }
-        return try await pairing.channel(.startCall(LinkCallStart(conversationID: thread.remote)))
+        return try await pairing.channel(.startCall(LinkCallStart(conversationID: thread.remote, answering: answering)))
+    }
+
+    /// Declines a call a bot on the Hub placed; the Hub leaves it as declined and stops it ringing everywhere.
+    public func declineCall(_ id: UUID) async throws {
+        _ = try await pairing.request(.declineCall(id: id))
     }
 
     /// Opens a noodlet a bot shared in a conversation here to run on this Mac.
@@ -645,6 +655,13 @@ import Observation
                     case .backgroundChanged(let id, let background):
                         // One that cannot be fetched now is tried again at the next sync.
                         try? await copyBackground(background, of: id)
+                    case .callRinging(let call):
+                        guard let agent = entries.first(where: { $0.remote == call.botID })?.agent,
+                              let thread = thread(remote: call.conversationID) else { break }
+                        onCallRinging?(AgentCallRequest(id: call.id, agentID: agent, conversationID: thread.local, reason: call.reason,
+                                                        requestedAt: Date(), expiresAt: call.expiresAt))
+                    case .callStopped(let id):
+                        onCallStopped?(id)
                     }
                 }
             } catch {
@@ -832,7 +849,8 @@ import Observation
 
     private func callRecord(_ record: LinkCallRecord) -> VoiceCallRecord {
         VoiceCallRecord(agentID: entries.first { $0.remote == record.botID }?.agent ?? record.botID, endedAt: record.endedAt,
-                        lines: record.lines.map { VoiceCallLine($0.speaker == .you ? .person : .bot, $0.text, at: $0.at) })
+                        lines: record.lines.map { VoiceCallLine($0.speaker == .you ? .person : .bot, $0.text, at: $0.at) },
+                        unanswered: record.unanswered.map { $0 == .declined ? .declined : .missed }, reason: record.reason)
     }
 
     private func setSynced(_ count: Int, in remote: UUID) {

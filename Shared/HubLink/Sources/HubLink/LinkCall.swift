@@ -5,11 +5,34 @@ import Foundation
 /// goes up and down the call's channel as `LinkCallAudio`; the Hub connects it to the bot's voice.
 public struct LinkCallStart: Codable, Equatable, Sendable {
     public var conversationID: UUID
+    /// The call the bot placed that this answers, as `callRinging` named it. Nil when the person calls.
+    public var answering: UUID?
 
-    public init(conversationID: UUID) {
+    public init(conversationID: UUID, answering: UUID? = nil) {
         self.conversationID = conversationID
+        self.answering = answering
     }
 }
+
+/// A call one of the user's bots placed, ringing on their devices. Nothing connects to the bot's voice
+/// until a device answers it with `startCall`.
+public struct LinkIncomingCall: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var botID: UUID
+    /// The bot's conversation with the user, where the call is answered or left as missed.
+    public var conversationID: UUID
+    /// Why the bot is calling.
+    public var reason: String
+    /// When ringing stops and the call counts as missed.
+    public var expiresAt: Date
+
+    public init(id: UUID, botID: UUID, conversationID: UUID, reason: String, expiresAt: Date) {
+        self.id = id; self.botID = botID; self.conversationID = conversationID; self.reason = reason; self.expiresAt = expiresAt
+    }
+}
+
+/// How a call a bot placed ended without being answered.
+public enum LinkUnansweredCall: String, Codable, Equatable, Sendable { case missed, declined }
 
 public struct LinkCallLine: Codable, Equatable, Sendable {
     public enum Speaker: String, Codable, Sendable { case you, bot }
@@ -32,20 +55,29 @@ public struct LinkCallRecord: Codable, Equatable, Sendable {
     /// Nil while the call is on.
     public var endedAt: Date?
     public var lines: [LinkCallLine]
+    /// Set for a call the bot placed that nobody answered. Nil from older Hubs, whose cards are all calls that happened.
+    public var unanswered: LinkUnansweredCall?
+    /// Why the bot called, for a call it placed.
+    public var reason: String?
 
-    public init(botID: UUID, endedAt: Date? = nil, lines: [LinkCallLine] = []) {
+    public init(botID: UUID, endedAt: Date? = nil, lines: [LinkCallLine] = [], unanswered: LinkUnansweredCall? = nil, reason: String? = nil) {
         self.botID = botID
         self.endedAt = endedAt
         self.lines = lines
+        self.unanswered = unanswered
+        self.reason = reason
     }
 
-    private enum CodingKeys: String, CodingKey { case botID, endedAt, lines }
+    private enum CodingKeys: String, CodingKey { case botID, endedAt, lines, unanswered, reason }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         botID = try c.decode(UUID.self, forKey: .botID)
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         lines = try c.decode(.lines, or: [])
+        // A kind of unanswered call a later Hub adds reads as missed.
+        unanswered = try c.decodeIfPresent(String.self, forKey: .unanswered).map { LinkUnansweredCall(rawValue: $0) ?? .missed }
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
     }
 }
 

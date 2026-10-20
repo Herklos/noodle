@@ -2,10 +2,11 @@ import AppKit
 import NoodleCore
 import SwiftUI
 
-/// Calls bots on this Mac place with `messenger --call`. They ring in a panel until the person
-/// answers or declines, or until they expire; only answering connects to the bot's voice.
+/// Calls bots place with `messenger --call`. They ring in a panel until the person answers or
+/// declines, or until they expire; only answering connects to the bot's voice. A bot on this Mac
+/// rings here; a Hub holds its own bots' calls and rings them on every device of their owner.
 extension NoodleStore {
-    /// Rings the call a bot placed, or leaves it as missed when it can no longer ring.
+    /// Rings the call a bot on this Mac placed, or leaves it as missed when it can no longer ring.
     func ringCall(of agentID: UUID, now: Date = Date()) {
         guard let request = repository.pendingCall(agentID: agentID),
               !ringingCalls.contains(where: { $0.id == request.id }) else { return }
@@ -15,6 +16,20 @@ extension NoodleStore {
               voiceCallTarget(for: conversation)?.id == agentID else {
             return endUnansweredCall(request, .missed, at: now)
         }
+        ring(request)
+    }
+
+    /// Rings a call a bot on a Hub placed, with the bot and conversation here. The Hub says when it stops.
+    func ringHubCall(_ request: AgentCallRequest, now: Date = Date()) {
+        guard !ringingCalls.contains(where: { $0.id == request.id }), request.expiresAt > now,
+              !runsHere(request.agentID), voiceCalls.call == nil, isCallable(request.agentID) else { return }
+        ring(request)
+    }
+
+    /// Stops ringing a call answered or declined elsewhere, or that the Hub left as missed.
+    func stopRinging(_ id: UUID) { _ = takeRingingCall(id) }
+
+    private func ring(_ request: AgentCallRequest) {
         ringingCalls.append(request)
         guard connectsServices else { return }
         IncomingCallPanel.shared.update(self)
@@ -34,9 +49,11 @@ extension NoodleStore {
 
     func isCallable(_ agentID: UUID) -> Bool { agents.contains { $0.id == agentID && $0.archivedAt == nil } }
 
-    /// Ends the calls that rang for too long as missed.
+    /// Ends the calls that rang for too long as missed. A Hub's are left to the Hub, which keeps them.
     func expireCalls(at now: Date) {
-        for request in ringingCalls where request.expiresAt <= now { endUnansweredCall(request, .missed, at: now) }
+        for request in ringingCalls where request.expiresAt <= now {
+            if runsHere(request.agentID) { endUnansweredCall(request, .missed, at: now) } else { stopRinging(request.id) }
+        }
     }
 
     /// Answering is calling the bot, told why it called, in the window that shows its conversation.
@@ -44,9 +61,14 @@ extension NoodleStore {
         // Answering never hangs up a call in progress; this one rings on until it is missed.
         guard voiceCalls.call == nil else { return }
         guard let request = takeRingingCall(id),
-              (try? repository.endCall(agentID: request.agentID, id: id)) != nil,
               let conversation = conversations.first(where: { $0.id == request.conversationID }) else { return }
-        startVoiceCall(in: conversation, media: media, answeredCallReason: request.reason)
+        if runsHere(request.agentID) {
+            guard (try? repository.endCall(agentID: request.agentID, id: id)) != nil else { return }
+            startVoiceCall(in: conversation, media: media, answeredCallReason: request.reason)
+        } else {
+            // The Hub checks the call still rings and tells the bot why it called.
+            startVoiceCall(in: conversation, media: media, answeredCallID: id)
+        }
         guard connectsServices else { return }
         NSApp.activate(ignoringOtherApps: true)
         if !conversationWindows.focus(conversation.id) {
@@ -57,7 +79,12 @@ extension NoodleStore {
 
     func declineCall(_ id: UUID) {
         guard let request = ringingCalls.first(where: { $0.id == id }) else { return }
-        endUnansweredCall(request, .declined, at: Date())
+        guard !runsHere(request.agentID) else { return endUnansweredCall(request, .declined, at: Date()) }
+        stopRinging(id)
+        guard let mirror = hubMirror(forAgent: request.agentID) else { return }
+        Task { [weak self] in
+            do { try await mirror.declineCall(id) } catch { self?.errorMessage = "Could not decline the call: \(error.localizedDescription)" }
+        }
     }
 
     /// Leaves the card in the conversation, which shows it unread, and tells the bot, once per call.

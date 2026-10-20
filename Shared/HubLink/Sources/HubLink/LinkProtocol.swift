@@ -258,6 +258,10 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Takes the chat effect waiting in one of this user's conversations, now that this device shows it; it
     /// plays on no other device. Answered with `effect`, empty when none waits.
     case takeEffect(conversationID: UUID)
+    /// Declines a call one of this user's bots placed, which rings on every device of theirs until
+    /// one answers or declines it, or it expires. Answered with `done`. Answering is `startCall` with
+    /// `answering`.
+    case declineCall(id: UUID)
 }
 
 /// A chat effect a bot sent, waiting for its conversation to be seen. Its kind is a name; one an app does
@@ -675,6 +679,11 @@ public enum LinkEvent: Codable, Equatable, Sendable {
     case usersChanged
     /// A chat effect waits in one of this user's conversations, to be taken by the device that shows it.
     case effectWaiting(conversationID: UUID)
+    /// One of this user's bots is calling them: ring until `callStopped`, or until it expires. Pushed again
+    /// to a device that subscribes while it rings. Only from a Hub whose status says `ringsCalls`.
+    case callRinging(LinkIncomingCall)
+    /// A call that rang was answered on some device, declined, or not answered in time: stop ringing.
+    case callStopped(id: UUID)
 }
 
 /// Someone else on the Hub, as anyone sharing a bot sees them.
@@ -1063,11 +1072,13 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     public var imageModel: String?
     /// Whether the Hub keeps the `annotation` of the files it is sent, so a device may offer to comment on one.
     public var keepsAnnotations: Bool
+    /// Whether the user's bots here can call them, ringing with `callRinging`. Older Hubs never ring.
+    public var ringsCalls: Bool
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
                 canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
-                keepsAnnotations: Bool = false) {
+                keepsAnnotations: Bool = false, ringsCalls: Bool = false) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1081,11 +1092,12 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.avatar = avatar
         self.imageModel = imageModel
         self.keepsAnnotations = keepsAnnotations
+        self.ringsCalls = ringsCalls
     }
 
     private enum CodingKeys: String, CodingKey {
         case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
-             keepsAnnotations
+             keepsAnnotations, ringsCalls
     }
 
     public init(from decoder: Decoder) throws {
@@ -1103,6 +1115,7 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
         imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel)
         keepsAnnotations = try c.decode(.keepsAnnotations, or: false)
+        ringsCalls = try c.decode(.ringsCalls, or: false)
     }
 }
 

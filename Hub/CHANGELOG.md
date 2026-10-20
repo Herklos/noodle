@@ -6,6 +6,7 @@
 
 - Admins can also suspend and restore regular users from Noodle Mobile.
 - Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
+- Bots whose harness takes voice calls (Codex) can call their owner with messenger --call when something needs them now. The call rings on the owner's devices that run a Noodle with calls, until one answers or declines it or 45 seconds pass; the Hub connects the bot's voice only once it is answered. A declined or missed call leaves a card in the bot's conversation and tells the bot. A bot can call at most once every 30 minutes and three times a day.
 
 ### Fixed
 

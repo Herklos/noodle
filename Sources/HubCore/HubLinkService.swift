@@ -443,6 +443,10 @@ import os
         streams[id] = stream
         // The device waits for a first word, so it hears whatever is pushed from here on.
         stream.send(Data())
+        // Calls that started ringing before it subscribed ring on it too.
+        if let user = access.device(for: stream.peer)?.user {
+            for call in bots?.ringingCalls(for: user) ?? [] { stream.send(LinkProtocol.encode(LinkEvent.callRinging(call))) }
+        }
         // The bots a device hosts are online while it follows the Hub.
         bots?.hostsChanged()
         stream.onClose { [weak self] in
@@ -825,6 +829,9 @@ import os
             return .hubSharing(try await sharingThroughHubs(botID, from: key).list(botID))
         case .takeEffect(let conversationID):
             return .effect(try hubBots().takeEffect(in: conversationID, for: try user(key)))
+        case .declineCall(let id):
+            try hubBots().declineCall(id, for: try user(key))
+            return .done
         case .shareOnHub(let botID, let hub, let people):
             return .hubSharing(try await sharingThroughHubs(botID, from: key).share(botID, hub, people))
         }
@@ -1019,7 +1026,9 @@ import os
         return LinkStatus(hubName: hubName, userName: user?.name ?? "", planName: plan?.name ?? "",
                           harnesses: harnesses, endpoints: endpoints, canPairDevices: user?.canPairDevices ?? false,
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
-                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil)
+                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil,
+                          // This Mac as a Hub leaves its bots' calls to Noodle, which rings them itself.
+                          ringsCalls: bots != nil && !access.isPersonal)
     }
 
     /// Opens the port on the router, then keeps it open.

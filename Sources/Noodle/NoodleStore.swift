@@ -820,6 +820,8 @@ final class NoodleStore {
                 mirror.onChange = { [weak self] in self?.hubBotsChanged() }
                 mirror.onRead = { [weak self] in self?.readElsewhere($0, upTo: $1) }
                 mirror.onBackgroundChanged = { [weak self] in self?.reloadBackground(of: $0) }
+                mirror.onCallRinging = { [weak self] in self?.ringHubCall($0) }
+                mirror.onCallStopped = { [weak self] in self?.stopRinging($0) }
                 // People on the Hub talk to this Mac's own bots there, which run here.
                 mirror.hosting.onMessages = { [weak self] ids in
                     guard let self else { return }
@@ -1471,7 +1473,7 @@ final class NoodleStore {
         router: VoiceCallRouter(local: runtime, isOnHub: { [weak self] in self?.hubMirror(forAgent: $0) != nil },
                                 openHubCall: { [weak self] agentID, setup in
             guard let mirror = self?.hubMirror(forAgent: agentID) else { throw VoiceCallUnavailable() }
-            return try await mirror.openCall(in: setup.conversationID)
+            return try await mirror.openCall(in: setup.conversationID, answering: setup.answeredCallID)
         }, makePeer: { [weak self] in self?.makeCallPeer() ?? VoiceCallPeer() }),
         makeMedia: { EngineVoiceCallMedia() }, report: { [weak self] in self?.errorMessage = $0 },
         record: { [weak self] in self?.recordVoiceCall($0) },
@@ -1561,7 +1563,8 @@ final class NoodleStore {
         return agent
     }
 
-    func startVoiceCall(in conversation: BotConversation, media: (any VoiceCallMedia)? = nil, answeredCallReason: String? = nil) {
+    func startVoiceCall(in conversation: BotConversation, media: (any VoiceCallMedia)? = nil, answeredCallReason: String? = nil,
+                        answeredCallID: UUID? = nil) {
         guard let agent = voiceCallTarget(for: conversation) else { return }
         let personName = (try? repository.loadAgentOwner(agent))?.name ?? "User"
         let recentLines = messages(for: conversation).suffix(12).compactMap { message -> VoiceCallLine? in
@@ -1580,7 +1583,7 @@ final class NoodleStore {
             // A Hub starts its bot and picks its voice itself.
             let voice = onHub ? nil : await BotVoice.forCall(agent, repository: repository, guesser: voiceGuesser)
             voiceCalls.start(agentID: agent.id, conversationID: conversation.id, voice: voice,
-                             personName: personName, identity: identity, recentLines: recentLines, answeredCallReason: answeredCallReason, media: media)
+                             personName: personName, identity: identity, recentLines: recentLines, answeredCallReason: answeredCallReason, answeredCallID: answeredCallID, media: media)
         }
     }
 

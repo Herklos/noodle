@@ -131,6 +131,43 @@ import XCTest
         XCTAssertEqual(try f.local.loadMessages(conversationID: local.id).filter { $0.call != nil }.count, 1)
     }
 
+    /// A call a bot on the Hub places rings here with the bot and conversation as known here, until it is
+    /// declined from here; the Hub keeps its card, which shows here as a declined call.
+    func testABotsCallOnTheHubRingsHereAndCanBeDeclined() async throws {
+        let f = try await fixture()
+        let plan = try XCTUnwrap(f.hub.access.plans.first { $0.name == "Family" })
+        f.hub.access.set(HubHarness(provider: .codex, profile: nil), included: true, in: plan)
+        let mirror = f.mirror()
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Yuki", provider: "codex"))
+        let hubAgent = try XCTUnwrap(f.hub.repository.loadAgents().first)
+        let local = try conversation(of: agent.id, in: f.local)
+        var rang: [AgentCallRequest] = [], stopped: [UUID] = []
+        mirror.onCallRinging = { rang.append($0) }
+        mirror.onCallStopped = { stopped.append($0) }
+        let running = Task { await mirror.run() }
+        addTeardownBlock { running.cancel() }
+        for _ in 0..<50 where !mirror.isConnected { try await Task.sleep(for: .milliseconds(100)) }
+
+        let request = try f.hub.repository.requestCall(agentID: hubAgent.id, reason: "The build is broken")
+        f.hub.bots.ringCall(of: hubAgent.id)
+        for _ in 0..<50 where rang.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        let ringing = try XCTUnwrap(rang.first)
+        XCTAssertEqual(ringing.id, request.id)
+        XCTAssertEqual(ringing.agentID, agent.id)
+        XCTAssertEqual(ringing.conversationID, local.id)
+        XCTAssertEqual(ringing.reason, "The build is broken")
+        XCTAssertEqual(ringing.expiresAt, request.expiresAt)
+
+        try await mirror.declineCall(request.id)
+        for _ in 0..<50 where stopped.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(stopped, [request.id])
+        await mirror.sync()
+        let cards = try f.local.loadMessages(conversationID: local.id).compactMap(\.call)
+        XCTAssertEqual(cards.map(\.unanswered), [.declined])
+        XCTAssertEqual(cards.first?.agentID, agent.id)
+        XCTAssertEqual(cards.first?.reason, "The build is broken")
+    }
+
     /// Sharing a bot from this Mac, and a bot someone shared with this Mac's user, which they can
     /// only talk with: it shows whose it is, and the mirror keeps nothing of how it is made.
     func testBotsAreSharedFromHereAndSharedBotsShowWhoseTheyAre() async throws {
