@@ -6,7 +6,9 @@ code, or open the link on the phone. Your first Hub welcomes you with a team of 
 Pair Another Device in your profile shows an invitation for another of your devices, when
 the Hub allows it. If the Hub made you an admin, Users in its details lists everyone on it:
 add people with +, and tap someone to change their plan and whether they can pair devices,
-rename them, invite or remove their devices, or remove them. Only the Hub changes admins.
+rename them, invite or remove their devices, or remove them. Turn on Suspended to stop
+their Hub bots and block their devices; turn it off to restore access with their data and
+pairings intact. Only the Hub changes admins.
 
 A browser tab or computer a bot shares opens live when you tap it, and you can use it
 from the phone. Tap … at the top of a conversation to choose from the things shared

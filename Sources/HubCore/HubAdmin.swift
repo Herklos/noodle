@@ -25,7 +25,7 @@ import NoodleCore
         try checkAdmin()
         let plan = try draft.plan.map(self.plan)
         let user = try access.addUser(named: draft.name ?? "")
-        try apply(name: nil, plan: plan, canPairDevices: draft.canPairDevices, to: user)
+        try apply(name: nil, plan: plan, canPairDevices: draft.canPairDevices, isSuspended: draft.isSuspended, to: user)
         return try link(current(user.id))
     }
 
@@ -33,7 +33,7 @@ import NoodleCore
         let user = try managedUser(id)
         let plan = try draft.plan.map(self.plan)
         let name = try draft.name.map(ConversationName.validated)
-        try apply(name: name, plan: plan, canPairDevices: draft.canPairDevices, to: user)
+        try apply(name: name, plan: plan, canPairDevices: draft.canPairDevices, isSuspended: draft.isSuspended, to: user)
         return try link(current(id))
     }
 
@@ -72,10 +72,11 @@ import NoodleCore
     }
 
     /// Takes only what was checked already, so a change is kept whole or not at all.
-    private func apply(name: String?, plan: HubPlan?, canPairDevices: Bool?, to user: HubUser) throws {
+    private func apply(name: String?, plan: HubPlan?, canPairDevices: Bool?, isSuspended: Bool?, to user: HubUser) throws {
         if let name, name != user.name { try access.rename(user, to: name) }
         if let plan, plan.id != user.plan { access.move(user, to: plan) }
         if let canPairDevices, canPairDevices != user.canPairDevices { access.setCanPairDevices(canPairDevices, for: user) }
+        if let isSuspended { access.setSuspended(isSuspended, for: user) }
     }
 
     private func link(_ user: HubUser) -> LinkUser {
@@ -83,6 +84,6 @@ import NoodleCore
                  devices: access.devices(of: user).map {
                      LinkUserDevice(id: $0.id, name: $0.name, paired: $0.paired, lastSeen: $0.lastSeen, isConnected: isConnected($0))
                  },
-                 avatar: user.avatar)
+                 avatar: user.avatar, isSuspended: user.isSuspended)
     }
 }

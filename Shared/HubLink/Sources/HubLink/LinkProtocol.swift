@@ -770,12 +770,13 @@ public struct LinkUser: Codable, Equatable, Identifiable, Sendable {
     public var canPairDevices: Bool
     /// Admins are managed only on the Hub itself, so a device shows them without changing them.
     public var isAdmin: Bool
+    public var isSuspended: Bool
     public var devices: [LinkUserDevice]
     /// Nil until they choose one: they show their initials. Its image travels apart, as `picture`.
     public var avatar: LinkAvatar?
 
     public init(id: UUID, name: String, plan: UUID, canPairDevices: Bool, isAdmin: Bool, devices: [LinkUserDevice],
-                avatar: LinkAvatar? = nil) {
+                avatar: LinkAvatar? = nil, isSuspended: Bool = false) {
         self.id = id
         self.name = name
         self.plan = plan
@@ -783,6 +784,22 @@ public struct LinkUser: Codable, Equatable, Identifiable, Sendable {
         self.isAdmin = isAdmin
         self.devices = devices
         self.avatar = avatar
+        self.isSuspended = isSuspended
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, plan, canPairDevices, isAdmin, devices, avatar, isSuspended
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        plan = try c.decode(UUID.self, forKey: .plan)
+        canPairDevices = try c.decode(Bool.self, forKey: .canPairDevices)
+        isAdmin = try c.decode(Bool.self, forKey: .isAdmin)
+        devices = try c.decode([LinkUserDevice].self, forKey: .devices)
+        avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
+        isSuspended = try c.decodeIfPresent(Bool.self, forKey: .isSuspended) ?? false
     }
 }
 
@@ -819,11 +836,13 @@ public struct LinkUserDraft: Codable, Equatable, Sendable {
     public var name: String?
     public var plan: UUID?
     public var canPairDevices: Bool?
+    public var isSuspended: Bool?
 
-    public init(name: String? = nil, plan: UUID? = nil, canPairDevices: Bool? = nil) {
+    public init(name: String? = nil, plan: UUID? = nil, canPairDevices: Bool? = nil, isSuspended: Bool? = nil) {
         self.name = name
         self.plan = plan
         self.canPairDevices = canPairDevices
+        self.isSuspended = isSuspended
     }
 }
 

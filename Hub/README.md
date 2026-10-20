@@ -25,6 +25,7 @@ the Hub in Noodle's Settings > Hub: add, rename and remove people, change their 
 whether they can pair devices, and invite or remove their devices. Admins cannot change
 themselves or other admins; only the Hub's Settings can. An admin can still pair a device
 of their own as anyone who is not an admin, so make only people you trust admins.
+Admins can also suspend and restore regular users from Users in Noodle Mobile.
 Logs in the menu bar menu lists, for 90 days, who added, changed or removed users,
 made invitations and paired or removed devices, here or from a device, and every attempt
 the Hub refused; choose a person to see only what concerns them. Network shows how many people

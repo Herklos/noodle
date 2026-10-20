@@ -4,6 +4,7 @@
 
 ### Added
 
+- Admins can also suspend and restore regular users from Noodle Mobile.
 - Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
 
 ### Fixed
