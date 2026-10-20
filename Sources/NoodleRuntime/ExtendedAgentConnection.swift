@@ -8,6 +8,7 @@ public final class ExtendedAgentConnection: NSObject, AgentHostClient {
     public var onExit: ((Int32) -> Void)?
     public var onFailure: ((String) -> Void)?
     var onSignInChallenge: ((String, String) -> Void)?
+    var onAccountUsage: ((Data) -> Void)?
     private var stopping = false
 
     public init(bundle: Bundle = .main) throws {
@@ -145,6 +146,7 @@ public final class ExtendedAgentConnection: NSObject, AgentHostClient {
     public func receive(_ data: Data, isError: Bool) { onData?(data, isError) }
     public func terminated(_ status: Int32) { onExit?(status) }
     public func signInChallenge(_ url: String, code: String) { onSignInChallenge?(url, code) }
+    public func accountUsage(_ data: Data) { onAccountUsage?(data) }
     func fxModels(executablePath: String, reply: @escaping (Data?, String?) -> Void) {
         proxy(failure: { reply(nil, $0) })?.fxModels(executablePath: executablePath, withReply: reply)
     }

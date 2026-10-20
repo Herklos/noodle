@@ -46,6 +46,7 @@ struct AttachmentView: View {
     @Environment(\.reviewPatch) private var reviewPatch
     @Environment(\.annotating) private var annotating
     @Environment(\.previewAttachments) private var previewAttachments
+    @Environment(\.forwardAttachment) private var forwardAttachment
 
     private var isImage: Bool { attachment.mediaType.hasPrefix("image/") }
 
@@ -87,8 +88,18 @@ struct AttachmentView: View {
                     try await chats.file(for: attachment, in: thread)
                 }, preview: SharePreview(attachment.filename))
             }
+            if AttachmentClipboard.isText(attachment) {
+                Button("Copy", systemImage: "doc.on.doc") { copy(asFile: false) }
+                Button("Copy File", systemImage: "doc.on.clipboard") { copy(asFile: true) }
+            }
             if let annotating, attachment.annotation == nil {
                 Button("Comment…", systemImage: "text.bubble") { annotating.begin(.attachment(attachment)) }
+            }
+            if AttachmentForwarding.canForward(attachment), let forwardAttachment {
+                let chats = chats, thread = thread, attachment = attachment
+                Button("Forward…", systemImage: "arrowshape.turn.up.right") {
+                    forwardAttachment(AttachmentForwardRequest(chats: chats, thread: thread, attachment: attachment))
+                }
             }
             // As on the Mac: a picture in the conversation can become its backdrop.
             if isImage, attachment.annotation == nil {
@@ -214,6 +225,18 @@ struct AttachmentView: View {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
         } else {
             ProgressView()
+        }
+    }
+
+    /// As its text, or as the file, which pastes as a file; it comes down from the Hub first if need be.
+    private func copy(asFile: Bool) {
+        Task {
+            guard let url = try? await chats.file(for: attachment, in: thread) else { return }
+            if asFile {
+                AttachmentClipboard.copyFile(url, named: attachment.filename)
+            } else {
+                AttachmentClipboard.copyText(url)
+            }
         }
     }
 
@@ -719,14 +742,14 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
-/// The message field. A text view rather than a SwiftUI field, so pasting a copied image attaches it,
-/// as in Messages. It grows to six lines, then scrolls.
+/// The message field. A text view rather than a SwiftUI field, so pasting a copied image or file
+/// attaches it, as in Messages, and long text too, as on the Mac. It grows to six lines, then scrolls.
 struct ComposerField: UIViewRepresentable {
     @Binding var text: String
     /// Where the caret is, in UTF-16 units, as `NSRange` counts.
     @Binding var caret: Int
     let placeholder: String
-    let pasted: (UIImage) -> Void
+    let pasted: (ComposerPaste) -> Void
     @Environment(\.isEnabled) private var isEnabled
 
     func makeUIView(context: Context) -> PastingTextView {
@@ -787,11 +810,11 @@ struct ComposerField: UIViewRepresentable {
     }
 }
 
-/// Offers Paste for copied images too, and hands them over instead of inserting them.
-/// A paste the person chooses from the edit menu is always allowed; reading the clipboard
-/// from code is not.
+/// Offers Paste for copied images and files too, and hands them and long text over instead of
+/// inserting them. A paste the person chooses from the edit menu is always allowed; reading the
+/// clipboard from code is not.
 final class PastingTextView: UITextView {
-    var pasted: ((UIImage) -> Void)?
+    var pasted: ((ComposerPaste) -> Void)?
     let placeholder = UILabel()
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -810,16 +833,133 @@ final class PastingTextView: UITextView {
     required init?(coder: NSCoder) { fatalError("Not used from a storyboard.") }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(paste(_:)), UIPasteboard.general.hasImages { return true }
+        if action == #selector(paste(_:)), pasted != nil, ComposerPaste.mayAttach(from: .general) { return true }
         return super.canPerformAction(action, withSender: sender)
     }
 
     override func paste(_ sender: Any?) {
-        if UIPasteboard.general.hasImages, let images = UIPasteboard.general.images, !images.isEmpty {
-            images.forEach { pasted?($0) }
-        } else {
-            super.paste(sender)
+        if !attachPaste(from: .general) { super.paste(sender) }
+    }
+
+    /// Hands over what the pasteboard holds that is attached rather than typed; false leaves it to the field.
+    func attachPaste(from pasteboard: UIPasteboard) -> Bool {
+        guard let pasted, let paste = ComposerPaste.read(from: pasteboard) else { return false }
+        pasted(paste)
+        return true
+    }
+}
+
+/// What a paste into the message field attaches instead of inserting.
+@MainActor enum ComposerPaste {
+    case images([UIImage])
+    /// Copied files, as the Files app or Copy File copies one.
+    case files([NSItemProvider])
+    /// Text past the Mac's limits for a long paste.
+    case text(String)
+
+    /// The name the Mac gives a long paste.
+    static let textFilename = "Pasted Text.txt"
+
+    /// Pictures first, as before, then files, then long text, which the Mac also attaches.
+    static func read(from pasteboard: UIPasteboard) -> Self? {
+        if pasteboard.hasImages, let images = pasteboard.images, !images.isEmpty { return .images(images) }
+        let files = pasteboard.itemProviders.filter { isFile(types: $0.registeredTypeIdentifiers, suggestedName: $0.suggestedName) }
+        if !files.isEmpty { return .files(files) }
+        if pasteboard.hasStrings, let text = pasteboard.string, MessageFolding.isLong(text) { return .text(text) }
+        return nil
+    }
+
+    /// Whether Paste could attach something, from the kinds of data alone: reading the items
+    /// themselves outside a paste would ask the person first.
+    static func mayAttach(from pasteboard: UIPasteboard) -> Bool {
+        if pasteboard.hasImages { return true }
+        return (pasteboard.types(forItemSet: nil) ?? []).joined().contains { identifier in
+            guard let type = UTType(identifier) else { return false }
+            return type.conforms(to: .fileURL) || (type.conforms(to: .data) && !type.conforms(to: .text))
         }
+    }
+
+    /// A file, by its location, or by a name whose extension is a type it comes as. Copied words have
+    /// no name, or one that is not their type, as a page's title would be.
+    static func isFile(types: [String], suggestedName: String?) -> Bool {
+        let types = types.compactMap { UTType($0) }
+        if types.contains(where: { $0.conforms(to: .fileURL) }) { return true }
+        guard let suggestedName else { return false }
+        let ext = (suggestedName as NSString).pathExtension
+        guard !ext.isEmpty, let named = UTType(filenameExtension: ext) else { return false }
+        return types.contains { $0.conforms(to: named) }
+    }
+
+    /// Copies of the pasted files, kept until sent; a file that cannot be read is left out.
+    static func load(_ providers: [NSItemProvider], hubs: URL = ComposerPaste.hubsFolder,
+                     ownFolders: [URL] = ComposerPaste.ownFolders) async -> [OutgoingFile] {
+        var files: [OutgoingFile] = []
+        for provider in providers {
+            // Noodle's own Copy File leaves where the file is, for Noodle only.
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+               let url = await SharedItems.object(URL.self, from: provider), url.isFileURL,
+               mayRead(url, hubs: hubs, ownFolders: ownFolders),
+               let file = try? PickedFiles.copy(url, named: provider.suggestedName ?? url.lastPathComponent) {
+                files.append(file)
+            } else if let type = provider.registeredContentTypes.first(where: { $0.conforms(to: .data) && !$0.conforms(to: .url) }),
+                      let file = await SharedItems.file(type, from: provider) {
+                files.append(file)
+            }
+        }
+        return files
+    }
+
+    /// Where the app keeps the Hubs it joined, as `NoodleMobileApp` does.
+    static var hubsFolder: URL {
+        AppGroup.hubs ?? URL.applicationSupportDirectory.appendingPathComponent("Hubs", isDirectory: true)
+    }
+
+    /// The app's own container and the one it shares with its extensions.
+    static var ownFolders: [URL] {
+        [URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+         AppGroup.identifier.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }]
+            .compactMap { $0 }
+    }
+
+    /// Any app can put a file's location on the pasteboard, so inside Noodle's own folders only a
+    /// conversation's file, as Copy File copies, is read: never a Hub's keys or other private data.
+    static func mayRead(_ url: URL, hubs: URL, ownFolders: [URL]) -> Bool {
+        func components(_ url: URL) -> [String] { url.standardizedFileURL.resolvingSymlinksInPath().pathComponents }
+        let path = components(url)
+        func below(_ folder: URL) -> ArraySlice<String>? {
+            let folder = components(folder)
+            return path.count > folder.count && Array(path.prefix(folder.count)) == folder ? path.dropFirst(folder.count) : nil
+        }
+        // <Hub>/Files/<attachment>/<name>, as the conversations keep their files.
+        if let rest = below(hubs), rest.count == 4, rest.dropFirst().first == "Files" { return true }
+        return !ownFolders.contains { below($0) != nil }
+    }
+
+    static func textFile(_ text: String) throws -> OutgoingFile {
+        try PickedFiles.store(Data(text.utf8), named: textFilename, type: .plainText)
+    }
+}
+
+/// A text file in the conversation copies as its text, or as the file itself, to paste as one.
+@MainActor enum AttachmentClipboard {
+    static func isText(_ attachment: LinkAttachment) -> Bool {
+        guard attachment.annotation == nil else { return false }
+        let ext = (attachment.filename as NSString).pathExtension
+        return [UTType(mimeType: attachment.mediaType), ext.isEmpty ? nil : UTType(filenameExtension: ext)]
+            .contains { $0?.conforms(to: .text) == true }
+    }
+
+    static func copyText(_ url: URL, to pasteboard: UIPasteboard = .general) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        pasteboard.string = text
+    }
+
+    /// Named as in the conversation, which other apps paste it as; Noodle reads it where it is.
+    static func copyFile(_ url: URL, named filename: String, to pasteboard: UIPasteboard = .general) {
+        guard let provider = NSItemProvider(contentsOf: url) else { return }
+        provider.suggestedName = filename
+        provider.registerObject(url as NSURL, visibility: .ownProcess)
+        pasteboard.setItemProviders([provider], localOnly: false, expirationDate: nil)
     }
 }
 

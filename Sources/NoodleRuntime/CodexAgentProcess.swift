@@ -370,6 +370,11 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             handleVoiceCall(method, params ?? [:])
             return
         }
+        // Account limits belong to no thread or turn; the latest one is what Settings shows.
+        if method == "account/rateLimits/updated", let params {
+            onActivity(["method": method, "params": params])
+            return
+        }
         if method == "turn/started", !turnIsActive, voiceCallEvents != nil,
            params?["threadId"] as? String == threadID,
            let id = (params?["turn"] as? [String: Any])?["id"] as? String {

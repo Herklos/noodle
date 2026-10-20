@@ -40,8 +40,8 @@ struct NoodleMobileApp: App {
                 // With the last Hub left the list is gone, and with it what the widgets show.
                 if after == 0 { BotWidgetPublisher.shared.publish(.init()) }
             }
-            // A bot tapped in a widget opens like a tapped notification. Any other link is an invitation, opened
-            // from Messages, Mail or a QR code in the Camera app.
+            // A bot tapped in a widget opens like a tapped notification, and its call button calls the bot as well.
+            // Any other link is an invitation, opened from Messages, Mail or a QR code in the Camera app.
             .onOpenURL { url in
                 if let link = WidgetLink(url: url) {
                     if let route = CurrentHub.route(to: link, in: hubs.hubs) { delegate.opening = route }
@@ -90,6 +90,6 @@ private struct NotificationKey: Equatable {
     /// A widget's bot on a Hub this phone is in; nil once the Hub is left.
     static func route(to link: WidgetLink, in pairings: [HubPairing]) -> NotificationRoute? {
         pairings.first { space(of: $0) == link.hub }
-            .map { NotificationRoute(topic: PushTopic.topic(for: $0), conversation: link.conversationID) }
+            .map { NotificationRoute(topic: PushTopic.topic(for: $0), conversation: link.conversationID, call: link.call) }
     }
 }

@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-20
+
 ### Added
 
 - Tap …, choose Hubs and tap your Hub: it lists all your computers and browsers on it, whichever bots have them. Tap one to change its name and description, or swipe to delete it.
+- Touch and hold a file in a conversation and choose Forward… to send it to another bot or group, with an optional comment. It arrives there as your message, as if you had attached the file yourself.
+- Touch and hold a text file in a conversation to Copy its text or Copy File, which pastes into other apps as the file.
+- Paste a copied file into the message field to attach it, instead of its text. Long pasted text, over 12 lines or 1,200 characters, is attached as a text file, as on the Mac.
+- The small Bot widget has a Call button for a bot that takes voice calls. Tap it to open the chat and call the bot straight away; tap anywhere else to open the chat as before.
 
 ### Changed
 
@@ -28,6 +34,19 @@
 - Tap one, change its name and description and tap Save: check the list shows them, and so do the bot's Computers or Browsers and Noodle on the Mac. Clear a description, save, and check it is gone.
 - Swipe one to delete it: check the confirmation names the bots that use it, and that after Delete it is gone from the list and from those bots.
 - With a Hub that cannot list computers or browsers, check those rows do not show.
+- Touch and hold a picture or another file in a conversation and choose Forward…: check the sheet names the file and lists your bots and groups, without the conversation you are in, and that search finds them by name.
+- Pick a bot or group, write a comment and tap Send: check the sheet closes, and that conversation shows one message from you with the file and your comment as its text. Check the bot answers about the file.
+- Forward without a comment: check the message says "Sent 1 attachment".
+- Forward a file you have not opened yet, and a large one: check Send waits while it downloads, then it goes.
+- With two Hubs joined, check bots from both are listed, each with its Hub's name, and that forwarding to the other Hub works.
+- Touch and hold a voice message, a comment card, a link, or a shared computer or noodlet: check Forward… does not show.
+- Turn on Airplane Mode and forward a file you have opened: check the message shows Not delivered in the other conversation, and goes when you try again with the connection back.
+- Touch and hold a text file in a conversation: check Copy and Copy File show, and a picture or PDF shows neither. Choose Copy and paste into Notes: check its text arrives.
+- Choose Copy File and paste into the message field: check the file waits above the field with the same name, and sends. Paste it into Files or Mail: check it arrives as a file.
+- Copy a file in the Files app and paste it into the message field: check it is attached, not its text.
+- Paste text of more than 12 lines into the message field: check it is attached as Pasted Text.txt and the field stays as it was. Paste a short text: check it goes into the field as before. Copy a picture and paste it: check it is attached as before.
+- With a bot that takes voice calls, open Noodle, then add the small Bot widget for it, or edit one you have to show it: check a green Call button shows under its name. Tap Call, also with Noodle closed: check its chat opens and the call starts, asking for the microphone the first time, as the chat's Call button does, and you hear the bot.
+- Tap the widget away from Call: check only the chat opens. Choose a bot that cannot take calls: check there is no Call button. Use a tinted Home Screen: check Call can still be read. With VoiceOver, check the bot and "Call" with its name are read separately.
 
 ## [0.39.0] - 2026-10-18
 

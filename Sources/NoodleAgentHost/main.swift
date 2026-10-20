@@ -661,6 +661,12 @@ private final class HostSession: NSObject, AgentHostService {
         codexAccount = Task { @MainActor [weak self] in
             let provider = CodexSetupProvider(codexHome: home, environment: environment)
             let installation = HarnessInstallation(provider: .codex, executablePath: executable.path)
+            // Only plan limits cross back, never anything from the login itself.
+            if !signIn {
+                provider.onUsage = { usage in
+                    if let data = try? JSONEncoder().encode(usage) { self?.client?.accountUsage(data) }
+                }
+            }
             do {
                 let status = try await signIn
                     ? provider.signIn(for: installation) { self?.client?.signInChallenge($0.url.absoluteString, code: $0.code) }

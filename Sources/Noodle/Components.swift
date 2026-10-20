@@ -1,5 +1,6 @@
 import SwiftUI
 import NoodleCore
+import NoodleRuntime
 import NoodleRuntimeSettings
 import HubLink
 
@@ -123,6 +124,63 @@ extension NoodleStore {
     }
 }
 
+extension AgentRuntimeSnapshot {
+    /// Why a bot waits for Kick, in a few words for its sidebar row and conversation; nil while it does not.
+    var pauseSummary: String? {
+        guard phase == .failed else { return nil }
+        switch failure {
+        case .recoveryFailed: return "Paused: recovery interrupted"
+        case .missingSession: return "Paused: session missing"
+        case .usageLimit: return "Paused: usage limit reached"
+        case .authenticationRequired: return "Paused: sign-in needed"
+        case .safetyStop: return "Paused: safety stop"
+        case nil: return "Stopped"
+        }
+    }
+}
+
+extension NoodleStore {
+    /// The conversation's bots that run on this Mac and wait for Kick.
+    func agentsWaitingForKick(in conversation: BotConversation) -> [AgentRecord] {
+        shownParticipants(for: conversation).filter { runsHere($0.id) && runtime.snapshot(for: $0.id).phase == .failed }
+    }
+
+    /// A bot's own conversation says why it waits; a group names the bots that wait.
+    func pauseSummary(for conversation: BotConversation) -> String? {
+        let waiting = agentsWaitingForKick(in: conversation)
+        guard let first = waiting.first else { return nil }
+        guard conversation.kind == .group else { return runtime.snapshot(for: first.id).pauseSummary }
+        return "Paused: " + waiting.map(\.displayName).joined(separator: ", ")
+    }
+}
+
+/// Over a conversation while one of its bots waits for Kick: why, in a few words, and Kick.
+/// In a group, Kick starts the first bot that waits; the next one shows once it is back.
+struct ConversationPauseControl: View {
+    @Environment(NoodleStore.self) private var store
+    let conversation: BotConversation
+    @State private var kickRequest: AgentKickRequest?
+
+    var body: some View {
+        if let summary = store.pauseSummary(for: conversation),
+           let agent = store.agentsWaitingForKick(in: conversation).first {
+            HStack(spacing: 8) {
+                Text(summary)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .help(store.runtime.snapshot(for: agent.id).detail)
+                Button("Kick") {
+                    kickRequest = store.runtime.kick(agent: agent, repository: store.repository)
+                }
+                .disabled(store.runtime.changingAccess.contains(agent.id))
+                .help("Kick \(agent.displayName)")
+            }
+            .padding(.horizontal, 6)
+            .modifier(AgentKickConfirmation(store: store, request: $kickRequest))
+        }
+    }
+}
+
 /// A conversation picture with its runtime dot. The ring is cut out of the picture,
 /// so it reads the same over a wallpaper, a vibrant panel or a list row.
 struct ConversationStatusAvatar: View {
@@ -203,6 +261,7 @@ struct ConversationStatusAvatar: View {
 
 struct MessageBubble: View {
     @Environment(NoodleStore.self) private var store
+    @Environment(\.forwardAttachment) private var forwardAttachment
     @AppStorage(ChatAttachmentLayout.defaultsKey) private var attachmentLayout = ChatAttachmentLayout.defaultValue.rawValue
     @AppStorage(MessageTextLayout.defaultsKey) private var textLayout = MessageTextLayout.defaultValue.rawValue
     @State private var inspectedReaction: String?
@@ -467,7 +526,11 @@ struct MessageBubble: View {
                 store.isHubNoodlet(item) ? { Task { try? await store.openCompanion(item, at: .hub) } } : nil
             },
             copyTable: table.map { table in { MessageTableActions.copy(table) } },
-            saveTable: table.map { table in { store.saveTable(table) } }
+            saveTable: table.map { table in { store.saveTable(table) } },
+            forward: attachment.flatMap { item -> (() -> Void)? in
+                guard AttachmentForwarding.canForward(item), let forwardAttachment else { return nil }
+                return { forwardAttachment(item) }
+            }
         )
     }
 

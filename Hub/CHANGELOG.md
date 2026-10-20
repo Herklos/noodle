@@ -4,7 +4,13 @@
 
 ### Added
 
-- A plan can limit how many tokens each of its users' bots use over a number of hours, days, weeks or months, counted over a rolling period. A user who reaches it is told when their bots can continue; a turn under way finishes, and their bots take no new turn until then. Settings → Users shows how much each user used.
+- A plan can limit how many tokens each of its users' bots use over a number of hours, days, weeks or months, counted over a rolling period. Once a user reaches it, a turn under way finishes and then their bots stop until the period allows more; messages to them still go through and are answered then. Settings → Users shows how much each user used.
+
+## [0.37.0] - 2026-10-20
+
+### Added
+
+- Settings → Harness shows how much of the plan limits of each signed-in Codex and Claude Code account is used, and when each resets.
 
 ## [0.36.1] - 2026-10-19
 
