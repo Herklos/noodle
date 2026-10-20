@@ -52,14 +52,14 @@ import Observation
         if holds.values.contains(where: { $0 <= now() }) { check() }
     }
 
-    /// Why the user's message cannot reach one of their own bots, or nil when it can.
+    /// Why the user cannot call one of their own bots or have it organize now, or nil when they can.
     public func refusal(for user: HubUser) -> String? {
         guard let until = holds[user.id], let limit = access.tokenLimit(for: user) else { return nil }
         return "You have used the \(limit.tokens.formatted()) tokens your plan allows per \(limit.periodName). "
             + "Your bots can continue \(relative(until))."
     }
 
-    /// Why someone a bot is shared with cannot reach it, or nil when they can.
+    /// Why someone a bot is shared with cannot call it now, or nil when they can.
     public func refusal(forGuestOf bot: String, ownedBy owner: UUID) -> String? {
         guard let until = holds[owner] else { return nil }
         return "\(bot) has used the tokens its owner’s plan allows. It can continue \(relative(until))."

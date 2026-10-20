@@ -211,7 +211,8 @@ import NoodleVoicePeer
         for agent in agents where released.contains(agent.id) { runtime.start(agent: agent, repository: repository) }
     }
 
-    /// Why a message or call cannot reach these bots now: their owner used up their plan's tokens.
+    /// Why a call or Organize cannot reach these bots now, as their owner used up their plan's tokens. Messages
+    /// still go through: they wait in the bots' inboxes until the period allows more.
     private func requireTokens(for agents: [AgentRecord], from user: HubUser) throws {
         guard let tokenLimits else { return }
         for agent in agents where access.host(ofBot: agent.id) == nil {
@@ -771,7 +772,6 @@ import NoodleVoicePeer
             }
             try requireLends(agent, to: user)
         }
-        try requireTokens(for: bots, from: user)
         let message = try repository.sendUserMessage(conversationID: conversationID, body: body,
                                                      attachmentIDs: attachmentIDs, id: id)
         if running || watching { runtime.notify(bots, repository: repository) }
