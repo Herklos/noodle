@@ -200,6 +200,12 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Opens a channel showing what a link in one of this user's conversations points at, live.
     /// See `LinkSurface` for what travels on it.
     case openSurface(conversationID: UUID, attachmentID: UUID)
+    /// The sign-in fields of the page a browser opened with `openSurface` shows, found once as the person
+    /// watching asks, for their device to offer its own fields and passwords. Answered with `signInForm`.
+    /// Only a Hub whose status says `signsInToBrowsers` knows it.
+    case signInForm(conversationID: UUID, attachmentID: UUID)
+    /// Fills the form `signInForm` found with what the person typed or picked, once. Answered with `done`.
+    case fillSignIn(LinkSignInFill)
     /// Opens a channel for a voice call with the bot of one of this user's conversations. See
     /// `LinkCallEvent` for what comes down it; closing it hangs up.
     case startCall(LinkCallStart)
@@ -258,6 +264,10 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Takes the chat effect waiting in one of this user's conversations, now that this device shows it; it
     /// plays on no other device. Answered with `effect`, empty when none waits.
     case takeEffect(conversationID: UUID)
+    /// Declines a call one of this user's bots placed, which rings on every device of theirs until
+    /// one answers or declines it, or it expires. Answered with `done`. Answering is `startCall` with
+    /// `answering`.
+    case declineCall(id: UUID)
 }
 
 /// A chat effect a bot sent, waiting for its conversation to be seen. Its kind is a name; one an app does
@@ -634,6 +644,7 @@ public enum LinkResponse: Codable, Equatable, Sendable {
     case hostedBot(LinkHostedBot)
     case hubSharing([LinkHubSharing])
     case effect(LinkEffect?)
+    case signInForm(LinkSignInForm)
     case done
     case failure(String)
 }
@@ -675,6 +686,11 @@ public enum LinkEvent: Codable, Equatable, Sendable {
     case usersChanged
     /// A chat effect waits in one of this user's conversations, to be taken by the device that shows it.
     case effectWaiting(conversationID: UUID)
+    /// One of this user's bots is calling them: ring until `callStopped`, or until it expires. Pushed again
+    /// to a device that subscribes while it rings. Hubs from before calls never send it.
+    case callRinging(LinkIncomingCall)
+    /// A call that rang was answered on some device, declined, or not answered in time: stop ringing.
+    case callStopped(id: UUID)
 }
 
 /// Someone else on the Hub, as anyone sharing a bot sees them.
@@ -1063,11 +1079,14 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     public var imageModel: String?
     /// Whether the Hub keeps the `annotation` of the files it is sent, so a device may offer to comment on one.
     public var keepsAnnotations: Bool
+    /// Whether the Hub finds and fills the sign-in fields of a browser someone watches live, with
+    /// `signInForm` and `fillSignIn`, so a device may offer to sign in.
+    public var signsInToBrowsers: Bool
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
                 canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
-                keepsAnnotations: Bool = false) {
+                keepsAnnotations: Bool = false, signsInToBrowsers: Bool = false) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1081,11 +1100,12 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.avatar = avatar
         self.imageModel = imageModel
         self.keepsAnnotations = keepsAnnotations
+        self.signsInToBrowsers = signsInToBrowsers
     }
 
     private enum CodingKeys: String, CodingKey {
         case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
-             keepsAnnotations
+             keepsAnnotations, signsInToBrowsers
     }
 
     public init(from decoder: Decoder) throws {
@@ -1103,6 +1123,7 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
         imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel)
         keepsAnnotations = try c.decode(.keepsAnnotations, or: false)
+        signsInToBrowsers = try c.decode(.signsInToBrowsers, or: false)
     }
 }
 

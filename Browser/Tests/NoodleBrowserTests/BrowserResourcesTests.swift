@@ -33,7 +33,7 @@ final class BrowserResourcesTests: XCTestCase {
 
     func testPackageTestsCanLoadAllBrowserScripts() throws {
         let scripts = try XCTUnwrap(BrowserResources.bundle.url(forResource: "Resources", withExtension: nil))
-        for name in ["Inspect.js", "PointerTarget.js", "WebMCP.js"] {
+        for name in ["Inspect.js", "PointerTarget.js", "SignIn.js", "WebMCP.js"] {
             XCTAssertFalse(try Data(contentsOf: scripts.appendingPathComponent(name)).isEmpty, name)
         }
     }

@@ -147,14 +147,55 @@ import XCTest
         XCTAssertEqual(access.browserLimit(for: user), 10)
     }
 
+    func testAPlanCanLimitTheTokensEachUserUsesInAPeriod() throws {
+        let (access, url) = access()
+        let family = try access.addPlan(named: "Family")
+        let user = try access.addUser(named: "Ada")
+        access.move(user, to: family)
+        XCTAssertNil(access.tokenLimit(for: user), "No limit by default")
+        var changes = 0
+        access.onTokenLimitsChange = { changes += 1 }
+
+        access.setTokenLimit(HubTokenLimit(tokens: 2_000_000, length: 7, unit: .days), in: family)
+        XCTAssertEqual(access.tokenLimit(for: user), HubTokenLimit(tokens: 2_000_000, length: 7, unit: .days))
+        XCTAssertEqual(access.tokenLimit(for: user)?.period, 7 * 86_400)
+        XCTAssertEqual(access.tokenLimit(for: user)?.periodName, "7 days")
+        XCTAssertEqual(HubAccess(url: url).plans, access.plans)
+        XCTAssertEqual(changes, 1)
+        // Moving the user takes them off it at once.
+        access.move(user, to: access.plans[0])
+        XCTAssertNil(access.tokenLimit(for: user))
+        XCTAssertEqual(changes, 2)
+        access.move(user, to: family)
+
+        // Nothing is limited to no tokens, or to no time.
+        access.setTokenLimit(HubTokenLimit(tokens: 0, length: 0, unit: .months), in: family)
+        XCTAssertEqual(access.tokenLimit(for: user), HubTokenLimit(tokens: 1, length: 1, unit: .months))
+        XCTAssertEqual(access.tokenLimit(for: user)?.periodName, "month")
+        access.setTokenLimit(nil, in: family)
+        XCTAssertNil(access.tokenLimit(for: user))
+    }
+
+    /// Plans saved before token limits, or by a later Hub with a period this one does not know, have none.
+    func testAPlanFromAnotherHubVersionDecodesWithoutATokenLimit() throws {
+        let old = #"{"id":"00000000-0000-0000-0000-00000000000A","name":"Family","harnesses":[]}"#
+        XCTAssertNil(try JSONDecoder().decode(HubPlan.self, from: Data(old.utf8)).tokenLimit)
+        let later = #"{"id":"00000000-0000-0000-0000-00000000000A","name":"Family","harnesses":[],"tokenLimit":{"tokens":5,"length":1,"unit":"fortnights"}}"#
+        let plan = try JSONDecoder().decode(HubPlan.self, from: Data(later.utf8))
+        XCTAssertEqual(plan.name, "Family")
+        XCTAssertNil(plan.tokenLimit)
+    }
+
     func testThePersonalMacsOwnerHasNoLimits() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-access-\(UUID()).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         let access = HubAccess(url: url, personal: true)
         access.setComputerLimit(0, in: access.plans[0])
         access.setBrowserLimit(0, in: access.plans[0])
+        access.setTokenLimit(HubTokenLimit(tokens: 1), in: access.plans[0])
         XCTAssertNil(access.computerLimit(for: access.users[0]))
         XCTAssertNil(access.browserLimit(for: access.users[0]))
+        XCTAssertNil(access.tokenLimit(for: access.users[0]))
     }
 
     func testAHarnessLeavingAPlanTakesItsModelsWithIt() throws {

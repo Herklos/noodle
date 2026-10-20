@@ -117,6 +117,8 @@ enum HubThread: HubConversation {
     /// Voice calls with this Hub's bots, which the Hub runs.
     @ObservationIgnored private(set) lazy var calls = PhoneCalls(open: { [pairing] start in
         try await pairing.channel(.startCall(start))
+    }, decline: { [pairing] id in
+        _ = try await pairing.request(.declineCall(id: id))
     })
     /// Which files of each patch the person has viewed, kept on this phone only.
     @ObservationIgnored private lazy var patchReviews = PatchReviewStore(fileURL: pairing.directory.appendingPathComponent("patch-reviews.json"))
@@ -811,6 +813,12 @@ enum HubThread: HubConversation {
             return
         case .effectWaiting(let id):
             waitingEffects.insert(id)
+            return
+        case .callRinging(let call):
+            calls.ring(call, name: agents.first { $0.id == call.botID }?.draft.name ?? "Bot")
+            return
+        case .callStopped(let id):
+            calls.stopRinging(id)
             return
         }
         saveCache()

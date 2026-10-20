@@ -116,6 +116,8 @@ final class NoodleStore {
     var editsSpaces = false
     private(set) var backgrounds: [UUID: ConversationBackground] = [:]
     var errorMessage: String?
+    /// Calls bots on this Mac placed that ring here now, oldest first.
+    var ringingCalls: [AgentCallRequest] = []
     private(set) var storageReady = false
     var pendingAttachments: [ConversationAttachment] {
         get { selectedConversationID.map { drafts[$0].attachments } ?? [] }
@@ -179,7 +181,7 @@ final class NoodleStore {
     @ObservationIgnored private var hubMirrorTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     @ObservationIgnored private let botWidgets = BotWidgetPublisher()
     let harnessSetup: HarnessSetupController
-    private let connectsServices: Bool
+    let connectsServices: Bool
     private var transcriptRefreshTask: Task<Void, Never>?
     private var harnessUpdateTask: Task<Void, Never>?
     private var hubCheckInTask: Task<Void, Never>?
@@ -310,6 +312,7 @@ final class NoodleStore {
         messenger.onWakesChanged = { [weak self] id in
             Task { @MainActor in guard let self else { return }; self.runtime.refreshWakes(for: id, repository: self.repository) }
         }
+        messenger.onCallRequested = { [weak self] id in Task { @MainActor in self?.ringCall(of: id) } }
         messenger.noodletHasPreview = { [applets] url in await applets.hasPreview(url) }
         thisMac.onBotsEdited = { [weak self] in self?.reload() }
         noodletAnnotations.present = { [weak self] capture in
@@ -683,6 +686,7 @@ final class NoodleStore {
             runtime.refresh(agents: agents)
             refreshAppShortcuts()
             storageReady = true
+            dropCallsOfGoneBots()
 
             if let selectedConversationID,
                conversations.contains(where: { $0.id == selectedConversationID }) {
@@ -766,6 +770,7 @@ final class NoodleStore {
             let updated = try repository.setAgentArchived(archived, agentID: agentID)
             if let index = agents.firstIndex(where: { $0.id == agentID }) { agents[index] = updated }
             runtime.archivedAgentIDs = Set(agents.filter { $0.archivedAt != nil }.map(\.id))
+            dropCallsOfGoneBots()
             // Out of the sidebar, an unread chat could never be read.
             if archived, let direct = conversations.first(where: { $0.kind == .direct && $0.participantIDs == [agentID] }) {
                 markConversationRead(direct.id)
@@ -815,6 +820,8 @@ final class NoodleStore {
                 mirror.onChange = { [weak self] in self?.hubBotsChanged() }
                 mirror.onRead = { [weak self] in self?.readElsewhere($0, upTo: $1) }
                 mirror.onBackgroundChanged = { [weak self] in self?.reloadBackground(of: $0) }
+                mirror.onCallRinging = { [weak self] in self?.ringHubCall($0) }
+                mirror.onCallStopped = { [weak self] in self?.stopRinging($0) }
                 // People on the Hub talk to this Mac's own bots there, which run here.
                 mirror.hosting.onMessages = { [weak self] ids in
                     guard let self else { return }
@@ -1466,7 +1473,7 @@ final class NoodleStore {
         router: VoiceCallRouter(local: runtime, isOnHub: { [weak self] in self?.hubMirror(forAgent: $0) != nil },
                                 openHubCall: { [weak self] agentID, setup in
             guard let mirror = self?.hubMirror(forAgent: agentID) else { throw VoiceCallUnavailable() }
-            return try await mirror.openCall(in: setup.conversationID)
+            return try await mirror.openCall(in: setup.conversationID, answering: setup.answeredCallID)
         }, makePeer: { [weak self] in self?.makeCallPeer() ?? VoiceCallPeer() }),
         makeMedia: { EngineVoiceCallMedia() }, report: { [weak self] in self?.errorMessage = $0 },
         record: { [weak self] in self?.recordVoiceCall($0) },
@@ -1556,7 +1563,8 @@ final class NoodleStore {
         return agent
     }
 
-    func startVoiceCall(in conversation: BotConversation, media: (any VoiceCallMedia)? = nil) {
+    func startVoiceCall(in conversation: BotConversation, media: (any VoiceCallMedia)? = nil, answeredCallReason: String? = nil,
+                        answeredCallID: UUID? = nil) {
         guard let agent = voiceCallTarget(for: conversation) else { return }
         let personName = (try? repository.loadAgentOwner(agent))?.name ?? "User"
         let recentLines = messages(for: conversation).suffix(12).compactMap { message -> VoiceCallLine? in
@@ -1575,7 +1583,7 @@ final class NoodleStore {
             // A Hub starts its bot and picks its voice itself.
             let voice = onHub ? nil : await BotVoice.forCall(agent, repository: repository, guesser: voiceGuesser)
             voiceCalls.start(agentID: agent.id, conversationID: conversation.id, voice: voice,
-                             personName: personName, identity: identity, recentLines: recentLines, media: media)
+                             personName: personName, identity: identity, recentLines: recentLines, answeredCallReason: answeredCallReason, answeredCallID: answeredCallID, media: media)
         }
     }
 
@@ -2431,6 +2439,8 @@ final class NoodleStore {
         }
         runtime.startAll(agents: agents, repository: repository)
         runtime.refreshCapabilities()
+        // A call that rang when Noodle quit rings on, or is left as missed.
+        for agent in agents where runsHere(agent.id) { ringCall(of: agent.id) }
     }
 
     func startMonitoring() {
@@ -2448,6 +2458,7 @@ final class NoodleStore {
                 self.runtime.reconcile(agents: self.agents, repository: self.repository)
                 self.runtime.checkHeartbeats()
                 self.runtime.checkWakes(repository: self.repository)
+                if !self.ringingCalls.isEmpty { self.dropCallsOfGoneBots() }
                 if self.connectsServices { self.botWidgets.publish(self.widgetBots) }
             }
         }

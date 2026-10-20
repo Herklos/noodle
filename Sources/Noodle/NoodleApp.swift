@@ -275,9 +275,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let signIn = notification.request.content.userInfo[NoodleNotifications.signInKey] != nil
+        // A ringing call only rings, in front or not: its panel shows who calls.
+        let call = notification.request.content.userInfo[NoodleNotifications.callKey] != nil
         Task { @MainActor in
             completionHandler(
-                signIn || NoodleNotifications.shouldPresentActivity ? [.banner, .sound] : []
+                call ? [.sound] : signIn || NoodleNotifications.shouldPresentActivity ? [.banner, .sound] : []
             )
         }
     }
