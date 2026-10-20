@@ -6,6 +6,7 @@
 
 - Admins can also suspend and restore regular users from Noodle Mobile.
 - Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
+- Someone watching one of their browsers live from a device can sign in to the page they see with the device's own fields and saved passwords, once Noodle on the device offers it. Noodle Browser on the Hub's Mac needs updating too.
 
 ### Fixed
 
