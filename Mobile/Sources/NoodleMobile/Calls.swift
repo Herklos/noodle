@@ -35,8 +35,8 @@ extension LinkChannel: CallChannel {}
     /// Ended or muted from the call screen.
     var onEnd: ((UUID) -> Void)? { get set }
     var onMute: ((UUID, Bool) -> Void)? { get set }
-    /// Answered on the call screen while it rang.
-    var onAnswer: ((UUID) -> Void)? { get set }
+    /// Answered on the call screen; false when the call no longer rings, so the answer fails there.
+    var onAnswer: ((UUID) -> Bool)? { get set }
     /// Puts the call on the call screen and returns once iOS has given it its audio. False when
     /// this phone has no call screen for apps, as in China.
     func begin(_ id: UUID, name: String) async throws -> Bool
@@ -59,6 +59,8 @@ extension LinkChannel: CallChannel {}
         var id = UUID()
         let threadID: UUID
         let conversationID: UUID
+        /// Answered on the call screen, where iOS shows it as an incoming call.
+        var isIncoming = false
         /// Nil while connecting.
         var startedAt: Date?
         var isMuted = false
@@ -71,6 +73,8 @@ extension LinkChannel: CallChannel {}
     struct Ringing: Equatable {
         let call: LinkIncomingCall
         let name: String
+        /// By this phone's clock, from the seconds the Hub said were left.
+        let expiresAt: Date
     }
 
     /// Calls this Hub's bots placed that ring here, oldest first.
@@ -101,7 +105,7 @@ extension LinkChannel: CallChannel {}
             guard self.call?.id == id else { return }
             self.end(id, problem: nil)
         }
-        system?.onAnswer = { [weak self] id in self?.answer(id) }
+        system?.onAnswer = { [weak self] id in self?.answer(id) ?? false }
         system?.onMute = { [weak self] id, muted in
             guard let self, self.call?.id == id, self.call?.isMuted != muted else { return }
             self.call?.isMuted = muted
@@ -112,11 +116,16 @@ extension LinkChannel: CallChannel {}
     /// Rings a call a bot placed on the call screen until it is answered or declined there, or the
     /// Hub says it stopped. A phone without a call screen for apps does not ring.
     func ring(_ incoming: LinkIncomingCall, name: String) {
-        guard !ringing.contains(where: { $0.call.id == incoming.id }), incoming.expiresAt > now(), call?.id != incoming.id else { return }
-        ringing.append(Ringing(call: incoming, name: name))
-        Task { [system] in _ = await system?.ring(incoming.id, name: name) }
+        guard !ringing.contains(where: { $0.call.id == incoming.id }), incoming.secondsLeft > 0, call?.id != incoming.id else { return }
+        ringing.append(Ringing(call: incoming, name: name, expiresAt: now().addingTimeInterval(incoming.secondsLeft)))
+        Task { [weak self, system] in
+            // It may have stopped while iOS put it on the call screen; then it ends there too.
+            guard await system?.ring(incoming.id, name: name) == true,
+                  self?.ringing.contains(where: { $0.call.id == incoming.id }) != true else { return }
+            system?.stopRinging(incoming.id, unanswered: false)
+        }
         // Should the Hub's word that it stopped be lost, it stops a little after it expired.
-        let wait = incoming.expiresAt.timeIntervalSince(now()) + 5
+        let wait = incoming.secondsLeft + 5
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
             self?.stopRinging(incoming.id)
@@ -127,14 +136,15 @@ extension LinkChannel: CallChannel {}
     func stopRinging(_ id: UUID) {
         guard let index = ringing.firstIndex(where: { $0.call.id == id }) else { return }
         let stopped = ringing.remove(at: index)
-        system?.stopRinging(id, unanswered: stopped.call.expiresAt <= now())
+        system?.stopRinging(id, unanswered: stopped.expiresAt <= now())
     }
 
-    /// Answering calls the bot through the Hub, which tells it why it called.
-    func answer(_ id: UUID) {
-        guard let index = ringing.firstIndex(where: { $0.call.id == id }) else { return }
+    /// Answering calls the bot through the Hub, which tells it why it called. False when the call no longer rings.
+    @discardableResult func answer(_ id: UUID) -> Bool {
+        guard let index = ringing.firstIndex(where: { $0.call.id == id }) else { return false }
         let answered = ringing.remove(at: index)
         start(threadID: answered.call.botID, conversationID: answered.call.conversationID, name: answered.name, answering: answered.call.id)
+        return true
     }
 
     /// `onCallScreen` says it was declined there, which already stopped it ringing.
@@ -151,7 +161,7 @@ extension LinkChannel: CallChannel {}
     func start(threadID: UUID, conversationID: UUID, name: String, answering: UUID? = nil) {
         hangUp()
         problem = nil
-        let call = Call(id: answering ?? UUID(), threadID: threadID, conversationID: conversationID)
+        let call = Call(id: answering ?? UUID(), threadID: threadID, conversationID: conversationID, isIncoming: answering != nil)
         let audio = makeAudio()
         self.call = call
         self.audio = audio
@@ -219,7 +229,8 @@ extension LinkChannel: CallChannel {}
             guard call?.startedAt == nil else { return }
             call?.startedAt = now()
             audio?.announceConnected()
-            system?.connected(id)
+            // iOS connected an answered call itself; only a call placed from here is reported.
+            if call?.isIncoming == false { system?.connected(id) }
         case .line(let line):
             call?.lines.append(line)
         case .ended(let detail):
@@ -256,7 +267,7 @@ final class SpokenAudio: @unchecked Sendable {
 @MainActor final class PhoneCallScreen: NSObject, SystemCalls, @preconcurrency CXProviderDelegate {
     var onEnd: ((UUID) -> Void)?
     var onMute: ((UUID, Bool) -> Void)?
-    var onAnswer: ((UUID) -> Void)?
+    var onAnswer: ((UUID) -> Bool)?
     private let provider: CXProvider?
     private let controller = CXCallController()
     private var activation: (id: UUID, continuation: CheckedContinuation<Bool, Error>)?
@@ -392,8 +403,9 @@ final class SpokenAudio: @unchecked Sendable {
             // Its audio is the answered call's from when iOS activates it next.
             audioActive = false
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP])
+            // A call answered or declined elsewhere, or missed, meanwhile is not joined.
+            guard onAnswer?(action.callUUID) == true else { return action.fail() }
             action.fulfill()
-            onAnswer?(action.callUUID)
         } catch {
             action.fail()
         }

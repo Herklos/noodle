@@ -42,7 +42,9 @@ final class CallChannelFake: CallChannel, @unchecked Sendable {
 @MainActor final class SystemCallsFake: SystemCalls {
     var onEnd: ((UUID) -> Void)?
     var onMute: ((UUID, Bool) -> Void)?
-    var onAnswer: ((UUID) -> Void)?
+    var onAnswer: ((UUID) -> Bool)?
+    /// Runs while iOS puts a call on the call screen.
+    var onRing: (() -> Void)?
     var beginError: Error?
     var rung: [(UUID, String)] = []
     var answeredCalls: [UUID] = []
@@ -58,6 +60,7 @@ final class CallChannelFake: CallChannel, @unchecked Sendable {
     }
     func ring(_ id: UUID, name: String) async -> Bool {
         rung.append((id, name))
+        onRing?()
         return true
     }
     func answered(_ id: UUID) async -> Bool {
@@ -160,8 +163,7 @@ private struct Failure: LocalizedError {
                                makeAudio: { audio }, system: system, now: { [date] in date })
         let kai = UUID(), conversation = UUID()
         func incoming(expiring seconds: TimeInterval = 45) -> LinkIncomingCall {
-            LinkIncomingCall(id: UUID(), botID: kai, conversationID: conversation, reason: "The build is broken",
-                             expiresAt: date.addingTimeInterval(seconds))
+            LinkIncomingCall(id: UUID(), botID: kai, conversationID: conversation, reason: "The build is broken", secondsLeft: seconds)
         }
 
         let answered = incoming()
@@ -173,17 +175,22 @@ private struct Failure: LocalizedError {
         #expect(calls.ringing.map(\.call) == [answered])
         #expect(opened.isEmpty, "Nothing connects to the bot before the call is answered")
 
-        system.onAnswer?(answered.id)
+        #expect(system.onAnswer?(answered.id) == true)
         await wait { !opened.isEmpty }
         #expect(opened == [LinkCallStart(conversationID: conversation, answering: answered.id)])
         #expect(calls.call?.id == answered.id)
         #expect(system.answeredCalls == [answered.id])
         #expect(system.begun.isEmpty, "An answered call is on the call screen already")
         #expect(calls.ringing.isEmpty)
+        #expect(system.onAnswer?(answered.id) == false, "A call no longer ringing cannot be answered again")
+        channel.push(.started)
+        await wait { calls.call?.startedAt != nil }
+        #expect(system.connected.isEmpty, "iOS connected the answered call itself")
         calls.hangUp()
 
         let refused = incoming()
         calls.ring(refused, name: "Kai")
+        await wait { system.rung.count == 2 }
         system.onEnd?(refused.id)
         await wait { !declined.isEmpty }
         #expect(declined == [refused.id])
@@ -192,6 +199,7 @@ private struct Failure: LocalizedError {
 
         let elsewhere = incoming()
         calls.ring(elsewhere, name: "Kai")
+        await wait { system.rung.count == 3 }
         calls.stopRinging(elsewhere.id)
         #expect(system.stopped.map { $0.0 } == [elsewhere.id])
         #expect(system.stopped.map { $0.1 } == [false])
@@ -199,6 +207,14 @@ private struct Failure: LocalizedError {
 
         calls.ring(incoming(expiring: 0), name: "Kai")
         #expect(calls.ringing.isEmpty, "A call that already expired never rings")
+
+        // Stopped while iOS put it on the call screen: once there, it is ended there.
+        let late = incoming()
+        system.onRing = { calls.stopRinging(late.id) }
+        calls.ring(late, name: "Kai")
+        await wait { system.stopped.filter { $0.0 == late.id }.count == 2 }
+        #expect(system.stopped.filter { $0.0 == late.id }.count == 2)
+        #expect(calls.ringing.isEmpty)
     }
 
     @Test func aCallThatCannotUseTheMicrophoneNeverReachesTheHub() async throws {
