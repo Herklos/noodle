@@ -973,6 +973,127 @@ import XCTest
         XCTAssertEqual(process.callEnds, 1)
     }
 
+    /// A Hub where Ada's bot Kai runs on Codex, which takes calls.
+    private func callingFixture() async throws -> (Fixture, LinkBot, () -> [FakeProcess]) {
+        let (runtime, processes) = try fakeRuntime()
+        let f = try await fixture(runtime: runtime)
+        f.hub.bots.watch()
+        f.hub.bots.voiceGuesser = MasculineNames()
+        f.hub.bots.makeCallPeer = { FakeCallPeer() }
+        let family = try XCTUnwrap(f.hub.access.plans.first { $0.name == "Family" })
+        f.hub.access.set(HubHarness(provider: .codex, profile: nil), included: true, in: family)
+        guard case .bot(let made) = try await f.device.request(.createBot(LinkBotDraft(name: "Kai", provider: "codex"))) else {
+            throw XCTSkip("unexpected answer")
+        }
+        return (f, made, processes)
+    }
+
+    /// A bot's call rings on its owner's devices, also on one that subscribes while it rings. Answering on one
+    /// calls the bot, told why it called, and the others stop ringing.
+    func testABotsCallRingsItsOwnersDevicesUntilOneAnswers() async throws {
+        let (f, kai, processes) = try await callingFixture()
+        let events = try await f.device.subscribe()
+        _ = try await f.device.request(.status)
+        let request = try f.hub.repository.requestCall(agentID: kai.id, reason: "The build is broken")
+        f.hub.bots.ringCall(of: kai.id)
+        let conversation = kai.conversationID, bot = kai.id
+        // Seconds left, not a time, so a device with its clock off rings as long.
+        let rang: @Sendable (LinkEvent) -> Bool = {
+            guard case .callRinging(let call) = $0 else { return false }
+            return call.id == request.id && call.botID == bot && call.conversationID == conversation
+                && call.reason == "The build is broken" && (40...45).contains(call.secondsLeft)
+        }
+        try await expect("the call ringing", in: events, where: rang)
+        XCTAssertTrue(processes().isEmpty, "Nothing connects to the bot before the call is answered")
+
+        let phone = HubPairing(directory: FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-phone-\(UUID())"),
+                               deviceName: "iPhone")
+        addTeardownBlock { try? FileManager.default.removeItem(at: phone.directory) }
+        await phone.join(f.link.invite(f.ada).url().absoluteString)
+        let phoneEvents = try await phone.subscribe()
+        try await expect("the call ringing on a device that subscribed later", in: phoneEvents, where: rang)
+
+        let channel = try await phone.channel(.startCall(LinkCallStart(conversationID: kai.conversationID, answering: request.id)))
+        try await expect("the call stopping on the other device", in: events) { $0 == .callStopped(id: request.id) }
+        await waitUntil { processes().last?.callRequests.count == 1 }
+        XCTAssertEqual(processes().last?.callRequests.first?.answeredCallReason, "The build is broken")
+        XCTAssertNil(f.hub.repository.pendingCall(agentID: kai.id))
+        XCTAssertTrue(f.hub.bots.ringingCalls(for: f.ada.id).isEmpty)
+        channel.cancel()
+    }
+
+    /// Only the bot's owner declines its call, which leaves a card; so does a call nobody answers in time.
+    func testADeclinedOrUnansweredCallLeavesACardOnEveryDevice() async throws {
+        let (f, kai, _) = try await callingFixture()
+        let grace = try await person("Grace", f)
+        let events = try await f.device.subscribe()
+        _ = try await f.device.request(.status)
+        let declined = try f.hub.repository.requestCall(agentID: kai.id, reason: "Need a decision")
+        f.hub.bots.ringCall(of: kai.id)
+        do {
+            _ = try await grace.device.request(.declineCall(id: declined.id))
+            XCTFail("Declined someone else's call")
+        } catch {}
+        let answer = try await f.device.request(.declineCall(id: declined.id))
+        XCTAssertEqual(answer, .done)
+        try await expect("the declined call stopping", in: events) { $0 == .callStopped(id: declined.id) }
+
+        let later = Date().addingTimeInterval(AgentCallLimits.cooldown + 60)
+        let missed = try f.hub.repository.requestCall(agentID: kai.id, reason: "The disk is full", now: later)
+        f.hub.bots.ringCall(of: kai.id, now: later)
+        f.hub.bots.expireCalls(at: missed.expiresAt)
+        try await expect("the missed call stopping", in: events) { $0 == .callStopped(id: missed.id) }
+
+        guard case .messages(let page) = try await f.device.request(.messages(conversationID: kai.conversationID, after: 0)) else {
+            return XCTFail("no messages")
+        }
+        let cards = page.messages.compactMap(\.call)
+        XCTAssertEqual(cards.map(\.unanswered), [.declined, .missed])
+        XCTAssertEqual(cards.map(\.reason), ["Need a decision", "The disk is full"])
+        XCTAssertNil(f.hub.repository.pendingCall(agentID: kai.id))
+    }
+
+    private func callCards(_ f: Fixture, _ bot: LinkBot) -> [VoiceCallRecord] {
+        ((try? f.hub.repository.loadMessages(conversationID: bot.conversationID)) ?? []).compactMap(\.call)
+    }
+
+    /// Calls that rang when the Hub stopped ring on when it starts again, or are left missed with a card.
+    func testCallsPendingWhenTheHubStartsAgainRingOnOrAreLeftMissed() async throws {
+        let (f, kai, _) = try await callingFixture()
+        let events = try await f.device.subscribe()
+        _ = try await f.device.request(.status)
+        _ = try f.hub.repository.requestCall(agentID: kai.id, reason: "Rang while the Hub was off",
+                                            now: Date().addingTimeInterval(-AgentCallLimits.ringing - 10))
+        f.hub.bots.ringPendingCalls()
+        XCTAssertEqual(callCards(f, kai).map(\.unanswered), [.missed])
+        XCTAssertNil(f.hub.repository.pendingCall(agentID: kai.id))
+
+        let later = Date().addingTimeInterval(AgentCallLimits.cooldown + 60)
+        let ringing = try f.hub.repository.requestCall(agentID: kai.id, reason: "Still ringing", now: later)
+        f.hub.bots.ringPendingCalls(now: later)
+        let id = ringing.id
+        try await expect("the call ringing on", in: events) { if case .callRinging(let call) = $0 { call.id == id } else { false } }
+    }
+
+    /// A call answered that never connects is left missed, so the bot hears of it. Declining a call that
+    /// no longer rings does nothing.
+    func testAnAnsweredCallThatNeverConnectsIsLeftMissed() async throws {
+        let (f, kai, processes) = try await callingFixture()
+        let request = try f.hub.repository.requestCall(agentID: kai.id, reason: "The build is broken")
+        f.hub.bots.ringCall(of: kai.id)
+        let channel = try await f.device.channel(.startCall(LinkCallStart(conversationID: kai.conversationID, answering: request.id)))
+        await waitUntil { processes().last?.callRequests.count == 1 }
+        XCTAssertTrue(callCards(f, kai).isEmpty)
+        processes().last?.callEvents?(.ended("The voice did not start."))
+        await waitUntil { !self.callCards(f, kai).isEmpty }
+        XCTAssertEqual(callCards(f, kai).map(\.unanswered), [.missed])
+        XCTAssertEqual(callCards(f, kai).map(\.reason), ["The build is broken"])
+        let late = try await f.device.request(.declineCall(id: request.id))
+        XCTAssertEqual(late, .done)
+        XCTAssertEqual(callCards(f, kai).count, 1)
+        channel.cancel()
+    }
+
     /// Anyone on the Hub can be picked to share with; nobody picks themselves.
     func testOwnersSeeWhoElseIsOnTheHub() async throws {
         let f = try await fixture()

@@ -674,7 +674,8 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             "clientManagedHandoffs": true,
             "transport": ["type": "webrtc", "sdp": request.offer],
             "realtimeStartInstructions": VoiceCallDocumentation.startInstructions(
-                conversationID: request.conversationID, personName: request.personName),
+                conversationID: request.conversationID, personName: request.personName,
+                answeredCallReason: request.answeredCallReason),
             "realtimeEndInstructions": VoiceCallDocumentation.endInstructions,
             // Added to Codex's own voice prompt, which would otherwise have it introduce itself as Codex.
             "initialItems": (request.identity.map { [["role": "developer", "text": VoiceCallDocumentation.identity($0)]] } ?? [])

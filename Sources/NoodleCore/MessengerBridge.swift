@@ -59,6 +59,9 @@ public final class MessengerBroker: @unchecked Sendable {
     public var onAgentChanged: (@Sendable (UUID) -> Void)?
     /// Called on the broker's queue when a bot scheduled or cancelled one of its wakes.
     public var onWakesChanged: (@Sendable (UUID) -> Void)?
+    /// Called on the broker's queue when a bot placed a call, which then waits in its package for
+    /// the app to ring it. Without one, nothing here can ring, so bots are told calls are unavailable.
+    public var onCallRequested: (@Sendable (UUID) -> Void)?
     /// Whether a noodlet has a preview. Only `present` sets one, so a bot attaching a noodlet
     /// without is refused and told to present it rather than leave a plain icon in the conversation.
     public var noodletHasPreview: (@Sendable (URL) async -> Bool)?
@@ -138,10 +141,14 @@ public final class MessengerBroker: @unchecked Sendable {
     }
 
     private func perform(_ request: MessengerBridgeRequest, for agent: AgentRecord) -> MessengerCommandResult {
+        if case .requestCall = request.action, onCallRequested == nil {
+            return .init(exitCode: 2, standardError: "messenger: Calls are not available where you run. Send a message instead.\n")
+        }
         let response = MessengerCLI.perform(request.action, repository: repository, agentID: agent.id, brokered: true)
         if case .setStatus = request.action, response.exitCode == 0 { onAgentChanged?(agent.id) }
         switch request.action {
         case .scheduleWake, .scheduleRecurringWake, .cancelWake: if response.exitCode == 0 { onWakesChanged?(agent.id) }
+        case .requestCall: if response.exitCode == 0 { onCallRequested?(agent.id) }
         default: break
         }
         return response

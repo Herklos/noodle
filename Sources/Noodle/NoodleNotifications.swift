@@ -12,6 +12,9 @@ enum NoodleNotifications {
     static let conversationIDKey = "conversationID"
     static let messageIDKey = "messageID"
     static let signInKey = "signIn"
+    static let callKey = "call"
+    /// One at a time: a call rings again by replacing it.
+    private static let ringingIdentifier = "Noodle.ringing"
 
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.pdparchitect.noodle",
@@ -75,6 +78,24 @@ enum NoodleNotifications {
                 logger.error("Unable to deliver notification: \(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    /// Rings for a call a bot placed. It is time-sensitive, so it rings through a Focus that lets Noodle's
+    /// time-sensitive notifications through, and Focus and Do Not Disturb silence it otherwise. The panel shows who calls.
+    @MainActor
+    static func ring(_ call: AgentCallRequest, from agent: AgentRecord) {
+        let content = UNMutableNotificationContent()
+        content.title = agent.displayName
+        content.body = call.reason
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        content.userInfo = [conversationIDKey: call.conversationID.uuidString, callKey: call.id.uuidString]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: ringingIdentifier, content: content, trigger: nil))
+    }
+
+    @MainActor
+    static func stopRinging() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [ringingIdentifier])
     }
 
     /// Shown even while Noodle is in front: the bot waits until the person signs in.

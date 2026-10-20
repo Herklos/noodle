@@ -192,7 +192,8 @@ final class MessengerDocumentationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = WorkspaceRepository(rootURL: root)
         try repository.prepare()
-        let bot = try repository.createAgent(named: "Tester")
+        // A harness that takes voice calls, so it can call.
+        let bot = try repository.createAgent(named: "Tester", harnessIdentifier: HarnessProvider.codex.rawValue)
         let message = ChatMessage(conversationID: bot.conversation.id, author: .user, body: "Test", delivery: .delivered)
         try repository.append(message)
         let prefix = ["messenger", "--agent-directory", repository.directory(for: bot.agent).path]
@@ -213,6 +214,7 @@ final class MessengerDocumentationTests: XCTestCase {
             case .wakeAt: options = ["2099-01-01T00:00:00Z", "--note", "Later"]
             case .wakeEvery: options = ["0 9 * * *", "--note", "Daily"]
             case .cancelWake: options = [wakeID]
+            case .call: options = ["--reason", "Checking in"]
             }
             let result = MessengerCLI.runDirect(arguments: prefix + [command.rawValue] + options, environment: [:])
             XCTAssertEqual(result.exitCode, 0, "\(command): \(result.standardError)")

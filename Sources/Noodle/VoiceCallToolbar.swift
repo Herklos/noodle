@@ -84,14 +84,16 @@ struct VoiceCallCard: View {
         HStack {
             Spacer(minLength: 60)
             HStack(spacing: 10) {
-                Image(systemName: live == nil ? "phone" : "phone.fill")
+                Image(systemName: record.unanswered != nil ? "phone.arrow.down.left" : live == nil ? "phone" : "phone.fill")
                     .font(.system(size: 15))
-                    .foregroundStyle(live == nil ? Color.secondary : Color.green)
+                    .foregroundStyle(record.unanswered != nil ? Color.red : live == nil ? Color.secondary : Color.green)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Voice call with \(botName)")
+                    Text(title)
                         .font(.system(size: 12.5, weight: .medium))
                     Group {
-                        if let live {
+                        if record.unanswered != nil {
+                            if let reason = record.reason { Text(reason).lineLimit(2) }
+                        } else if let live {
                             VoiceCallTimer(startedAt: live.startedAt)
                         } else if let endedAt = record.endedAt {
                             Text(Duration.seconds(max(0, endedAt.timeIntervalSince(message.createdAt)))
@@ -106,6 +108,14 @@ struct VoiceCallCard: View {
             .padding(.vertical, 9)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             Spacer(minLength: 60)
+        }
+    }
+
+    private var title: String {
+        switch record.unanswered {
+        case .missed: "Missed call from \(botName)"
+        case .declined: "Declined call from \(botName)"
+        case nil: "Voice call with \(botName)"
         }
     }
 

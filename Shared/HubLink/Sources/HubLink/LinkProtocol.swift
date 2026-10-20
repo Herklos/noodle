@@ -258,6 +258,10 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Takes the chat effect waiting in one of this user's conversations, now that this device shows it; it
     /// plays on no other device. Answered with `effect`, empty when none waits.
     case takeEffect(conversationID: UUID)
+    /// Declines a call one of this user's bots placed, which rings on every device of theirs until
+    /// one answers or declines it, or it expires. Answered with `done`. Answering is `startCall` with
+    /// `answering`.
+    case declineCall(id: UUID)
 }
 
 /// A chat effect a bot sent, waiting for its conversation to be seen. Its kind is a name; one an app does
@@ -675,6 +679,11 @@ public enum LinkEvent: Codable, Equatable, Sendable {
     case usersChanged
     /// A chat effect waits in one of this user's conversations, to be taken by the device that shows it.
     case effectWaiting(conversationID: UUID)
+    /// One of this user's bots is calling them: ring until `callStopped`, or until it expires. Pushed again
+    /// to a device that subscribes while it rings. Hubs from before calls never send it.
+    case callRinging(LinkIncomingCall)
+    /// A call that rang was answered on some device, declined, or not answered in time: stop ringing.
+    case callStopped(id: UUID)
 }
 
 /// Someone else on the Hub, as anyone sharing a bot sees them.

@@ -184,4 +184,22 @@ final class MessengerBridgeTests: XCTestCase {
         XCTAssertNotEqual(try call(.setStatus("   ")).exitCode, 0)
         XCTAssertEqual(try repository.loadAgents().first { $0.id == agent.id }?.status, String(repeating: "a", count: 60))
     }
+
+    /// A call rings only where something listens for it; elsewhere the bot is told to write instead.
+    func testABotCallsOnlyWhereSomethingCanRing() throws {
+        let caller = try repository.createAgent(named: "Theo", harnessIdentifier: HarnessProvider.codex.rawValue).agent
+        try broker.start(agents: [agent, other, caller])
+        let workspace = repository.directory(for: caller)
+        let refused = try MessengerBridgeClient.request(.requestCall(reason: "The build is broken"), workspace: workspace)
+        XCTAssertNotEqual(refused.exitCode, 0)
+        XCTAssertTrue(refused.standardError.contains("Calls are not available where you run"), refused.standardError)
+        XCTAssertNil(repository.pendingCall(agentID: caller.id))
+
+        let rang = expectation(description: "call reported")
+        broker.onCallRequested = { id in if id == caller.id { rang.fulfill() } }
+        let placed = MessengerCLI.run(arguments: ["messenger", "--agent-directory", workspace.path, "--call", "--reason", "The build is broken"])
+        XCTAssertEqual(placed.exitCode, 0, placed.standardError)
+        wait(for: [rang], timeout: 5)
+        XCTAssertEqual(repository.pendingCall(agentID: caller.id)?.reason, "The build is broken")
+    }
 }
