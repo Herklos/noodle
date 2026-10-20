@@ -206,10 +206,10 @@ private actor FakeHub {
             if messages.contains(where: { $0.id == outgoing.id }) { return .message(messages.first { $0.id == outgoing.id }!) }
             let attachments = outgoing.attachmentIDs.compactMap { files[$0]?.attachment }
             guard attachments.count == outgoing.attachmentIDs.count else { return .failure("A file is missing.") }
-            let sent = LinkMessage(id: outgoing.id, conversationID: bot.conversationID, author: .you, body: outgoing.body,
+            let sent = LinkMessage(id: outgoing.id, conversationID: outgoing.conversationID, author: .you, body: outgoing.body,
                                    createdAt: Date(), delivered: true, attachments: attachments)
             messages.append(sent)
-            messages.append(LinkMessage(id: UUID(), conversationID: bot.conversationID, author: .bot(bot.id),
+            messages.append(LinkMessage(id: UUID(), conversationID: outgoing.conversationID, author: .bot(bot.id),
                                         body: "You said: \(outgoing.body)", createdAt: Date(), delivered: true))
             if failingSends > 0 {
                 failingSends -= 1
@@ -1002,6 +1002,82 @@ private actor RecordedSubscriptions: PushSubscriptions {
         // The phone keeps what it sent, so it never downloads it back.
         #expect(try Data(contentsOf: try await chats.file(for: attachment, in: scout)) == data)
         #expect(await hub.downloads == 0)
+    }
+
+    /// Forward… sends a bot's file on to a group as one message of yours, with the comment as its words. The file
+    /// goes up again under an ID of its own, since the Hub keeps each conversation's files apart.
+    @Test func aForwardedFileReachesTheGroupWithTheComment() async throws {
+        let hub = FakeHub()
+        let data = Data((0..<(LinkProtocol.chunkSize + 1000)).map { UInt8($0 % 251) })
+        let original = await hub.botSends(data, named: "report.pdf", mediaType: "application/pdf")
+        let crew = await hub.addGroup(named: "Crew", saying: "Morning")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let group = try #require(chats.groups.first)
+
+        let id = try await chats.forward(original, from: chats, in: .bot(scout), saying: "  For the review \n", to: .group(group))
+
+        // Shown in the group at once, before the Hub has it.
+        let shown = try #require(chats.messages(of: group).last)
+        #expect(shown.id == id)
+        #expect(shown.author == .you)
+        #expect(shown.body == "For the review")
+        #expect(shown.attachments.map(\.filename) == ["report.pdf"])
+        #expect(shown.attachments.map(\.mediaType) == ["application/pdf"])
+        let copy = try #require(shown.attachments.first)
+        #expect(copy.id != original.id)
+        #expect(await hub.downloads == 1)
+
+        await chats.deliver(id)
+        #expect(!chats.isUnsent(shown))
+        let onHub = await hub.messages
+        let sent = try #require(onHub.first { $0.id == id })
+        #expect(sent.conversationID == crew.id)
+        #expect(sent.body == "For the review")
+        #expect(sent.attachments.map(\.id) == [copy.id])
+        #expect(await hub.data(of: copy.id) == data)
+        // Scout's conversation is as it was.
+        #expect(onHub.filter { $0.conversationID == scout.conversationID }.count == 2)
+
+        // Without a comment, it says what was sent, as a file sent alone does. The file is on the phone by now.
+        let bare = try await chats.forward(original, from: chats, in: .bot(scout), saying: " ", to: .group(group))
+        await chats.deliver(bare)
+        let bareOnHub = await hub.messages.first { $0.id == bare }
+        #expect(bareOnHub?.body == "Sent 1 attachment")
+        #expect(await hub.downloads == 1)
+    }
+
+    /// Forward… offers the bots and groups the list shows, but the file's own conversation and those that take no
+    /// messages, and search finds them by name. Recordings, comments and links are not offered for forwarding.
+    @Test func forwardOffersOtherBotsAndGroupsThatTakeMessages() async throws {
+        let hub = FakeHub()
+        let crew = await hub.addGroup(named: "Crew", saying: "Morning")
+        let house = await hub.addGroup(named: "House", saying: "Hi all")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        func names(leaving source: UUID, search: String = "") -> [String] {
+            AttachmentForwarding.targets(in: [chats], leaving: source, search: search).map { $0.1.name }
+        }
+
+        #expect(Set(names(leaving: scout.conversationID)) == ["Crew", "House"])
+        #expect(Set(names(leaving: crew.id)) == ["Scout", "House"])
+        #expect(names(leaving: scout.conversationID, search: " cre ") == ["Crew"])
+        #expect(names(leaving: scout.conversationID, search: "Nobody").isEmpty)
+        try await chats.setArchived(true, .group(try #require(chats.groups.first { $0.id == house.id })))
+        #expect(names(leaving: scout.conversationID) == ["Crew"])
+
+        let file = LinkAttachment(id: UUID(), filename: "notes.txt", mediaType: "text/plain", byteCount: 5)
+        #expect(AttachmentForwarding.canForward(file))
+        var voice = file
+        voice.voice = LinkVoice(transcript: "Hi", duration: 1, waveform: [0.5], localeIdentifier: "en-GB")
+        #expect(!AttachmentForwarding.canForward(voice))
+        var link = file
+        link.url = URL(string: "https://example.com")
+        #expect(!AttachmentForwarding.canForward(link))
     }
 
     /// The share sheet offers what the list shows, without asking the Hub: archived bots and groups stay out.

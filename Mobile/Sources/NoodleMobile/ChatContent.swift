@@ -46,6 +46,7 @@ struct AttachmentView: View {
     @Environment(\.reviewPatch) private var reviewPatch
     @Environment(\.annotating) private var annotating
     @Environment(\.previewAttachments) private var previewAttachments
+    @Environment(\.forwardAttachment) private var forwardAttachment
 
     private var isImage: Bool { attachment.mediaType.hasPrefix("image/") }
 
@@ -89,6 +90,12 @@ struct AttachmentView: View {
             }
             if let annotating, attachment.annotation == nil {
                 Button("Comment…", systemImage: "text.bubble") { annotating.begin(.attachment(attachment)) }
+            }
+            if AttachmentForwarding.canForward(attachment), let forwardAttachment {
+                let chats = chats, thread = thread, attachment = attachment
+                Button("Forward…", systemImage: "arrowshape.turn.up.right") {
+                    forwardAttachment(AttachmentForwardRequest(chats: chats, thread: thread, attachment: attachment))
+                }
             }
             // As on the Mac: a picture in the conversation can become its backdrop.
             if isImage, attachment.annotation == nil {

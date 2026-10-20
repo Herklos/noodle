@@ -925,6 +925,28 @@ enum HubThread: HubConversation {
     private func isNewest(_ message: LinkMessage) -> Bool { conversations[message.conversationID]?.last?.id == message.id }
 
     func send(_ body: String, files: [OutgoingFile] = [], to conversation: some HubConversation) async throws {
+        let id = try queue(body, files: files, to: conversation)
+        await deliver(id)
+    }
+
+    /// Sends a message `queue` or `forward` left waiting, trying again after short pauses.
+    func deliver(_ id: UUID) async { await deliver(id, pauses: retryPauses) }
+
+    /// Sends a file of `thread` on to a bot or group, which may be another Hub's, as if the person had
+    /// attached it there: one message from them with the file, and the comment as its words. A Hub keeps
+    /// each conversation's files to itself, so the file comes down to this phone if it is not here yet and
+    /// goes up again with the message. The message shows at once and waits for `deliver`.
+    func forward(_ attachment: LinkAttachment, from source: HubChats, in thread: HubThread, saying comment: String,
+                 to conversation: HubThread) async throws -> UUID {
+        guard AttachmentForwarding.canForward(attachment) else { throw LinkError("Only files can be forwarded.") }
+        let url = try await source.file(for: attachment, in: thread)
+        return try queue(comment.trimmingCharacters(in: .whitespacesAndNewlines),
+                         files: [OutgoingFile(url: url, filename: attachment.filename, mediaType: attachment.mediaType)],
+                         to: conversation)
+    }
+
+    /// Shows a message at once and keeps it, files included, until it is delivered.
+    private func queue(_ body: String, files: [OutgoingFile], to conversation: some HubConversation) throws -> UUID {
         let (outgoing, attachments) = try OutgoingMessages.make(body, files: files, to: conversation.conversationID)
         let text = outgoing.body
         // Kept first, files included, so a message that does not go through can go later.
@@ -935,7 +957,7 @@ enum HubThread: HubConversation {
         merge([LinkMessage(id: outgoing.id, conversationID: conversation.conversationID, author: .you, body: text,
                            createdAt: Date(), delivered: false, attachments: attachments)], into: conversation.conversationID)
         saveCache()
-        await deliver(outgoing.id, pauses: retryPauses)
+        return outgoing.id
     }
 
     func tryAgain(_ message: LinkMessage) async {
@@ -1360,6 +1382,7 @@ struct AgentsView: View {
             .navigationDestination(for: ChatLink.self) { link in
                 if let hub = chats.first(where: { CurrentHub.name(of: $0.pairing) == link.hub }) {
                     ChatView(chats: hub, threadID: link.thread)
+                        .environment(\.joinedHubs, chats)
                         .environment(\.openThread) { hub, thread in
                             path = ChatLink.path(path, opening: ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread))
                         }
@@ -1896,6 +1919,9 @@ struct ChatView: View {
     @State private var watchingAt: NoodletManifest.Placement?
     /// The patch open for review, held here for the same reason.
     @State private var reviewing: PatchReviewRequest?
+    /// The file being forwarded, held here for the same reason.
+    @State private var forwarding: AttachmentForwardRequest?
+    @Environment(\.joinedHubs) private var joinedHubs
     /// The message lifted by a long press, with its reactions and actions.
     @State private var focused: MessageFocus?
     /// A comment being written over the conversation, and one asked for from a lifted message, which
@@ -2092,6 +2118,8 @@ struct ChatView: View {
         }
         .environment(\.watchLive) { watchingAt = $1; watching = $0 }
         .environment(\.reviewPatch) { reviewing = $0 }
+        .environment(\.forwardAttachment) { forwarding = $0 }
+        .sheet(item: $forwarding) { ForwardSheet(request: $0, hubs: joinedHubs.isEmpty ? [chats] : joinedHubs) }
         .sheet(item: $reviewing) { request in
             PatchReviewScreen(request: request, viewed: chats.viewedPatchFiles(request.attachment, in: thread),
                               annotating: annotating(in: thread)) {

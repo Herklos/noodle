@@ -5,6 +5,7 @@
 ### Added
 
 - Tap …, choose Hubs and tap your Hub: it lists all your computers and browsers on it, whichever bots have them. Tap one to change its name and description, or swipe to delete it.
+- Touch and hold a file in a conversation and choose Forward… to send it to another bot or group, with an optional comment. It arrives there as your message, as if you had attached the file yourself.
 
 ### Changed
 
@@ -28,6 +29,13 @@
 - Tap one, change its name and description and tap Save: check the list shows them, and so do the bot's Computers or Browsers and Noodle on the Mac. Clear a description, save, and check it is gone.
 - Swipe one to delete it: check the confirmation names the bots that use it, and that after Delete it is gone from the list and from those bots.
 - With a Hub that cannot list computers or browsers, check those rows do not show.
+- Touch and hold a picture or another file in a conversation and choose Forward…: check the sheet names the file and lists your bots and groups, without the conversation you are in, and that search finds them by name.
+- Pick a bot or group, write a comment and tap Send: check the sheet closes, and that conversation shows one message from you with the file and your comment as its text. Check the bot answers about the file.
+- Forward without a comment: check the message says "Sent 1 attachment".
+- Forward a file you have not opened yet, and a large one: check Send waits while it downloads, then it goes.
+- With two Hubs joined, check bots from both are listed, each with its Hub's name, and that forwarding to the other Hub works.
+- Touch and hold a voice message, a comment card, a link, or a shared computer or noodlet: check Forward… does not show.
+- Turn on Airplane Mode and forward a file you have opened: check the message shows Not delivered in the other conversation, and goes when you try again with the connection back.
 
 ## [0.39.0] - 2026-10-18
 

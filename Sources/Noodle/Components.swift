@@ -261,6 +261,7 @@ struct ConversationStatusAvatar: View {
 
 struct MessageBubble: View {
     @Environment(NoodleStore.self) private var store
+    @Environment(\.forwardAttachment) private var forwardAttachment
     @AppStorage(ChatAttachmentLayout.defaultsKey) private var attachmentLayout = ChatAttachmentLayout.defaultValue.rawValue
     @AppStorage(MessageTextLayout.defaultsKey) private var textLayout = MessageTextLayout.defaultValue.rawValue
     @State private var inspectedReaction: String?
@@ -525,7 +526,11 @@ struct MessageBubble: View {
                 store.isHubNoodlet(item) ? { Task { try? await store.openCompanion(item, at: .hub) } } : nil
             },
             copyTable: table.map { table in { MessageTableActions.copy(table) } },
-            saveTable: table.map { table in { store.saveTable(table) } }
+            saveTable: table.map { table in { store.saveTable(table) } },
+            forward: attachment.flatMap { item -> (() -> Void)? in
+                guard AttachmentForwarding.canForward(item), let forwardAttachment else { return nil }
+                return { forwardAttachment(item) }
+            }
         )
     }
 
