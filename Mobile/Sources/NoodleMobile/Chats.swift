@@ -2352,9 +2352,7 @@ struct ChatView: View {
     /// The field, with the microphone or send button inside it, as in Messages.
     private var messageField: some View {
         HStack(alignment: .bottom, spacing: 6) {
-            ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message") { image in
-                attach { try PickedFiles.store(image.pngData() ?? Data(), named: "Image.png", type: .png) }
-            }
+            ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message") { attachPasted($0) }
             .padding(.vertical, 13)
             // As in Messages: the microphone until there is something to send.
             if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty && notes.isEmpty {
@@ -2419,6 +2417,24 @@ struct ChatView: View {
 
     private func attach(_ pick: () throws -> [OutgoingFile]) {
         do { files += try pick() } catch { problem = error.localizedDescription }
+    }
+
+    /// Pictures, files and long text pasted into the field wait above it, as on the Mac.
+    private func attachPasted(_ paste: ComposerPaste) {
+        switch paste {
+        case .images(let images):
+            for image in images {
+                attach { try PickedFiles.store(image.pngData() ?? Data(), named: "Image.png", type: .png) }
+            }
+        case .text(let text):
+            attach { try ComposerPaste.textFile(text) }
+        case .files(let providers):
+            Task {
+                let pasted = await ComposerPaste.load(providers)
+                if pasted.isEmpty { problem = "The copied file could not be attached." }
+                files += pasted
+            }
+        }
     }
 
     private func add(_ items: [PhotosPickerItem]) async {

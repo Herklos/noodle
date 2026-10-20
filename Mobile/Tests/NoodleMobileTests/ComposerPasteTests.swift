@@ -1,0 +1,83 @@
+import Foundation
+import HubLink
+@testable import NoodleMobile
+import Testing
+import UIKit
+import UniformTypeIdentifiers
+
+/// Pasting into the message field as on the Mac: files attach as files, and text past the Mac's
+/// limits attaches as a text file named as the Mac names one.
+@MainActor @Suite(.timeLimit(.minutes(1))) struct ComposerPasteTests {
+    private func pasteboard() -> UIPasteboard { UIPasteboard.withUniqueName() }
+
+    @Test func longTextAttachesAsPastedTextAtTheMacsLimits() throws {
+        let board = pasteboard()
+        defer { UIPasteboard.remove(withName: board.name) }
+        let field = PastingTextView()
+        var pasted: ComposerPaste?
+        field.pasted = { pasted = $0 }
+
+        board.string = Array(repeating: "line", count: 12).joined(separator: "\n")
+        #expect(!field.attachPaste(from: board), "short text goes into the field")
+        #expect(pasted == nil)
+
+        let long = Array(repeating: "line", count: 13).joined(separator: "\n")
+        board.string = long
+        #expect(field.attachPaste(from: board))
+        guard case .text(let text)? = pasted else { Issue.record("long text did not attach: \(String(describing: pasted))"); return }
+        #expect(text == long)
+        #expect(field.text.isEmpty)
+
+        board.string = String(repeating: "a", count: 1_201)
+        guard case .text? = ComposerPaste.read(from: board) else { Issue.record("1,201 characters did not attach"); return }
+
+        let file = try ComposerPaste.textFile(long)
+        #expect(file.filename == "Pasted Text.txt")
+        #expect(file.mediaType == "text/plain")
+        #expect(try String(contentsOf: file.url, encoding: .utf8) == long)
+    }
+
+    /// Copy File on a text file in the conversation pastes back as that file, named as it was, not as its text.
+    @Test func aCopiedFilePastesAsTheFile() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("notes.txt")
+        try Data("A few words".utf8).write(to: url)
+        let board = pasteboard()
+        defer { UIPasteboard.remove(withName: board.name) }
+
+        AttachmentClipboard.copyFile(url, named: "notes.txt", to: board)
+
+        guard case .files(let providers)? = ComposerPaste.read(from: board) else { Issue.record("the file did not paste as a file"); return }
+        let files = await ComposerPaste.load(providers)
+        #expect(files.map(\.filename) == ["notes.txt"])
+        #expect(files.first?.mediaType == "text/plain")
+        let file = try #require(files.first)
+        #expect(file.url != url, "the pasted file is a copy that stays until sent")
+        #expect(try String(contentsOf: file.url, encoding: .utf8) == "A few words")
+    }
+
+    /// Another app's copied file comes with its name; copied words come without one, or with a name
+    /// that is not their type, as a page's title would be.
+    @Test func onlyACopiedFileCountsAsAFile() {
+        #expect(ComposerPaste.isFile(types: [UTType.fileURL.identifier], suggestedName: nil))
+        #expect(ComposerPaste.isFile(types: [UTType.plainText.identifier], suggestedName: "notes.txt"))
+        #expect(ComposerPaste.isFile(types: [UTType.pdf.identifier], suggestedName: "Report.pdf"))
+        #expect(!ComposerPaste.isFile(types: [UTType.utf8PlainText.identifier], suggestedName: nil))
+        #expect(!ComposerPaste.isFile(types: [UTType.utf8PlainText.identifier, UTType.html.identifier], suggestedName: "Node.js"))
+        #expect(!ComposerPaste.isFile(types: [UTType.plainText.identifier], suggestedName: "Notes"))
+        #expect(!ComposerPaste.isFile(types: [UTType.url.identifier], suggestedName: nil))
+    }
+
+    @Test func onlyTextFilesOfferCopyFile() {
+        func attachment(_ filename: String, _ mediaType: String) -> LinkAttachment {
+            LinkAttachment(id: UUID(), filename: filename, mediaType: mediaType, byteCount: 10)
+        }
+        #expect(AttachmentClipboard.isText(attachment("notes.txt", "text/plain")))
+        #expect(AttachmentClipboard.isText(attachment("data.json", "application/json")))
+        #expect(AttachmentClipboard.isText(attachment("script.py", "application/octet-stream")))
+        #expect(!AttachmentClipboard.isText(attachment("Photo.jpg", "image/jpeg")))
+        #expect(!AttachmentClipboard.isText(attachment("Report.pdf", "application/pdf")))
+    }
+}
