@@ -170,6 +170,19 @@ import WebKit
     }
     /// Someone is watching the browser live.
     func isWatched(_ browser: UUID) -> Bool { surfaces[browser]?.isWatched == true }
+    /// Browsers whose filled passwords are being emptied after the last viewer left; bots wait until then.
+    private var clearingSignIn: Set<UUID> = []
+    /// Empties the password fields people filled in the browser's pages while watching, so that a bot
+    /// using the browser next cannot read them.
+    func clearSignIns(_ browserID: UUID) {
+        let filled = tabs.values.filter { $0.browserID == browserID && $0.hasSignInToClear }
+        guard !filled.isEmpty else { return }
+        clearingSignIn.insert(browserID)
+        Task {
+            for tab in filled { await tab.clearSignIn() }
+            clearingSignIn.remove(browserID)
+        }
+    }
     /// Only the tab a person is watching draws as if seen.
     private func showWatchedTab(_ browserID: UUID, watched: Bool? = nil) {
         let watched = watched ?? isWatched(browserID)
@@ -303,7 +316,7 @@ import WebKit
         var response = BrowserResponse()
         if request.operation == .list {
             guard library.failure == nil else { throw BrowserError(library.failure!) }
-            response.browsers = library.profiles.map(\.remote); response.features = [SurfaceSocket.feature]; return response
+            response.browsers = library.profiles.map(\.remote); response.features = [SurfaceSocket.feature, BrowserSignInForm.feature]; return response
         }
         let hub = caller == BrowserBuildIdentity.current.hubID
         if request.operation == .create, let draft = request.profile {
@@ -365,15 +378,28 @@ import WebKit
             let streamer = surfaces[id] ?? {
                 let view = BrowserLiveView(browserID: id, runtime: self)
                 let streamer = SurfaceStreamer(capture: { try await view.picture() }, apply: { try view.apply($0) })
-                streamer.watchingChanged = { [weak self] watched in self?.showWatchedTab(id, watched: watched) }
+                streamer.watchingChanged = { [weak self] watched in
+                    self?.showWatchedTab(id, watched: watched)
+                    if !watched { self?.clearSignIns(id) }
+                }
                 return streamer
             }()
             surfaces[id] = streamer
             streamer.attach(surface)
             return response
         }
+        // Only the person watching signs in, on the tab they see, whether or not bots are paused.
+        if request.operation == .signInForm || request.operation == .signInFill {
+            guard isWatched(id) else { throw BrowserError("Open the browser live to sign in.") }
+            guard let tabID = profile.selectedTabID ?? profile.tabs.first?.id else { throw BrowserError("This browser has no tabs.") }
+            let tab = try tab(browserID: id, tabID: tabID)
+            response.tabID = tab.id
+            if request.operation == .signInForm { response.signInForm = try await tab.findSignIn() }
+            else { response.submitted = try await tab.fillSignIn(request.signIn!) }
+            return response
+        }
         guard !profile.paused else { throw BrowserError("Agent control is paused for this browser. Wait for the user to resume it.") }
-        guard !isWatched(id) else { throw BrowserError("A person is using this browser right now. Try again when they're done.") }
+        guard !isWatched(id), !clearingSignIn.contains(id) else { throw BrowserError("A person is using this browser right now. Try again when they're done.") }
         // Dialog replies must remain available while a JS command is waiting.
         if request.operation == .dialog {
             let tab = try tab(browserID: id, tabID: request.tabID!)

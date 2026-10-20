@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>Verify</title>
+<form id="verify"><p>Enter the code we sent you</p>
+<div><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"></div>
+<button type="submit">Verify</button></form>
+<script>
+window.inputs = 0;
+document.addEventListener('input', () => inputs++);
+window.code = () => [...document.querySelectorAll('#verify input')].map(input => input.value).join('');
+</script>

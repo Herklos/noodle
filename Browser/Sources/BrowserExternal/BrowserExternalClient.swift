@@ -60,7 +60,7 @@ public struct BrowserExternalClient: Sendable {
         case .bookmarkAdd: "Save --url HTTP[S]_URL with optional --title TEXT."
         case .bookmarkUpdate: "Change --bookmark ID's --title and/or --url."
         case .bookmarkRemove: "Delete --bookmark ID."
-        case .present, .surfaceStream, .setOwner: ""
+        case .present, .surfaceStream, .setOwner, .signInForm, .signInFill: ""
         }
     }
 

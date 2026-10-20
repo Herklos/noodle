@@ -205,6 +205,8 @@ import WebKit
         if dialog != nil { answerDialog(accept: false, text: nil) }
     }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        // The page and what a person filled in it are gone; a fill meant for it must not land on the next.
+        signIn = nil; signInFilled = [:]
         if webView.url?.host != faviconSite { favicon = nil; faviconURL = nil; faviconSite = nil }
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finishedDocument = true; update(); findFavicon() }
@@ -350,8 +352,12 @@ import WebKit
             guard let value = frames[frame] else { throw BrowserError("Frame is no longer available. Inspect the page again.") }
             selected = value
         }
-        return try await bounded { finish in
-            self.web.callAsyncJavaScript(source, arguments: arguments, in: selected, in: world ?? .page, completionHandler: finish)
+        return try await evaluate(source, arguments: arguments, in: selected, world: world)
+    }
+    /// Runs in `frame` itself, the main frame when nil, whether or not it is still registered.
+    private func evaluate(_ source: String, arguments: [String: Any], in frame: WKFrameInfo?, world: WKContentWorld?) async throws -> Any? {
+        try await bounded { finish in
+            self.web.callAsyncJavaScript(source, arguments: arguments, in: frame, in: world ?? .page, completionHandler: finish)
         }
     }
     func inspect(frame: String?) async throws -> String {
@@ -362,6 +368,86 @@ import WebKit
         result["frames"] = frames.map { ["id": $0.key, "url": $0.value.request.url?.absoluteString ?? "", "main": $0.value.isMainFrame] as [String: Any] }
         return String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self)
     }
+    /// The sign-in form last found for someone watching live: the token a fill must name, and the frame
+    /// and origin it is in, nil being the main frame. Its fields stay in the control world of that frame,
+    /// where the page cannot reach them.
+    private var signIn: (token: UUID, frame: WKFrameInfo?, origin: String)?
+    /// Frames where a person's password went in, by their key, emptied when the last viewer leaves.
+    private var signInFilled: [String: WKFrameInfo?] = [:]
+    var hasSignInToClear: Bool { !signInFilled.isEmpty }
+    static let signInChanged = "The page changed. Try again."
+    static let signInDialog = "The page is showing a dialog. Answer it, then try again."
+
+    private func signInScript(_ mode: String, in frame: WKFrameInfo?, token: UUID = UUID(), origin: String = "",
+                              entered: [String: String] = [:], submit: Bool = false) async throws -> Any? {
+        if dialog != nil { throw BrowserError(Self.signInDialog) }
+        let url = BrowserResources.bundle.url(forResource: "Resources", withExtension: nil)!.appendingPathComponent("SignIn.js")
+        return try await evaluate(try String(contentsOf: url, encoding: .utf8),
+                                  arguments: ["mode": mode, "token": token.uuidString, "expectedOrigin": origin, "entered": entered, "submit": submit],
+                                  in: frame, world: Self.controlWorld)
+    }
+
+    /// Looks once, in the page and each of its frames, for the form a person would sign in with: the one
+    /// holding the focused field, or else the likeliest. Nothing keeps watching the page afterwards.
+    func findSignIn() async throws -> BrowserSignInForm {
+        if dialog != nil { throw BrowserError(Self.signInDialog) }
+        let token = UUID()
+        var best: (frame: WKFrameInfo?, origin: String, score: Double, fields: [BrowserSignInField])?
+        var pageOrigin: String?
+        let others = frames.filter { $0.key != "main" }.sorted { $0.key < $1.key }.map { Optional($0.value) }
+        for (index, frame) in ([nil] + others).enumerated() {
+            // A frame that has gone or does not answer has no form to offer.
+            guard let found = try? await signInScript("find", in: frame, token: token) as? [String: Any] else { continue }
+            let origin = found["origin"] as? String ?? "null"
+            if index == 0 { pageOrigin = origin }
+            let score = (found["score"] as? NSNumber)?.doubleValue ?? 0
+            let fields = (found["fields"] as? [[String: Any]] ?? []).compactMap { field -> BrowserSignInField? in
+                guard let kind = (field["kind"] as? String).flatMap(BrowserSignInField.Kind.init(rawValue:)) else { return nil }
+                let label = (field["label"] as? String).map { String($0.prefix(60)) }
+                return BrowserSignInField(kind: kind, label: label?.isEmpty == false ? label : nil, length: (field["length"] as? NSNumber)?.intValue)
+            }
+            guard score > 0, !fields.isEmpty, score > best?.score ?? 0 else { continue }
+            best = (frame, origin, score, fields)
+        }
+        guard let best else { throw BrowserError("No sign-in fields were found on this page.") }
+        signIn = (token, best.frame, best.origin)
+        let site = URL(string: best.origin), page = URL(string: pageOrigin ?? "") ?? web.url
+        return BrowserSignInForm(token: token, host: site?.host ?? "", pageHost: page?.host ?? "", secure: site?.scheme == "https",
+                                 crossOrigin: best.origin != pageOrigin || best.origin == "null", fields: best.fields)
+    }
+
+    /// Fills the form `findSignIn` found with what a person typed or picked, then submits it if they asked.
+    /// The values go straight into the page and are kept nowhere. Returns whether the form was submitted.
+    func fillSignIn(_ values: BrowserSignInValues) async throws -> Bool {
+        guard let found = signIn, found.token == values.token else { throw BrowserError(Self.signInChanged) }
+        var entered: [String: String] = [:]
+        for (key, value) in [("username", values.username), ("password", values.password), ("newPassword", values.newPassword),
+                             ("oneTimeCode", values.oneTimeCode)] {
+            if let value, !value.isEmpty { entered[key] = value }
+        }
+        // Noted before filling, so a password that went in before something failed is still emptied later.
+        if entered["password"] != nil || entered["newPassword"] != nil {
+            signInFilled[found.frame.map { "\(ObjectIdentifier($0))" } ?? "main"] = .some(found.frame)
+        }
+        do {
+            let result = try await signInScript("fill", in: found.frame, token: found.token, origin: found.origin, entered: entered,
+                                                submit: values.submit) as? [String: Any]
+            return result?["submitted"] as? Bool ?? false
+        } catch let error as BrowserError where error.message == Self.signInDialog {
+            throw error
+        } catch {
+            signIn = nil
+            throw BrowserError(Self.signInChanged)
+        }
+    }
+
+    /// Empties the password fields a person filled, so whoever uses the page next, a bot included, cannot read them.
+    func clearSignIn() async {
+        let filled = signInFilled
+        signInFilled = [:]; signIn = nil
+        for frame in filled.values { _ = try? await signInScript("clear", in: frame) }
+    }
+
     func move(target: String?, x: Double?, y: Double?, frame: String?) async throws {
         let generation = inputGeneration
         var point: CGPoint
