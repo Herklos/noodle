@@ -55,18 +55,22 @@ struct BrowserSignInSheet: View {
     @FocusState private var focused: LinkSignInField.Kind?
 
     private func has(_ kinds: LinkSignInField.Kind...) -> Bool { form.fields.contains { kinds.contains($0.kind) } }
-    private var site: String { form.host.isEmpty ? "Unknown site" : form.host }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Label(site, systemImage: form.secure ? "lock.fill" : "lock.open.fill")
+                    if form.host.isEmpty {
+                        Label("This form doesn't say which site it's from.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    } else {
+                        Label(form.host, systemImage: form.secure ? "lock.fill" : "lock.open.fill")
+                    }
                     if !form.secure {
                         Label("This page isn't secure.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     }
                     if form.crossOrigin {
-                        Label("This form is from another site than \(form.pageHost).", systemImage: "exclamationmark.triangle.fill")
+                        Label(form.pageHost.isEmpty ? "This form is from another site." : "This form is from another site than \(form.pageHost).",
+                              systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }
                 }
@@ -96,6 +100,8 @@ struct BrowserSignInSheet: View {
                 if let problem { Text(problem).foregroundStyle(.red) }
             }
             .privacySensitive()
+            // Closing it while the values are on their way would lose what the Hub says about them.
+            .interactiveDismissDisabled(working)
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
