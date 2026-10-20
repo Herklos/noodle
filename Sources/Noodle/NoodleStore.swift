@@ -331,6 +331,13 @@ final class NoodleStore {
             guard let self, self.connectsServices, let agent = self.agents.first(where: { $0.id == id }) else { return }
             NoodleNotifications.postSignInRequired(for: agent)
         }
+        self.runtime.onPaused = { [weak self] id in
+            guard let self, self.connectsServices, let agent = self.agents.first(where: { $0.id == id }) else { return }
+            let snapshot = self.runtime.snapshot(for: id)
+            guard let summary = snapshot.pauseSummary else { return }
+            let conversation = self.conversations.first { $0.kind == .direct && $0.participantIDs == [id] }
+            NoodleNotifications.postPaused(agent, summary: summary, detail: snapshot.detail, conversationID: conversation?.id)
+        }
         self.runtime.checkSignIn = { [weak self] agent in
             guard let self, let installation = self.runtime.installation(for: agent) else { return nil }
             guard let profile = try? self.repository.loadAgentHarnessProfile(agent) else {

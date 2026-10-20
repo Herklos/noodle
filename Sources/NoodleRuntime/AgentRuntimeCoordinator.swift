@@ -160,6 +160,8 @@ public final class AgentRuntimeCoordinator {
     @ObservationIgnored public var recordedUsage: (@MainActor (String) -> [String: UsageTotal])?
     /// Called once when a bot's harness needs the person to sign in again.
     @ObservationIgnored public var onSignInRequired: (@MainActor (UUID) -> Void)?
+    /// Called once each time a bot pauses until Kick for a reported failure other than sign-in.
+    @ObservationIgnored public var onPaused: (@MainActor (UUID) -> Void)?
     /// Retries before a turn finishes fail the same way, so they stay quiet.
     @ObservationIgnored private var signInAnnounced: Set<UUID> = []
     /// Whether a bot's harness login works now, asked without starting the bot or a turn;
@@ -1238,7 +1240,13 @@ public final class AgentRuntimeCoordinator {
             if snapshot.failure == .authenticationRequired, self.signInAnnounced.insert(agentID).inserted {
                 self.onSignInRequired?(agentID)
             }
+            let previous = self.snapshots[agentID]
             self.snapshots[agentID] = snapshot
+            // Only failures the runtime keeps until Kick; a plain stop restarts by itself.
+            if snapshot.phase == .failed, let failure = snapshot.failure, failure != .authenticationRequired,
+               previous?.phase != .failed || previous?.failure != failure {
+                self.onPaused?(agentID)
+            }
             if snapshot.phase == .ready { self.markStable(agentID: agentID) }
         }
     }
