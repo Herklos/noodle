@@ -42,7 +42,11 @@ final class CallChannelFake: CallChannel, @unchecked Sendable {
 @MainActor final class SystemCallsFake: SystemCalls {
     var onEnd: ((UUID) -> Void)?
     var onMute: ((UUID, Bool) -> Void)?
+    var onAnswer: ((UUID) -> Void)?
     var beginError: Error?
+    var rung: [(UUID, String)] = []
+    var answeredCalls: [UUID] = []
+    var stopped: [(UUID, Bool)] = []
     var begun: [(UUID, String)] = []
     var connected: [UUID] = []
     var muted: [Bool] = []
@@ -52,6 +56,15 @@ final class CallChannelFake: CallChannel, @unchecked Sendable {
         begun.append((id, name))
         return true
     }
+    func ring(_ id: UUID, name: String) async -> Bool {
+        rung.append((id, name))
+        return true
+    }
+    func answered(_ id: UUID) async -> Bool {
+        answeredCalls.append(id)
+        return true
+    }
+    func stopRinging(_ id: UUID, unanswered: Bool) { stopped.append((id, unanswered)) }
     func connected(_ id: UUID) { connected.append(id) }
     func setMuted(_ id: UUID, _ muted: Bool) { self.muted.append(muted) }
     func end(_ id: UUID) { ended.append(id) }
@@ -136,6 +149,56 @@ private struct Failure: LocalizedError {
         #expect(other.call == nil)
         #expect(other.problem == "This bot cannot take calls.")
         #expect(endingAudio.closed == 1)
+    }
+
+    /// A bot's call rings on the call screen. Answering there calls the bot through the Hub as the answer to
+    /// that call; declining there tells the Hub; a call the Hub stops stops ringing.
+    @Test func aBotsCallRingsOnTheCallScreenUntilItIsAnsweredDeclinedOrStopped() async throws {
+        let channel = CallChannelFake(), audio = CallAudioFake(), system = SystemCallsFake()
+        var opened: [LinkCallStart] = [], declined: [UUID] = []
+        let calls = PhoneCalls(open: { opened.append($0); return channel }, decline: { declined.append($0) },
+                               makeAudio: { audio }, system: system, now: { [date] in date })
+        let kai = UUID(), conversation = UUID()
+        func incoming(expiring seconds: TimeInterval = 45) -> LinkIncomingCall {
+            LinkIncomingCall(id: UUID(), botID: kai, conversationID: conversation, reason: "The build is broken",
+                             expiresAt: date.addingTimeInterval(seconds))
+        }
+
+        let answered = incoming()
+        calls.ring(answered, name: "Kai")
+        calls.ring(answered, name: "Kai")
+        await wait { !system.rung.isEmpty }
+        #expect(system.rung.map { $0.0 } == [answered.id])
+        #expect(system.rung.map { $0.1 } == ["Kai"])
+        #expect(calls.ringing.map(\.call) == [answered])
+        #expect(opened.isEmpty, "Nothing connects to the bot before the call is answered")
+
+        system.onAnswer?(answered.id)
+        await wait { !opened.isEmpty }
+        #expect(opened == [LinkCallStart(conversationID: conversation, answering: answered.id)])
+        #expect(calls.call?.id == answered.id)
+        #expect(system.answeredCalls == [answered.id])
+        #expect(system.begun.isEmpty, "An answered call is on the call screen already")
+        #expect(calls.ringing.isEmpty)
+        calls.hangUp()
+
+        let refused = incoming()
+        calls.ring(refused, name: "Kai")
+        system.onEnd?(refused.id)
+        await wait { !declined.isEmpty }
+        #expect(declined == [refused.id])
+        #expect(calls.ringing.isEmpty)
+        #expect(system.stopped.isEmpty, "Declining on the call screen stopped it there already")
+
+        let elsewhere = incoming()
+        calls.ring(elsewhere, name: "Kai")
+        calls.stopRinging(elsewhere.id)
+        #expect(system.stopped.map { $0.0 } == [elsewhere.id])
+        #expect(system.stopped.map { $0.1 } == [false])
+        #expect(calls.ringing.isEmpty)
+
+        calls.ring(incoming(expiring: 0), name: "Kai")
+        #expect(calls.ringing.isEmpty, "A call that already expired never rings")
     }
 
     @Test func aCallThatCannotUseTheMicrophoneNeverReachesTheHub() async throws {
