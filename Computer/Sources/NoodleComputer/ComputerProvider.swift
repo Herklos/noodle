@@ -40,11 +40,39 @@ struct ComputerIdleWatch {
     }
 }
 
+/// Agents' shells nobody closes: their bot ended, or lost their IDs when its session restarted or
+/// its sign-in expired. Left open they fill the computer's terminal limit. A shell idle at its
+/// prompt that no call has used for half an hour is closed; one running a command is kept however
+/// long it runs. Where a computer cannot tell whether a command runs, a shell is kept six hours.
+/// The person's own terminals, and any on a computer someone is watching, are never closed.
+enum AgentTerminalSweep {
+    static let idle: TimeInterval = 30 * 60, uncertain: TimeInterval = 6 * 60 * 60
+
+    /// Whether to ask the computer if a command runs in the shell.
+    static func suspect(used: Date, person: Bool, watched: Bool, exited: Bool, at now: Date) -> Bool {
+        !person && !watched && !exited && now.timeIntervalSince(used) >= idle
+    }
+    /// `running` is nil where the computer cannot tell.
+    static func closes(used: Date, running: Bool?, at now: Date) -> Bool {
+        switch running {
+        case true?: false
+        case false?: now.timeIntervalSince(used) >= idle
+        case nil: now.timeIntervalSince(used) >= uncertain
+        }
+    }
+}
+
 @MainActor final class ComputerProvider {
     private weak var store: ComputerStore?
     private var server: ComputerConnectionServer?
     private var terminals: [UUID: ProviderTerminal] = [:]
-    private var localTerminals: [UUID: (computer: UUID, owner: String, runtime: LocalMacComputer, exited: Bool)] = [:]
+    private struct LocalTerminal {
+        let computer: UUID, owner: String, runtime: LocalMacComputer
+        var exited = false
+        let opened: Date
+        var used: Date
+    }
+    private var localTerminals: [UUID: LocalTerminal] = [:]
     private var windowsTerminals: [UUID: WindowsProviderTerminal] = [:]
     private var sshTerminals: [UUID: SSHProviderTerminal] = [:]
     /// Where a person watching remotely types and clicks, one per desktop view.
@@ -52,6 +80,7 @@ struct ComputerIdleWatch {
     private var surfaces: [String: (computer: UUID, streamer: SurfaceStreamer)] = [:]
     private let transferRoot: URL
     private var idle = ComputerIdleWatch()
+    private var sweeper: Task<Void, Never>?
     var now: () -> Date = Date.init
 
     /// `listens` false answers only what `handle` is given, as in tests, which cannot sign a socket.
@@ -60,6 +89,13 @@ struct ComputerIdleWatch {
         let endpoint = try socket ?? ComputerConnection.socketURL()
         transferRoot = endpoint.deletingLastPathComponent()
         guard listens else { return }
+        sweeper = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5 * 60))
+                guard let self else { return }
+                await self.sweepTerminals()
+            }
+        }
         let clients = socket == nil ? ComputerConnection.clientIDs : ComputerConnection.clientIDs + ["com.pdparchitect.noodle.integration"]
         server = try ComputerConnectionServer(socket: endpoint, team: ComputerConnection.signingTeam(), clientIDs: clients, handler: {
             [weak self] request, peer in
@@ -250,7 +286,18 @@ struct ComputerIdleWatch {
             return response
         }
         if request.operation == .terminalOpen {
-            return .init(terminalID: try await openTerminal(on: session, runtime: runtime, owner: owner), offset: 0, exited: false)
+            return .init(terminalID: try await openTerminal(on: session, runtime: runtime, owner: owner, person: false), offset: 0, exited: false)
+        }
+        if request.operation == .terminalList {
+            var listed: [RemoteTerminal] = []
+            for (id, terminal) in terminals.filter({ $0.value.owner == owner && $0.value.computerID == session.id }).sorted(by: { $0.value.opened < $1.value.opened }) {
+                var running: Bool?
+                if !terminal.exited { running = await runtime.providerTerminalRunsCommand(id) }
+                listed.append(summary(id, opened: terminal.opened, used: terminal.touched, running: running, exited: terminal.exited))
+            }
+            var response = ComputerResponse()
+            response.terminals = listed
+            return response
         }
         if request.operation == .preview {
             // Even a legacy web request with a terminal must not accept another owner's ID.
@@ -266,7 +313,7 @@ struct ComputerIdleWatch {
                 let id = try ComputerPresentation.terminal(explicit: request.terminalID,
                     active: terminals.filter { $0.value.owner == owner && $0.value.computerID == session.id && !$0.value.exited }.map(\.key))
                 guard let terminal = terminals[id] else { throw ComputerBridgeError("Terminal session is unavailable.") }
-                terminal.touched = Date()
+                terminal.touched = now()
                 response = terminal.replay.read(from: max(0, terminal.replay.end - 8000))
                 response.terminalID = id; response.exited = terminal.exited
                 response.computerID = session.id; response.view = view
@@ -280,7 +327,7 @@ struct ComputerIdleWatch {
         }
         guard let id = request.terminalID, let terminal = terminals[id], terminal.owner == owner,
               terminal.computerID == session.id else { throw ComputerBridgeError("Terminal session is unavailable or belongs to another agent.") }
-        terminal.touched = Date()
+        terminal.touched = now()
         switch request.operation {
         case .terminalRead:
             var response = terminal.replay.read(from: request.offset ?? 0)
@@ -298,9 +345,9 @@ struct ComputerIdleWatch {
         return .init()
     }
     /// A person watching a running computer: its desktop if it has one, else the terminal the card shows.
-    private func openTerminal(on session: ComputerSession, runtime: ContainerComputer, owner: String) async throws -> UUID {
-        // Retain completed output, but don't let abandoned sessions grow indefinitely.
-        terminals = terminals.filter { !$0.value.exited || Date().timeIntervalSince($0.value.touched) < 600 }
+    /// `person` for the person's own terminal, which is never closed for being idle.
+    private func openTerminal(on session: ComputerSession, runtime: ContainerComputer, owner: String, person: Bool) async throws -> UUID {
+        await sweepTerminals()
         guard terminals.count < 64, terminals.values.filter({ $0.computerID == session.id && !$0.exited }).count < 16 else {
             throw ComputerBridgeError("Too many terminal sessions. Close an unused session first.")
         }
@@ -310,8 +357,62 @@ struct ComputerIdleWatch {
             try? await process.kill(.kill); try? await process.delete(); io.finish()
             throw ComputerBridgeError("Computer stopped while opening the terminal.")
         }
-        terminals[id] = ProviderTerminal(computerID: session.id, owner: owner, io: io, process: process)
+        terminals[id] = ProviderTerminal(computerID: session.id, owner: owner, person: person, opened: now(), io: io, process: process)
         return id
+    }
+
+    /// Closes agents' shells left idle at their prompt, as `AgentTerminalSweep` decides, and
+    /// forgets shells that exited ten minutes ago.
+    func sweepTerminals() async {
+        guard let store else { return }
+        let forgotten = now().addingTimeInterval(-600)
+        terminals = terminals.filter { !$0.value.exited || $0.value.touched > forgotten }
+        for (id, terminal) in terminals where AgentTerminalSweep.suspect(used: terminal.touched, person: terminal.person,
+                                                                           watched: isWatched(terminal.computerID), exited: terminal.exited, at: now()) {
+            guard let runtime = store.sessions.first(where: { $0.id == terminal.computerID })?.container else { continue }
+            let running = await runtime.providerTerminalRunsCommand(id)
+            guard terminals[id] === terminal, !isWatched(terminal.computerID),
+                  AgentTerminalSweep.closes(used: terminal.touched, running: running, at: now()) else { continue }
+            await terminals.removeValue(forKey: id)?.close()
+        }
+        for (id, terminal) in localTerminals where terminal.exited && terminal.used <= forgotten {
+            localTerminals.removeValue(forKey: id)
+            var close = LocalMacRequest(.terminalClose); close.terminalID = id
+            _ = try? await terminal.runtime.call(close)
+        }
+        for (id, terminal) in localTerminals where AgentTerminalSweep.suspect(used: terminal.used, person: false,
+                                                                                watched: isWatched(terminal.computer), exited: terminal.exited, at: now()) {
+            let state = await localState(id, runtime: terminal.runtime)
+            guard let current = localTerminals[id], current.runtime === terminal.runtime else { continue }
+            if state.exited { localTerminals[id]?.exited = true; continue }
+            guard AgentTerminalSweep.closes(used: current.used, running: state.running, at: now()) else { continue }
+            localTerminals.removeValue(forKey: id)
+            var close = LocalMacRequest(.terminalClose); close.terminalID = id
+            _ = try? await terminal.runtime.call(close)
+        }
+        // Neither an SSH server nor the Windows agent says whether a command runs in a shell.
+        for (id, terminal) in sshTerminals where (terminal.exited && terminal.touched <= forgotten)
+            || (AgentTerminalSweep.suspect(used: terminal.touched, person: terminal.person, watched: isWatched(terminal.computerID), exited: terminal.exited, at: now())
+                && AgentTerminalSweep.closes(used: terminal.touched, running: nil, at: now())) {
+            sshTerminals.removeValue(forKey: id)?.close()
+        }
+        for (id, terminal) in windowsTerminals where (terminal.exited && terminal.touched <= forgotten)
+            || (AgentTerminalSweep.suspect(used: terminal.touched, person: false, watched: isWatched(terminal.computerID), exited: terminal.exited, at: now())
+                && AgentTerminalSweep.closes(used: terminal.touched, running: nil, at: now())) {
+            windowsTerminals.removeValue(forKey: id)?.close()
+        }
+    }
+
+    /// Whether a command runs in a Local Mac shell and whether it has exited, without reading its
+    /// output. Nil `running` from a helper older than this question, or one that cannot answer.
+    private func localState(_ id: UUID, runtime: LocalMacComputer) async -> (running: Bool?, exited: Bool) {
+        var read = LocalMacRequest(.terminalRead); read.terminalID = id; read.offset = .max
+        guard let reply = try? await runtime.call(read) else { return (nil, false) }
+        return reply.exited == true ? (false, true) : (reply.running, false)
+    }
+
+    private func summary(_ id: UUID, opened: Date, used: Date, running: Bool?, exited: Bool) -> RemoteTerminal {
+        RemoteTerminal(id: id, opened: opened, used: used, running: exited ? false : running, exited: exited)
     }
 
     private func surface(_ request: ComputerRequest, session: ComputerSession, runtime: ContainerComputer, owner: String,
@@ -331,7 +432,7 @@ struct ComputerIdleWatch {
         let id: UUID
         if let shown = request.terminalID, open[shown] != nil { id = shown }
         else if let other = open.max(by: { $0.value.touched < $1.value.touched })?.key { id = other }
-        else { id = try await openTerminal(on: session, runtime: runtime, owner: owner) }
+        else { id = try await openTerminal(on: session, runtime: runtime, owner: owner, person: request.agentID == nil) }
         guard let terminal = terminals[id] else { throw ComputerBridgeError("The terminal is closed.") }
         streamer("terminal:\(id)", computer: session.id, capture: { [weak terminal] in
             terminal.flatMap { TerminalSurface.picture($0.replay.read(from: max(0, $0.replay.end - 16_000)).data ?? Data()) }
@@ -410,12 +511,21 @@ struct ComputerIdleWatch {
             return reply
         }
         if request.operation == .terminalOpen {
-            guard windowsTerminals.count < 64, windowsTerminals.values.filter({ $0.computerID == session.id }).count < 16 else {
+            await sweepTerminals()
+            guard windowsTerminals.count < 64, windowsTerminals.values.filter({ $0.computerID == session.id && !$0.exited }).count < 16 else {
                 throw ComputerBridgeError("Too many terminal sessions. Close an unused session first.")
             }
+            guard session.windows === windows, session.phase == .running else { throw ComputerBridgeError("The computer stopped while opening its terminal.") }
             let id = UUID()
-            windowsTerminals[id] = WindowsProviderTerminal(computerID: session.id, owner: owner, agent: windows.agent)
+            windowsTerminals[id] = WindowsProviderTerminal(computerID: session.id, owner: owner, agent: windows.agent, at: now())
             return .init(terminalID: id, offset: 0, exited: false)
+        }
+        if request.operation == .terminalList {
+            var reply = ComputerResponse()
+            reply.terminals = windowsTerminals.filter { $0.value.owner == owner && $0.value.computerID == session.id }
+                .sorted { $0.value.opened < $1.value.opened }
+                .map { summary($0.key, opened: $0.value.opened, used: $0.value.touched, running: nil, exited: $0.value.exited) }
+            return reply
         }
         if request.operation == .preview {
             let view = request.view ?? (request.terminalID == nil ? "web" : "terminal")
@@ -424,6 +534,7 @@ struct ComputerIdleWatch {
                 let id = try ComputerPresentation.terminal(explicit: request.terminalID,
                     active: windowsTerminals.filter { $0.value.owner == owner && $0.value.computerID == session.id && !$0.value.exited }.map(\.key))
                 guard let terminal = windowsTerminals[id], terminal.owner == owner else { throw ComputerBridgeError("Terminal session is unavailable.") }
+                terminal.touched = now()
                 reply = terminal.replay.read(from: max(0, terminal.replay.end - 8000))
                 reply.terminalID = id; reply.exited = terminal.exited; reply.computerID = session.id; reply.view = view
             } else {
@@ -437,6 +548,7 @@ struct ComputerIdleWatch {
         guard let id = request.terminalID, let terminal = windowsTerminals[id], terminal.owner == owner, terminal.computerID == session.id else {
             throw ComputerBridgeError("Terminal session is unavailable or belongs to another agent.")
         }
+        terminal.touched = now()
         switch request.operation {
         case .terminalRead:
             var reply = terminal.replay.read(from: request.offset ?? 0)
@@ -458,7 +570,7 @@ struct ComputerIdleWatch {
                            socket: SurfaceSocket?, stagingRoot: URL?) async throws -> ComputerResponse {
         sshTerminals = sshTerminals.filter { _, terminal in
             store.sessions.contains { $0.id == terminal.computerID && $0.sshRuntime?.connection === terminal.connection && $0.phase == .running }
-                && (!terminal.exited || Date().timeIntervalSince(terminal.touched) < 600)
+                && (!terminal.exited || now().timeIntervalSince(terminal.touched) < 600)
         }
         if request.operation == .delete { throw ComputerBridgeError("Remove this computer in \(ComputerAppIdentity.name).") }
         if request.operation == .revoke {
@@ -477,7 +589,9 @@ struct ComputerIdleWatch {
         guard session.phase == .running, let runtime = session.sshRuntime else {
             throw ComputerBridgeError("Computer is stopped. Start it in \(ComputerAppIdentity.name) or with computer start --computer \(session.id.uuidString).")
         }
-        func open() async throws -> UUID {
+        // `person` for the person's own terminal, which is never closed for being idle.
+        func open(person: Bool) async throws -> UUID {
+            await sweepTerminals()
             guard sshTerminals.count < 64, sshTerminals.values.filter({ $0.computerID == session.id && !$0.exited }).count < 16 else {
                 throw ComputerBridgeError("Too many terminal sessions. Close an unused session first.")
             }
@@ -486,6 +600,7 @@ struct ComputerIdleWatch {
                 terminal.close()
                 throw ComputerBridgeError("The computer stopped while opening its terminal.")
             }
+            terminal.person = person; terminal.opened = now(); terminal.touched = terminal.opened
             let id = UUID()
             sshTerminals[id] = terminal
             return id
@@ -496,7 +611,7 @@ struct ComputerIdleWatch {
             let id: UUID
             if let requested = request.terminalID, shown[requested] != nil { id = requested }
             else if let other = shown.max(by: { $0.value.touched < $1.value.touched })?.key { id = other }
-            else { id = try await open() }
+            else { id = try await open(person: request.agentID == nil) }
             guard let terminal = sshTerminals[id] else { throw ComputerBridgeError("The terminal is closed.") }
             streamer("terminal:\(id)", computer: session.id, capture: { [weak terminal] in
                 terminal.flatMap { TerminalSurface.picture($0.replay.read(from: max(0, $0.replay.end - 16_000)).data ?? Data()) }
@@ -526,7 +641,14 @@ struct ComputerIdleWatch {
             } else { reply.byteCount = try await files.download(reply.path!, to: staging) }
             return reply
         }
-        if request.operation == .terminalOpen { return .init(terminalID: try await open(), offset: 0, exited: false) }
+        if request.operation == .terminalOpen { return .init(terminalID: try await open(person: false), offset: 0, exited: false) }
+        if request.operation == .terminalList {
+            var reply = ComputerResponse()
+            reply.terminals = sshTerminals.filter { $0.value.owner == owner && $0.value.computerID == session.id }
+                .sorted { $0.value.opened < $1.value.opened }
+                .map { summary($0.key, opened: $0.value.opened, used: $0.value.touched, running: nil, exited: $0.value.exited) }
+            return reply
+        }
         if request.operation == .preview {
             var reply = ComputerResponse(); reply.computerID = session.id; reply.view = "terminal"
             let id = try ComputerPresentation.terminal(explicit: request.terminalID,
@@ -534,7 +656,7 @@ struct ComputerIdleWatch {
             guard let terminal = sshTerminals[id], terminal.owner == owner, terminal.computerID == session.id else {
                 throw ComputerBridgeError("Terminal session is unavailable or belongs to another agent.")
             }
-            terminal.touched = Date()
+            terminal.touched = now()
             reply = terminal.replay.read(from: max(0, terminal.replay.end - 8000))
             reply.terminalID = id; reply.exited = terminal.exited; reply.computerID = session.id; reply.view = "terminal"
             return reply
@@ -542,7 +664,7 @@ struct ComputerIdleWatch {
         guard let id = request.terminalID, let terminal = sshTerminals[id], terminal.owner == owner, terminal.computerID == session.id else {
             throw ComputerBridgeError("Terminal session is unavailable or belongs to another agent.")
         }
-        terminal.touched = Date()
+        terminal.touched = now()
         switch request.operation {
         case .terminalRead:
             var reply = terminal.replay.read(from: request.offset ?? 0)
@@ -594,16 +716,29 @@ struct ComputerIdleWatch {
         }
         if request.operation == .terminalOpen {
             // Agents' shells only: the person's own terminal opens however many agents hold.
+            await sweepTerminals()
             guard localTerminals.count < 64, localTerminals.values.filter({ $0.computer == session.id && !$0.exited }).count < 16 else {
                 throw ComputerBridgeError("Too many terminal sessions. Close an unused session first.")
             }
             let reply = try await runtime.call(.init(.terminalOpen))
             guard let id = reply.terminalID, session.localMac === runtime, session.phase == .running else { throw ComputerBridgeError("The computer stopped while opening its terminal.") }
-            localTerminals[id] = (session.id, owner, runtime, false)
+            localTerminals[id] = LocalTerminal(computer: session.id, owner: owner, runtime: runtime, opened: now(), used: now())
             return .init(terminalID: id, offset: 0, exited: false)
         }
+        if request.operation == .terminalList {
+            var listed: [RemoteTerminal] = []
+            for (id, terminal) in localTerminals.filter({ $0.value.owner == owner && $0.value.computer == session.id }).sorted(by: { $0.value.opened < $1.value.opened }) {
+                var state: (running: Bool?, exited: Bool) = (false, true)
+                if !terminal.exited { state = await localState(id, runtime: runtime) }
+                if state.exited { localTerminals[id]?.exited = true }
+                listed.append(summary(id, opened: terminal.opened, used: terminal.used, running: state.running, exited: state.exited))
+            }
+            var reply = ComputerResponse()
+            reply.terminals = listed
+            return reply
+        }
         if request.operation == .preview {
-            if let id = request.terminalID { _ = try terminal(id) }
+            if let id = request.terminalID { _ = try terminal(id); localTerminals[id]?.used = now() }
             let view = request.view ?? (request.terminalID == nil ? "web" : "terminal")
             var reply = ComputerResponse(); reply.computerID = session.id; reply.view = view
             if view == "web" {
@@ -619,6 +754,7 @@ struct ComputerIdleWatch {
             return reply
         }
         let id = try terminal(request.terminalID)
+        localTerminals[id]?.used = now()
         let operation: LocalMacOperation
         switch request.operation {
         case .terminalRead: operation = .terminalRead
@@ -644,11 +780,13 @@ struct ComputerIdleWatch {
     private let channel: UInt32
     var replay = TerminalReplay()
     var exited = false
-    init(computerID: UUID, owner: String, agent: WindowsAgent) {
-        self.computerID = computerID; self.owner = owner; self.agent = agent
-        var opened: UInt32 = 0
+    let opened: Date
+    var touched: Date
+    init(computerID: UUID, owner: String, agent: WindowsAgent, at date: Date) {
+        self.computerID = computerID; self.owner = owner; self.agent = agent; opened = date; touched = date
+        var number: UInt32 = 0
         weak var weakSelf: WindowsProviderTerminal?
-        opened = agent.open { frame in
+        number = agent.open { frame in
             Task { @MainActor in
                 switch frame.type {
                 case 101: weakSelf?.replay.append(frame.payload)
@@ -657,7 +795,7 @@ struct ComputerIdleWatch {
                 }
             }
         }
-        channel = opened
+        channel = number
         weakSelf = self
         let request: [String: Any] = ["cmd": "powershell.exe -NoLogo", "pty": true, "cols": 120, "rows": 30]
         agent.send(1, channel: channel, payload: (try? JSONSerialization.data(withJSONObject: request)) ?? Data())
@@ -679,15 +817,19 @@ struct ComputerIdleWatch {
 @MainActor private final class ProviderTerminal {
     let computerID: UUID
     let owner: String
+    /// The person's own terminal, never closed for being idle.
+    let person: Bool
+    let opened: Date
     let io: GuestTerminalIO
     let process: LinuxProcess
     var replay = TerminalReplay()
     var exited = false
-    var touched = Date()
+    var touched: Date
     private var outputTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
-    init(computerID: UUID, owner: String, io: GuestTerminalIO, process: LinuxProcess) {
-        self.computerID = computerID; self.owner = owner; self.io = io; self.process = process
+    init(computerID: UUID, owner: String, person: Bool, opened: Date, io: GuestTerminalIO, process: LinuxProcess) {
+        self.computerID = computerID; self.owner = owner; self.person = person; self.opened = opened; touched = opened
+        self.io = io; self.process = process
         outputTask = Task { [weak self] in
             for await data in io.received { self?.replay.append(data) }
         }

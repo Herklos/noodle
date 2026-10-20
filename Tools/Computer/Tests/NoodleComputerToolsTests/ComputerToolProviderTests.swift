@@ -71,7 +71,7 @@ final class ComputerToolProviderTests: XCTestCase {
         XCTAssertEqual([provider.manifest.id, provider.manifest.activation.rawValue], ["computer", "assigned:computer"])
         let listed = try await provider.tools(context: .init(agentID: agent, workspace: workspace))
         let tools = try ToolDescriptor.list(mcp: listed)
-        XCTAssertEqual(tools.map(\.name), ["list", "start", "stop", "open", "read", "write", "resize", "close", "present", "upload", "download"],
+        XCTAssertEqual(tools.map(\.name), ["list", "start", "stop", "open", "read", "write", "resize", "close", "terminals", "present", "upload", "download"],
                        "revoke, display and terminalResolve stay user-only")
         for tool in tools {
             XCTAssertFalse(tool.description.isEmpty, tool.name)
@@ -136,6 +136,34 @@ final class ComputerToolProviderTests: XCTestCase {
         XCTAssertEqual(transport.requests.last?.offset, 0)
         _ = try await call("resize", ["computer": mine.uuidString, "terminal": terminal.uuidString, "columns": 120, "rows": 40])
         XCTAssertEqual([transport.requests.last?.columns, transport.requests.last?.rows], [120, 40])
+    }
+
+    /// A bot that lost its terminal IDs finds its own terminals again and is told to close the ones it no longer needs.
+    func testTerminalsListsTheBotsOwnTerminalsAndAnOlderComputerAsksForAnUpdate() async throws {
+        let opened = Date(timeIntervalSince1970: 1_800_000_000)
+        transport.respond = { [terminal] _, _ in
+            var response = ComputerResponse()
+            response.terminals = [RemoteTerminal(id: terminal, opened: opened, used: opened.addingTimeInterval(90), running: true, exited: false)]
+            return response
+        }
+        let listed = try await call("terminals", ["computer": mine.uuidString])
+        XCTAssertEqual(listed["isError"] as? Bool, false, String(describing: listed["content"]))
+        let request = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual([request.operation.rawValue, request.computerID?.uuidString, request.agentID?.uuidString], ["terminalList", mine.uuidString, agent.uuidString])
+        let first = try XCTUnwrap(((listed["structuredContent"] as? [String: Any])?["terminals"] as? [[String: Any]])?.first)
+        XCTAssertEqual(first["id"] as? String, terminal.uuidString)
+        XCTAssertEqual(first["opened"] as? String, "2027-01-15T08:00:00Z", "times a bot can read")
+        XCTAssertEqual(first["used"] as? String, "2027-01-15T08:01:30Z")
+        XCTAssertEqual(first["running"] as? Bool, true)
+        XCTAssertEqual(first["exited"] as? Bool, false)
+        XCTAssertTrue(ComputerToolGuidance.tool("terminals").contains("close"))
+        XCTAssertTrue(provider.manifest.instructions.contains("Close terminals you no longer need"))
+
+        transport.capabilities?.features.remove("terminal-list-v1")
+        let old = try await call("terminals", ["computer": mine.uuidString])
+        XCTAssertEqual(old["isError"] as? Bool, true)
+        XCTAssertEqual(((old["content"] as? [[String: Any]])?.first)?["text"] as? String, "Update Noodle Computer to list your terminals.")
+        XCTAssertEqual(transport.requests.count, 1, "an older Noodle Computer is not sent the request")
     }
 
     func testUnassignedComputersNeverReachTheSocketAndTheListIsFiltered() async throws {

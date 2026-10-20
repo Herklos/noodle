@@ -268,6 +268,29 @@ import XCTest
         // Another agent cannot use it.
         var other = read; other.agentID = UUID()
         do { _ = try await provider.handle(other, peer: peer); XCTFail("Another agent read the terminal") } catch {}
+
+        // The bot finds its shell again. A server cannot say whether a command runs in it, so an
+        // unused shell is kept six hours rather than half of one.
+        var clock = Date()
+        provider.now = { clock }
+        var mine = open; mine.operation = .terminalList
+        let found = try await provider.handle(mine, peer: peer).terminals ?? []
+        XCTAssertEqual(found.map(\.id), [terminal])
+        XCTAssertNil(found.first?.running)
+        XCTAssertEqual(found.first?.exited, false)
+        var others = mine; others.agentID = UUID()
+        let theirs = try await provider.handle(others, peer: peer).terminals ?? []
+        XCTAssertEqual(theirs, [], "each bot lists its own")
+        clock += 31 * 60
+        let secondReply = try await provider.handle(open, peer: peer)
+        let second = try XCTUnwrap(secondReply.terminalID)
+        let kept = try await provider.handle(mine, peer: peer).terminals ?? []
+        XCTAssertEqual(kept.map(\.id), [terminal, second])
+        clock += 6 * 60 * 60
+        let thirdReply = try await provider.handle(open, peer: peer)
+        let third = try XCTUnwrap(thirdReply.terminalID)
+        let left = try await provider.handle(mine, peer: peer).terminals ?? []
+        XCTAssertEqual(left.map(\.id), [third])
     }
 
     func testKeysAreReadAsSSHKeygenWritesThem() throws {
