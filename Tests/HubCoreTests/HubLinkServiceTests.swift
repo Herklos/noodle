@@ -96,6 +96,8 @@ import XCTest
     func testExpiredInvitationsAreRefusedByTheHub() async throws {
         let (hub, link, device) = try await fixture()
         let invitation = link.invite(try hub.access.addUser(named: "Ada"))
+        // Let the Hub take in the new user first: it refreshes its gate then, which would drop the invitation once expired.
+        try await Task.sleep(for: .milliseconds(200))
         clock = clock.addingTimeInterval(LinkInvitation.lifetime + 1)
         // The device's own clock may be wrong, so the Hub checks too.
         await HubPairing(directory: device, deviceName: "Mac").join(invitation.url().absoluteString, now: invitation.expires.addingTimeInterval(-1))
