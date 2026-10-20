@@ -35,6 +35,24 @@ public struct BrowserSignInForm: Codable, Equatable, Sendable {
         self.token = token; self.host = host; self.pageHost = pageHost; self.secure = secure; self.crossOrigin = crossOrigin
         self.fields = fields
     }
+
+    private enum CodingKeys: String, CodingKey { case token, host, pageHost, secure, crossOrigin, fields }
+
+    /// A field of a kind a later Noodle Browser finds is left out, rather than the whole form being unreadable.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        token = try c.decode(UUID.self, forKey: .token)
+        host = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
+        pageHost = try c.decodeIfPresent(String.self, forKey: .pageHost) ?? ""
+        secure = try c.decodeIfPresent(Bool.self, forKey: .secure) ?? false
+        crossOrigin = try c.decodeIfPresent(Bool.self, forKey: .crossOrigin) ?? true
+        fields = try c.decode([Lossy<BrowserSignInField>].self, forKey: .fields).compactMap(\.value)
+    }
+
+    private struct Lossy<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+    }
 }
 
 /// What a person typed or picked to sign in, sent once to fill the form `token` names. It is never

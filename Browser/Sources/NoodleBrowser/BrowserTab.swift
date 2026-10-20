@@ -206,7 +206,7 @@ import WebKit
     }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // The page and what a person filled in it are gone; a fill meant for it must not land on the next.
-        signIn = nil; signInFilled = [:]
+        signIn = nil; signInFilled = [:]; botScriptedDocument = false
         if webView.url?.host != faviconSite { favicon = nil; faviconURL = nil; faviconSite = nil }
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finishedDocument = true; update(); findFavicon() }
@@ -355,8 +355,9 @@ import WebKit
         return try await evaluate(source, arguments: arguments, in: selected, world: world)
     }
     /// Runs in `frame` itself, the main frame when nil, whether or not it is still registered.
-    private func evaluate(_ source: String, arguments: [String: Any], in frame: WKFrameInfo?, world: WKContentWorld?) async throws -> Any? {
-        try await bounded { finish in
+    private func evaluate(_ source: String, arguments: [String: Any], in frame: WKFrameInfo?, world: WKContentWorld?,
+                          limit: Duration = .seconds(20)) async throws -> Any? {
+        try await bounded(limit: limit) { finish in
             self.web.callAsyncJavaScript(source, arguments: arguments, in: frame, in: world ?? .page, completionHandler: finish)
         }
     }
@@ -375,31 +376,55 @@ import WebKit
     /// Frames where a person's password went in, by their key, emptied when the last viewer leaves.
     private var signInFilled: [String: WKFrameInfo?] = [:]
     var hasSignInToClear: Bool { !signInFilled.isEmpty }
+    /// A bot ran its own script in this page, which could have left listeners behind to read what a person
+    /// types; nobody is offered to sign in to it until it loads again.
+    var botScriptedDocument = false
     static let signInChanged = "The page changed. Try again."
     static let signInDialog = "The page is showing a dialog. Answer it, then try again."
+    static let signInBotScripted = "A bot ran scripts on this page. Reload it, then try again."
+    /// How long one frame may take to say what sign-in fields it has.
+    static let signInFrameLimit = Duration.seconds(2)
 
     private func signInScript(_ mode: String, in frame: WKFrameInfo?, token: UUID = UUID(), origin: String = "",
-                              entered: [String: String] = [:], submit: Bool = false) async throws -> Any? {
+                              entered: [String: String] = [:], submit: Bool = false,
+                              limit: Duration = .seconds(20)) async throws -> Any? {
         if dialog != nil { throw BrowserError(Self.signInDialog) }
         let url = BrowserResources.bundle.url(forResource: "Resources", withExtension: nil)!.appendingPathComponent("SignIn.js")
         return try await evaluate(try String(contentsOf: url, encoding: .utf8),
                                   arguments: ["mode": mode, "token": token.uuidString, "expectedOrigin": origin, "entered": entered, "submit": submit],
-                                  in: frame, world: Self.controlWorld)
+                                  in: frame, world: Self.controlWorld, limit: limit)
     }
 
-    /// Looks once, in the page and each of its frames, for the form a person would sign in with: the one
-    /// holding the focused field, or else the likeliest. Nothing keeps watching the page afterwards.
+    /// Looks once, in the page and each of its frames at the same time, for the form a person would sign in
+    /// with: the one holding the focused field, or else the likeliest. Nothing keeps watching the page afterwards.
     func findSignIn() async throws -> BrowserSignInForm {
+        if botScriptedDocument { throw BrowserError(Self.signInBotScripted) }
         if dialog != nil { throw BrowserError(Self.signInDialog) }
         let token = UUID()
+        // A frame registers again each time its document starts, so the same one can be listed more than once.
+        var seen = Set<ObjectIdentifier>()
+        let others = frames.filter { $0.key != "main" }.sorted { $0.key < $1.key }.map(\.value)
+            .filter { seen.insert(ObjectIdentifier($0)).inserted }
+        let candidates: [WKFrameInfo?] = [nil] + others.map { Optional($0) }
+        var answers = [[String: Any]?](repeating: nil, count: candidates.count)
+        await withTaskGroup(of: (Int, [String: Any]?).self) { group in
+            for (index, frame) in candidates.enumerated() {
+                group.addTask { @MainActor in
+                    // A frame that has gone or does not answer in time has no form to offer.
+                    (index, try? await self.signInScript("find", in: frame, token: token, limit: Self.signInFrameLimit) as? [String: Any])
+                }
+            }
+            for await (index, answer) in group { answers[index] = answer }
+        }
         var best: (frame: WKFrameInfo?, origin: String, score: Double, fields: [BrowserSignInField])?
         var pageOrigin: String?
-        let others = frames.filter { $0.key != "main" }.sorted { $0.key < $1.key }.map { Optional($0.value) }
-        for (index, frame) in ([nil] + others).enumerated() {
-            // A frame that has gone or does not answer has no form to offer.
-            guard let found = try? await signInScript("find", in: frame, token: token) as? [String: Any] else { continue }
+        var documents = Set<String>()
+        for (index, found) in answers.enumerated() {
+            guard let found else { continue }
             let origin = found["origin"] as? String ?? "null"
             if index == 0 { pageOrigin = origin }
+            // Two registrations of one document answer alike; the first stands for both.
+            if let document = found["document"] as? String, !documents.insert(document).inserted { continue }
             let score = (found["score"] as? NSNumber)?.doubleValue ?? 0
             let fields = (found["fields"] as? [[String: Any]] ?? []).compactMap { field -> BrowserSignInField? in
                 guard let kind = (field["kind"] as? String).flatMap(BrowserSignInField.Kind.init(rawValue:)) else { return nil }
@@ -407,7 +432,7 @@ import WebKit
                 return BrowserSignInField(kind: kind, label: label?.isEmpty == false ? label : nil, length: (field["length"] as? NSNumber)?.intValue)
             }
             guard score > 0, !fields.isEmpty, score > best?.score ?? 0 else { continue }
-            best = (frame, origin, score, fields)
+            best = (candidates[index], origin, score, fields)
         }
         guard let best else { throw BrowserError("No sign-in fields were found on this page.") }
         signIn = (token, best.frame, best.origin)
@@ -420,6 +445,7 @@ import WebKit
     /// The values go straight into the page and are kept nowhere. Returns whether the form was submitted.
     func fillSignIn(_ values: BrowserSignInValues) async throws -> Bool {
         guard let found = signIn, found.token == values.token else { throw BrowserError(Self.signInChanged) }
+        if botScriptedDocument { signIn = nil; throw BrowserError(Self.signInBotScripted) }
         var entered: [String: String] = [:]
         for (key, value) in [("username", values.username), ("password", values.password), ("newPassword", values.newPassword),
                              ("oneTimeCode", values.oneTimeCode)] {
@@ -441,11 +467,19 @@ import WebKit
         }
     }
 
-    /// Empties the password fields a person filled, so whoever uses the page next, a bot included, cannot read them.
-    func clearSignIn() async {
-        let filled = signInFilled
-        signInFilled = [:]; signIn = nil
-        for frame in filled.values { _ = try? await signInScript("clear", in: frame) }
+    /// Empties the password fields a person filled, so whoever uses the page next, a bot included, cannot read
+    /// them. A dialog the page shows is dismissed first, since the page runs nothing while it waits on one.
+    /// Returns false while a filled field may still hold its password; those frames stay listed.
+    func clearSignIn() async -> Bool {
+        signIn = nil
+        for (key, frame) in signInFilled {
+            if dialog != nil { answerDialog(accept: false, text: nil) }
+            do {
+                _ = try await signInScript("clear", in: frame)
+                signInFilled.removeValue(forKey: key)
+            } catch {}
+        }
+        return signInFilled.isEmpty
     }
 
     func move(target: String?, x: Double?, y: Double?, frame: String?) async throws {
@@ -521,14 +555,14 @@ import WebKit
         guard let tiff = pointer.annotate(image, state: pointerState, viewport: viewport).tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) else { throw BrowserError("Could not encode screenshot.") }
         return png
     }
-    private func bounded<T>(_ start: (@escaping @MainActor @Sendable (Result<T, Error>) -> Void) -> Void) async throws -> T {
+    private func bounded<T>(limit: Duration = .seconds(20), _ start: (@escaping @MainActor @Sendable (Result<T, Error>) -> Void) -> Void) async throws -> T {
         guard !stopped else { throw BrowserError("Tab is closed.") }
         let id = UUID()
         return try await withCheckedThrowingContinuation { continuation in
             let box = BrowserOperationResult(continuation)
             operations[id] = { box.finish(.failure(BrowserError("Browser operation interrupted."))) }
             let timer = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(20))
+                try? await Task.sleep(for: limit)
                 guard !Task.isCancelled else { return }
                 self?.operations.removeValue(forKey: id)
                 box.finish(.failure(BrowserError("Browser operation timed out. Inspect its state before retrying.")))

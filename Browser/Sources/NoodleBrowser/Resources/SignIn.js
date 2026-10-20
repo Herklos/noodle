@@ -11,7 +11,7 @@ const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 
 function put(field, value) {
     if (!field.isConnected) throw Error('changed');
     valueSetter.call(field, value);
-    field.dispatchEvent(new InputEvent('input', {bubbles: true, composed: true, inputType: 'insertReplacementText', data: value}));
+    field.dispatchEvent(new InputEvent('input', {bubbles: true, composed: true, inputType: 'insertReplacementText'}));
     field.dispatchEvent(new Event('change', {bubbles: true}));
 }
 function deepElements(root, selector) {
@@ -47,11 +47,14 @@ if (mode === 'fill') {
     const values = {username: entered.username, email: entered.username, password: entered.password,
                     'new-password': entered.newPassword, 'one-time-code': entered.oneTimeCode};
     if (kept.fields.some(({elements}) => elements.some(element => !element.isConnected))) throw Error('changed');
-    const filled = new Set(kept.filled);
     let last = null, count = 0;
     for (const {kind, elements} of kept.fields) {
         const value = values[kind];
         if (value == null) continue;
+        // Listed before any goes in, so a password is emptied later even if filling stops partway.
+        if (kind === 'password' || kind === 'new-password') {
+            for (const element of elements) if (!kept.filled.includes(element)) kept.filled.push(element);
+        }
         if (elements.length > 1) {
             // A code split across boxes, one character in each.
             const characters = [...value];
@@ -60,11 +63,9 @@ if (mode === 'fill') {
             elements[0].focus({preventScroll: true});
             put(elements[0], value);
         }
-        if (kind === 'password' || kind === 'new-password') elements.forEach(element => filled.add(element));
         last = elements[elements.length - 1];
         count++;
     }
-    kept.filled = [...filled];
     let submitted = false;
     if (submit && last) {
         const form = kept.form?.isConnected ? kept.form : null;
@@ -87,6 +88,9 @@ if (mode === 'fill') {
 }
 
 // mode === 'find'
+// Names this document, so a frame registered twice is told apart from two frames.
+globalThis.__noodleDocument ??= Math.random().toString(36).slice(2) + Date.now().toString(36);
+const document_ = globalThis.__noodleDocument;
 // The form a field belongs to, across the shadow roots between them; null for a field outside any.
 function formOf(field) {
     if (field.form) return field.form;
@@ -181,11 +185,11 @@ for (const [form, members] of groups) {
     if (!best || score > best.score) best = {form, fields, score};
 }
 
-if (!best) return {score: 0, origin: self.origin, fields: []};
+if (!best) return {score: 0, origin: self.origin, document: document_, fields: []};
 // A password filled earlier in this page stays listed, so it is still emptied when the viewer leaves.
 globalThis.__noodleSignIn = {token, form: best.form, filled: kept?.filled ?? [],
                              fields: best.fields.map(({kind, elements}) => ({kind, elements}))};
 return {
-    score: best.score, origin: self.origin,
+    score: best.score, origin: self.origin, document: document_,
     fields: best.fields.map(({kind, elements, label}) => elements.length > 1 ? {kind, label, length: elements.length} : {kind, label})
 };

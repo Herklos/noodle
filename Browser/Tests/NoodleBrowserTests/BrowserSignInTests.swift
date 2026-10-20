@@ -102,6 +102,58 @@ import XCTest
         XCTAssertEqual(user, "ada@example.com", "more than passwords was emptied")
     }
 
+    /// A bot's script could have left a listener in the page to read what a person types, so a page a bot
+    /// ran scripts on is not offered for signing in until it loads again.
+    func testAPageABotRanScriptsOnIsNotOfferedUntilItReloads() async throws {
+        let watched = try await Watched(fixture: "sign-in-login.html") { runtime, browser, tab in
+            var bot = BrowserRequest(.eval, browserID: browser, tabID: tab.id)
+            bot.text = "document.addEventListener('input', event => { window.stolen = event.target.value }, true); return true"
+            _ = try await runtime.perform(bot)
+        }
+        defer { watched.end() }
+        do {
+            _ = try await watched.form()
+            XCTFail("a page a bot scripted was offered for signing in")
+        } catch { XCTAssertEqual(error.localizedDescription, "A bot ran scripts on this page. Reload it, then try again.") }
+
+        _ = try await watched.page("window.replaced = true")
+        watched.tab.web.loadHTMLString(try Watched.fixture("sign-in-login.html"), baseURL: Self.site)
+        try await watched.loaded()
+        let form = try await watched.form()
+        XCTAssertEqual(form.fields.map(\.kind), [.email, .password])
+    }
+
+    /// A dialog the page shows when the last viewer leaves is dismissed, so the password is still emptied.
+    func testAPasswordIsEmptiedEvenWithADialogOpenWhenTheViewerLeaves() async throws {
+        let watched = try await Watched(fixture: "sign-in-login.html")
+        defer { watched.end() }
+        let form = try await watched.form()
+        _ = try await watched.fill(BrowserSignInValues(token: form.token, password: "correct horse"))
+        // Not awaited: a script call the alert interrupted would wait as long as the alert does.
+        watched.tab.web.evaluateJavaScript("setTimeout(() => alert('Leaving so soon?'), 200); true", completionHandler: nil)
+        for _ in 0..<250 where watched.tab.dialog == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotNil(watched.tab.dialog, "the page showed no dialog")
+
+        watched.viewer.close()
+        var bot = BrowserRequest(.eval, browserID: watched.browser, tabID: watched.tab.id)
+        bot.text = "return document.querySelector('#pass').value"
+        var read: String?
+        for _ in 0..<500 {
+            if let answer = try? await watched.runtime.perform(bot).text { read = answer; break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(read, "\"\"", "a bot read the password the person filled")
+    }
+
+    /// A field of a kind a later Noodle Browser finds is left out, so the Hub still reads the form.
+    func testAFormWithAFieldOfAKindNotKnownYetStillReads() throws {
+        let token = UUID()
+        let json = #"{"token":"\#(token)","host":"a.test","pageHost":"a.test","secure":true,"crossOrigin":false,"#
+            + #""fields":[{"kind":"passkey"},{"kind":"password","label":"Password"}]}"#
+        let form = try JSONDecoder().decode(BrowserSignInForm.self, from: Data(json.utf8))
+        XCTAssertEqual(form.fields, [BrowserSignInField(kind: .password, label: "Password")])
+    }
+
     func testSigningInNeedsSomeoneWatchingAndTheSamePage() async throws {
         let watched = try await Watched(fixture: "sign-in-login.html")
         defer { watched.end() }
@@ -166,7 +218,9 @@ import XCTest
     let viewer: SurfaceSocket
     private let frames: Int
 
-    init(fixture name: String, frames: Int = 1, changing: (String, String)? = nil) async throws {
+    /// `beforeWatching` runs once the page has loaded, while bots may still use the browser.
+    init(fixture name: String, frames: Int = 1, changing: (String, String)? = nil,
+         beforeWatching: ((BrowserRuntime, UUID, BrowserTab) async throws -> Void)? = nil) async throws {
         let library = BrowserLibrary(root: root)
         runtime = BrowserRuntime(library: library)
         browser = try library.create(name: "Sign in").id
@@ -179,6 +233,7 @@ import XCTest
         viewer = SurfaceSocket(fd: fds[1])
         tab.web.loadHTMLString(html, baseURL: URL(string: "https://login.example.test/")!)
         try await loaded()
+        try await beforeWatching?(runtime, browser, tab)
         _ = try await runtime.perform(BrowserRequest(.surfaceStream, browserID: browser, tabID: tab.id), surface: SurfaceSocket(fd: fds[0]))
         XCTAssertTrue(runtime.isWatched(browser))
     }

@@ -170,17 +170,29 @@ import WebKit
     }
     /// Someone is watching the browser live.
     func isWatched(_ browser: UUID) -> Bool { surfaces[browser]?.isWatched == true }
-    /// Browsers whose filled passwords are being emptied after the last viewer left; bots wait until then.
-    private var clearingSignIn: Set<UUID> = []
+    /// Browsers whose filled passwords are being emptied after the last viewer left, with how many emptyings
+    /// are under way; bots wait until none is.
+    private var clearingSignIn: [UUID: Int] = [:]
+    /// How many times emptying a page's passwords is tried before the page itself is stopped.
+    static let signInClearAttempts = 3
     /// Empties the password fields people filled in the browser's pages while watching, so that a bot
-    /// using the browser next cannot read them.
+    /// using the browser next cannot read them. A page that will not let them be emptied is stopped, as an
+    /// idle one is, and loads afresh when next used; bots never get a page still holding a password.
     func clearSignIns(_ browserID: UUID) {
         let filled = tabs.values.filter { $0.browserID == browserID && $0.hasSignInToClear }
         guard !filled.isEmpty else { return }
-        clearingSignIn.insert(browserID)
+        clearingSignIn[browserID, default: 0] += 1
         Task {
-            for tab in filled { await tab.clearSignIn() }
-            clearingSignIn.remove(browserID)
+            for tab in filled {
+                var cleared = false
+                for _ in 0..<Self.signInClearAttempts where !cleared { cleared = await tab.clearSignIn() }
+                guard !cleared, tabs[tab.id] === tab else { continue }
+                tab.info.loading = false; saveTab(tab)
+                stopped[tab.id] = (tab.favicon ?? stopped[tab.id]?.favicon, nil)
+                tabs.removeValue(forKey: tab.id)?.stop()
+            }
+            clearingSignIn[browserID, default: 1] -= 1
+            if clearingSignIn[browserID] == 0 { clearingSignIn[browserID] = nil }
         }
     }
     /// Only the tab a person is watching draws as if seen.
@@ -379,8 +391,9 @@ import WebKit
                 let view = BrowserLiveView(browserID: id, runtime: self)
                 let streamer = SurfaceStreamer(capture: { try await view.picture() }, apply: { try view.apply($0) })
                 streamer.watchingChanged = { [weak self] watched in
-                    self?.showWatchedTab(id, watched: watched)
+                    // Bots are kept off until the passwords people filled are emptied, before the browser counts as unwatched.
                     if !watched { self?.clearSignIns(id) }
+                    self?.showWatchedTab(id, watched: watched)
                 }
                 return streamer
             }()
@@ -399,7 +412,7 @@ import WebKit
             return response
         }
         guard !profile.paused else { throw BrowserError("Agent control is paused for this browser. Wait for the user to resume it.") }
-        guard !isWatched(id), !clearingSignIn.contains(id) else { throw BrowserError("A person is using this browser right now. Try again when they're done.") }
+        guard !isWatched(id), clearingSignIn[id] == nil else { throw BrowserError("A person is using this browser right now. Try again when they're done.") }
         // Dialog replies must remain available while a JS command is waiting.
         if request.operation == .dialog {
             let tab = try tab(browserID: id, tabID: request.tabID!)
@@ -442,6 +455,8 @@ import WebKit
         case .inspect: response.text = try await tab.inspect(frame: request.frame)
         case .webMCPList, .webMCPCall: response.text = try await tab.webMCP(request)
         case .eval:
+            // The bot's script may leave listeners behind in the page; a person is not offered to sign in to it.
+            tab.botScriptedDocument = true
             let result = try await tab.evaluate("return JSON.stringify(await (async()=>{\n\(request.text!)\n})());", frame: request.frame)
             let text = result as? String ?? "null"
             guard text.utf8.count <= 2 * 1_048_576 else { throw BrowserError("JavaScript result exceeds 2 MiB. Return less data.") }
