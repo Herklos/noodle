@@ -69,11 +69,34 @@ final class GuestTerminalIO: ReaderStream, Writer, @unchecked Sendable {
 }
 
 final class ComputerNativeTerminalView: TerminalView {
+    /// Where Copy puts the selection, as plain text.
+    var pasteboard = NSPasteboard.general
+
+    override func copy(_ sender: Any) {
+        guard let text = getSelection(), !text.isEmpty else { return }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // A click does not focus this view inside its SwiftUI host, so the Edit
+        // menu's Copy, Paste and Select All went to whatever had focus before.
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if window?.firstResponder === self, modifiers == .command,
            event.charactersIgnoringModifiers?.lowercased() == "k" {
             clearTerminal(nil)
+            return true
+        }
+        if window?.firstResponder === self, modifiers == .command, selectionActive,
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            // Copy here: in keyDown SwiftTerm would clear the selection first.
+            // Without a selection ⌘C keeps its old path; ⌃C is the interrupt.
+            copy(self)
             return true
         }
         if window?.firstResponder === self, modifiers == .control,
