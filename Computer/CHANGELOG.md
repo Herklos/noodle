@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Copy in the Edit menu and ⌘C copy the text selected in a computer's terminal. Copy used to stay dimmed and nothing reached the clipboard. With nothing selected ⌘C does nothing, and ⌃C still interrupts the running command.
+
 ## [0.32.2] - 2026-10-18
 
 ### Fixed
