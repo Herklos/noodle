@@ -51,10 +51,12 @@ public enum ComputerOperation: String, Codable, Sendable {
     case borrow
     /// Noodle or Noodle Hub asking which computers its bots started and then left running unused.
     case idle
+    /// The caller's own open terminals on a computer, so a bot can find and close ones it lost.
+    case terminalList
     public var isFileTransfer: Bool { self == .fileUpload || self == .fileDownload }
     /// What bots call, in the order they are listed.
     public static let agentCases: [Self] = [.list, .start, .stop, .terminalOpen, .terminalRead, .terminalWrite, .terminalResize, .terminalClose,
-                                            .preview, .fileUpload, .fileDownload]
+                                            .terminalList, .preview, .fileUpload, .fileDownload]
     /// What apps outside Noodle may call: what bots may, apart from posting into a conversation,
     /// and making, borrowing, changing and deleting computers.
     public static let externalCases: [Self] = agentCases.filter { $0 != .preview } + [.templates, .create, .borrow, .update, .delete]
@@ -66,6 +68,7 @@ public enum ComputerOperation: String, Codable, Sendable {
         case .terminalWrite: "write"
         case .terminalResize: "resize"
         case .terminalClose: "close"
+        case .terminalList: "terminals"
         case .preview: "present"
         case .fileUpload: "upload"
         case .fileDownload: "download"
@@ -202,6 +205,8 @@ public struct ComputerResponse: Codable, Sendable {
     public var templates: [ComputerTemplateSummary]?
     /// Computers the caller's agents started and then left running unused, each told once.
     public var idle: [ComputerIdleNotice]?
+    /// For terminalList.
+    public var terminals: [RemoteTerminal]?
     public init(computers: [RemoteComputer]? = nil, terminalID: UUID? = nil, data: Data? = nil,
                 offset: Int64? = nil, truncated: Bool? = nil, exited: Bool? = nil, error: String? = nil) {
         self.computers = computers; self.terminalID = terminalID; self.data = data; self.offset = offset
@@ -225,6 +230,21 @@ public struct ComputerIdleNotice: Codable, Equatable, Sendable {
     }
 }
 
+/// One of the caller's terminals on a computer.
+public struct RemoteTerminal: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var opened: Date
+    /// The last read, write or resize through the tool.
+    public var used: Date
+    /// Whether a command runs in the foreground, rather than the shell waiting at its prompt;
+    /// nil where the computer cannot tell.
+    public var running: Bool?
+    public var exited: Bool
+    public init(id: UUID, opened: Date, used: Date, running: Bool?, exited: Bool) {
+        self.id = id; self.opened = opened; self.used = used; self.running = running; self.exited = exited
+    }
+}
+
 /// Discovery is the stable handshake. App release numbers are deliberately not
 /// compared: compatible releases can ship independently.
 public struct ComputerCapabilities: Codable, Equatable, Sendable {
@@ -232,7 +252,7 @@ public struct ComputerCapabilities: Codable, Equatable, Sendable {
     public var maximumProtocol = 1
     private static let requiredFeatures: Set<String> = ["agent-terminals-v1", "presentation-v2", "guest-display-v1"]
     public var features: Set<String> = requiredFeatures.union(["file-transfer-v1", "document-preview-v1", "computer-management-v1",
-                                                               SurfaceSocket.feature])
+                                                               "terminal-list-v1", SurfaceSocket.feature])
     public init() {}
     public static func requireCompatible(_ capabilities: Self?) throws {
         guard let capabilities else {
@@ -258,6 +278,12 @@ public struct ComputerCapabilities: Codable, Equatable, Sendable {
         try requireCompatible(capabilities)
         guard capabilities?.features.contains("computer-management-v1") == true else {
             throw ComputerBridgeError("Update Noodle Computer to make and edit computers from here.")
+        }
+    }
+    public static func requireTerminalList(_ capabilities: Self?) throws {
+        try requireCompatible(capabilities)
+        guard capabilities?.features.contains("terminal-list-v1") == true else {
+            throw ComputerBridgeError("Update Noodle Computer to list your terminals.")
         }
     }
     public static func requireDocumentPreview(_ capabilities: Self?) throws {

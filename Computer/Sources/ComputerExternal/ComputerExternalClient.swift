@@ -21,7 +21,7 @@ public struct ComputerExternalClient: Sendable {
         Noodle Computer runs Linux computers and this Mac's own Local Mac account. This app sees only computers it created or a \
         person lent it. Start with list; use templates and create to make one, or borrow to ask the person to lend one of theirs. \
         Pass computer as a name or ID; it may be left out when there is only one. start a stopped computer, open a terminal, then \
-        write commands and read their output from the returned offset; stop it when it is no longer needed. upload and download move files between this Mac and the \
+        write commands and read their output from the returned offset; close each terminal you are done with, and stop the computer when it is no longer needed. terminals lists the ones this app has open. upload and download move files between this Mac and the \
         computer. The person is asked before this app is first allowed in, before it creates a computer, and before it borrows one. \
         A result's idle lists computers you started and then left unused; stop each one you no longer need.
         """
@@ -41,6 +41,7 @@ public struct ComputerExternalClient: Sendable {
         case .terminalWrite: "Send --text followed by Enter, or exact --base64 bytes, to the terminal."
         case .terminalResize: "Resize the terminal to --columns 1–500 and --rows 1–200."
         case .terminalClose: "Close the terminal."
+        case .terminalList: "List this app's terminals on the computer: each ID, when it was opened and last used, whether a command is running and whether it has exited. Close the ones you no longer need."
         case .fileUpload: "Copy the file at --source PATH on this Mac to the absolute --destination path in the computer."
         case .fileDownload: "Copy the absolute --source path in the computer to --destination PATH on this Mac, a new file."
         default: ""
@@ -109,7 +110,7 @@ public struct ComputerExternalClient: Sendable {
             var tool: [String: Any] = ["name": operation.command, "description": describe(operation),
                 "inputSchema": ["type": "object", "properties": Dictionary(uniqueKeysWithValues: accepted(operation).map { ($0, all[$0]!) }),
                                 "required": required]]
-            if [.list, .templates, .terminalRead].contains(operation) { tool["annotations"] = ["readOnlyHint": true] }
+            if [.list, .templates, .terminalRead, .terminalList].contains(operation) { tool["annotations"] = ["readOnlyHint": true] }
             if operation == .delete { tool["annotations"] = ["destructiveHint": true] }
             return tool
         }
@@ -224,7 +225,9 @@ public struct ComputerExternalClient: Sendable {
     }
 
     static func object(_ response: ComputerResponse) throws -> [String: Any] {
-        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any] ?? [:]
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try JSONSerialization.jsonObject(with: encoder.encode(response)) as? [String: Any] ?? [:]
         object["capabilities"] = nil; object["version"] = nil
         return object
     }

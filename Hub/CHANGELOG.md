@@ -6,6 +6,7 @@
 
 - Admins can also suspend and restore regular users from Noodle Mobile.
 - Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
+- Bots on the Hub with a computer have a `terminals` tool that lists their own open terminals there, so they can find and close ones they lost track of.
 
 ### Fixed
 

@@ -1,4 +1,5 @@
 import AppKit
+import ComputerBridge
 import Foundation
 import Combine
 import LocalMacCore
@@ -419,5 +420,76 @@ import XCTest
         runtime.close()
         let operations = await helper.value
         XCTAssertEqual(operations.filter { $0 == .terminalOpen }.count, 18)
+    }
+
+    /// Bots that lost their shells cannot close them. A shell idle at its prompt that no call has used
+    /// for half an hour is closed for them; one running a command stays however long it runs, and
+    /// one whose helper cannot tell stays six hours. Each bot lists only its own.
+    func testAgentShellsLeftIdleAtThePromptAreClosed() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try ComputerStore(root: root)
+        let provider = try ComputerProvider(store: store, socket: root.appendingPathComponent("computer.sock"), listens: false)
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        var clock = start
+        provider.now = { clock }
+        let session = ComputerSession(Computer(name: "Retained", kind: .localMac))
+        store.sessions = [session]
+        let ids = (0..<20).map { _ in UUID() }
+        let building = ids[1], olderHelper = ids[2], used = ids[3]
+        let input = Pipe(), output = Pipe()
+        let helper = Task.detached { () -> [UUID] in
+            defer { try? output.fileHandleForWriting.close(); try? input.fileHandleForReading.close() }
+            var closed: [UUID] = [], opened = 0
+            while let data = try? LocalMacWire.read(input.fileHandleForReading),
+                  let request = try? LocalMacWire.decode(LocalMacRequest.self, from: data) {
+                var reply = Self.reply(request, displayID: request.operation == .status ? nil : 99)
+                switch request.operation {
+                case .terminalOpen: reply.terminalID = ids[opened]; opened += 1
+                case .terminalRead:
+                    reply.terminalID = request.terminalID; reply.offset = 0; reply.exited = false
+                    reply.running = request.terminalID == olderHelper ? nil : request.terminalID == building
+                case .terminalClose: closed += request.terminalID.map { [$0] } ?? []
+                default: break
+                }
+                try? LocalMacWire.write(JSONEncoder().encode(reply), to: output.fileHandleForWriting)
+            }
+            return closed
+        }
+        let runtime = LocalMacComputer(displayIDs: { [2] })
+        runtime.expectDisconnect(true)
+        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
+        session.localMac = runtime; session.phase = .running
+        let agents = (0..<18).map { _ in UUID() }
+        func open(_ agent: UUID) async throws -> UUID? {
+            try await provider.handle(.init(.terminalOpen, computerID: session.id, agentID: agent), peer: "agents").terminalID
+        }
+        func terminals(_ agent: UUID) async throws -> [RemoteTerminal] {
+            try await provider.handle(.init(.terminalList, computerID: session.id, agentID: agent), peer: "agents").terminals ?? []
+        }
+
+        for agent in agents[0..<16] { _ = try await open(agent) }
+        clock += 20 * 60
+        _ = try await provider.handle(.init(.terminalWrite, computerID: session.id, agentID: agents[3], terminalID: used, data: Data("ls\r".utf8)), peer: "agents")
+        clock += 11 * 60
+        let replacement = try await open(agents[16])
+        XCTAssertEqual(replacement, ids[16], "idle shells made room")
+        let listed = try await terminals(agents[1])
+        XCTAssertEqual(listed, [RemoteTerminal(id: building, opened: start, used: start, running: true, exited: false)], "listing and checking are not use")
+        let unsure = try await terminals(agents[2]), recent = try await terminals(agents[3]), idle = try await terminals(agents[0])
+        XCTAssertEqual(unsure.map(\.id), [olderHelper])
+        XCTAssertNil(unsure.first?.running)
+        XCTAssertEqual(recent.map(\.used), [start + 20 * 60])
+        XCTAssertEqual(idle, [], "idle at its prompt for 31 minutes")
+
+        clock += 6 * 60 * 60
+        _ = try await open(agents[17])
+        let unsureLater = try await terminals(agents[2]), stillBuilding = try await terminals(agents[1])
+        XCTAssertEqual(unsureLater, [], "kept six hours where the helper cannot tell")
+        XCTAssertEqual(stillBuilding.map(\.id), [building], "a command still running keeps its shell")
+
+        runtime.close()
+        let closed = await helper.value
+        XCTAssertEqual(Set(closed), Set(ids[0...16]).subtracting([building]))
     }
 }

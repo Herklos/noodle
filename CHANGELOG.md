@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Bots with a computer have a `terminals` tool that lists their own open terminals there, with when each was opened and last used and whether a command is running, so they can find and close ones they lost track of. Their Computer skill tells them to close terminals they no longer need. An older Noodle Computer answers "Update Noodle Computer to list your terminals."
+
 ## [0.70.0] - 2026-10-20
 
 ### Added

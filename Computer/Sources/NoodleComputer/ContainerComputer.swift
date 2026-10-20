@@ -252,7 +252,7 @@ actor ContainerComputer {
         let process = try await pod.execInContainer("workspace", processID: "noodle-\(id.uuidString.lowercased())") { config in
             config.arguments = ["/bin/sh", "-c", GuestShell.command]
             config.user = guest.user
-            config.environmentVariables = GuestShell.environment(inheriting: guest.environmentVariables)
+            config.environmentVariables = GuestShell.environment(inheriting: guest.environmentVariables) + [GuestShell.terminalVariable + "=" + id.uuidString.lowercased()]
             config.terminal = true; config.stdin = io; config.stdout = io
         }
         do {
@@ -309,6 +309,23 @@ actor ContainerComputer {
         }
     }
 
+
+    /// Whether a command runs in the foreground of provider terminal `id`, rather than its shell
+    /// waiting at the prompt; nil when the guest cannot tell.
+    func providerTerminalRunsCommand(_ id: UUID) async -> Bool? {
+        let output = ComputerOutput()
+        guard let process = try? await makeFileProcess(arguments: ["/bin/sh", "-c", GuestShell.foregroundCheck, "sh", id.uuidString.lowercased(), "/proc"],
+                                                       output: output, errors: ComputerOutput()) else { return nil }
+        do {
+            try await process.start()
+            _ = try await process.wait(timeoutInSeconds: 10)
+            try? await process.delete()
+        } catch {
+            try? await process.kill(.kill); try? await process.delete()
+            return nil
+        }
+        return GuestShell.runsCommand(output.text())
+    }
 
     // Independent, non-PTY binary channel. The guest's paths are argv values.
     func makeFileProcess(arguments: [String], input: (any ReaderStream)? = nil,
