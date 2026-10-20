@@ -128,4 +128,20 @@ final class AgentCallTests: XCTestCase {
             .contains("Petko started a voice call with you"))
         XCTAssertTrue(MessengerDocumentation.skillInstructions.contains("messenger --call --reason <text>"))
     }
+
+    /// What rings is one line as the bot wrote it: no line breaks, bidirectional overrides or zero-width
+    /// characters to make it read differently, and no longer than the limit in Unicode scalars.
+    func testTheReasonRingsAsOneLineWithoutHiddenCharacters() throws {
+        let bot = try repository.createAgent(named: "Theo", harnessIdentifier: HarnessProvider.codex.rawValue).agent
+        let request = try repository.requestCall(agentID: bot.id, reason: "The \u{202E}build\u{202C} is\u{200B} broken\r\nnow\u{2028}please",
+                                                 now: date)
+        XCTAssertEqual(request.reason, "The build is broken now please")
+        XCTAssertTrue(refusal { try repository.requestCall(agentID: bot.id, reason: "\u{200B}\u{2066}\n", now: date.addingTimeInterval(3_600)) }
+            .contains("--reason"))
+        // 150 characters, each a letter and a combining accent: 300 scalars.
+        let accented = String(repeating: "e\u{301}", count: 150)
+        XCTAssertEqual(accented.count, 150)
+        XCTAssertTrue(refusal { try repository.requestCall(agentID: bot.id, reason: accented, now: date.addingTimeInterval(3_600)) }
+            .contains("--reason"))
+    }
 }

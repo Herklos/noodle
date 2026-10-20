@@ -21,6 +21,22 @@ public struct AgentCallRequest: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+extension AgentCallRequest {
+    /// The reason as one line, as shown while the call rings. Control and format characters go, such as
+    /// line breaks, bidirectional overrides and zero-width ones, so it reads as the bot wrote it.
+    static func shownReason(_ raw: String) -> String {
+        var kept = String.UnicodeScalarView()
+        for scalar in raw.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control, .lineSeparator, .paragraphSeparator: kept.append(" ")
+            case .format: continue
+            default: kept.append(scalar)
+            }
+        }
+        return String(kept).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+}
+
 /// How a call a bot placed ended without being answered.
 public enum UnansweredCall: String, Codable, Hashable, Sendable {
     case missed, declined
@@ -60,8 +76,8 @@ public enum AgentCallDocumentation {
 extension WorkspaceRepository {
     /// Places a call from a bot whose harness takes calls to the person in its own conversation.
     public func requestCall(agentID: UUID, reason rawReason: String, now: Date = Date()) throws -> AgentCallRequest {
-        let reason = rawReason.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        guard !reason.isEmpty, reason.count <= AgentCallLimits.reasonLength else {
+        let reason = AgentCallRequest.shownReason(rawReason)
+        guard !reason.isEmpty, reason.unicodeScalars.count <= AgentCallLimits.reasonLength else {
             throw AgentCallError("A call needs a --reason of at most \(AgentCallLimits.reasonLength) characters saying why you are calling.")
         }
         guard let agent = try loadAgents().first(where: { $0.id == agentID }), agent.archivedAt == nil else {

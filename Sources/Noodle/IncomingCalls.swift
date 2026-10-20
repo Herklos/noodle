@@ -9,7 +9,8 @@ extension NoodleStore {
     func ringCall(of agentID: UUID, now: Date = Date()) {
         guard let request = repository.pendingCall(agentID: agentID),
               !ringingCalls.contains(where: { $0.id == request.id }) else { return }
-        guard request.expiresAt > now, runsHere(agentID),
+        // Someone on a call is not rung; the call is left as missed and the bot writes instead.
+        guard request.expiresAt > now, voiceCalls.call == nil, runsHere(agentID),
               let conversation = conversations.first(where: { $0.id == request.conversationID }),
               voiceCallTarget(for: conversation)?.id == agentID else {
             return endUnansweredCall(request, .missed, at: now)
@@ -23,6 +24,16 @@ extension NoodleStore {
         }
     }
 
+    /// Ends quietly the calls of bots deleted or archived while they rang: there is nobody left to answer.
+    func dropCallsOfGoneBots() {
+        for request in ringingCalls where !isCallable(request.agentID) {
+            _ = takeRingingCall(request.id)
+            _ = try? repository.endCall(agentID: request.agentID, id: request.id)
+        }
+    }
+
+    func isCallable(_ agentID: UUID) -> Bool { agents.contains { $0.id == agentID && $0.archivedAt == nil } }
+
     /// Ends the calls that rang for too long as missed.
     func expireCalls(at now: Date) {
         for request in ringingCalls where request.expiresAt <= now { endUnansweredCall(request, .missed, at: now) }
@@ -30,6 +41,8 @@ extension NoodleStore {
 
     /// Answering is calling the bot, told why it called, in the window that shows its conversation.
     func answerCall(_ id: UUID, media: (any VoiceCallMedia)? = nil) {
+        // Answering never hangs up a call in progress; this one rings on until it is missed.
+        guard voiceCalls.call == nil else { return }
         guard let request = takeRingingCall(id),
               (try? repository.endCall(agentID: request.agentID, id: id)) != nil,
               let conversation = conversations.first(where: { $0.id == request.conversationID }) else { return }
@@ -50,6 +63,10 @@ extension NoodleStore {
     /// Leaves the card in the conversation, which shows it unread, and tells the bot, once per call.
     private func endUnansweredCall(_ request: AgentCallRequest, _ outcome: UnansweredCall, at now: Date) {
         _ = takeRingingCall(request.id)
+        guard isCallable(request.agentID) else {
+            _ = try? repository.endCall(agentID: request.agentID, id: request.id)
+            return
+        }
         guard (try? repository.endCall(agentID: request.agentID, id: request.id)) != nil else { return }
         do {
             try repository.recordUnansweredCall(request, outcome, at: now)
@@ -72,7 +89,8 @@ extension NoodleStore {
     }
 }
 
-/// Floats in the top right corner over every app and Space while a call rings, and rings.
+/// Floats in the top right corner over every app and Space while a call rings. It rings with a
+/// time-sensitive notification, so Focus and Do Not Disturb silence it as they choose.
 @MainActor final class IncomingCallPanel {
     static let shared = IncomingCallPanel()
     static let size = NSSize(width: 360, height: 76)
@@ -83,6 +101,7 @@ extension NoodleStore {
         guard !store.ringingCalls.isEmpty else {
             panel?.orderOut(nil)
             ringer?.cancel(); ringer = nil
+            NoodleNotifications.stopRinging()
             return
         }
         let panel = self.panel ?? makePanel(store)
@@ -92,10 +111,13 @@ extension NoodleStore {
         }
         panel.orderFrontRegardless()
         guard ringer == nil else { return }
-        ringer = Task { @MainActor in
-            while !Task.isCancelled {
-                NSSound(named: "Glass")?.play()
-                try? await Task.sleep(for: .seconds(2.5))
+        ringer = Task { @MainActor [weak store] in
+            while !Task.isCancelled, let store {
+                if let call = store.ringingCalls.first(where: { store.isCallable($0.agentID) }),
+                   let agent = store.agents.first(where: { $0.id == call.agentID }) {
+                    NoodleNotifications.ring(call, from: agent)
+                }
+                try? await Task.sleep(for: .seconds(4))
             }
         }
     }
@@ -109,6 +131,8 @@ extension NoodleStore {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.hidesOnDeactivate = false
+        // A screen being shared or recorded does not show who calls or why.
+        panel.sharingType = .none
         panel.isMovableByWindowBackground = true
         panel.contentView = NSHostingView(rootView: IncomingCallView().environment(store))
         return panel
@@ -127,7 +151,8 @@ struct IncomingCallView: View {
 
     var body: some View {
         Group {
-            if let call = store.ringingCalls.first, let agent = store.agents.first(where: { $0.id == call.agentID }) {
+            if let call = store.ringingCalls.first(where: { store.isCallable($0.agentID) }),
+               let agent = store.agents.first(where: { $0.id == call.agentID }) {
                 HStack(spacing: 12) {
                     ConversationAvatar(participants: [agent], isGroup: false, size: 44)
                     VStack(alignment: .leading, spacing: 2) {
@@ -146,10 +171,11 @@ struct IncomingCallView: View {
                     button("Answer", systemImage: "phone.fill", color: .green) { store.answerCall(call.id) }
                 }
                 .padding(.horizontal, 14)
+                .frame(width: IncomingCallPanel.size.width, height: IncomingCallPanel.size.height)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
         .frame(width: IncomingCallPanel.size.width, height: IncomingCallPanel.size.height)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func button(_ title: String, systemImage: String, color: Color, action: @escaping () -> Void) -> some View {

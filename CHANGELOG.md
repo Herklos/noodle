@@ -8,7 +8,7 @@ All notable changes to Noodle are documented here, following
 
 ### Added
 
-- Bots on this Mac whose harness takes voice calls (Codex) can call you when something needs you now. The call rings in a panel in the top right corner with the bot's reason, and Answer starts the call in its conversation. A call you decline or miss leaves a card in the conversation, and the bot is told so it can write instead. A bot can call at most once every 30 minutes and three times a day.
+- Bots on this Mac whose harness takes voice calls (Codex) can call you when something needs you now. The call rings in a panel in the top right corner with the bot's reason, and Answer starts the call in its conversation. It rings as a time-sensitive notification, so Focus and Do Not Disturb decide whether you hear it, and it does not ring while you are on a call. A call you decline or miss leaves a card in the conversation, and the bot is told so it can write instead. A bot can call at most once every 30 minutes and three times a day.
 
 ## [0.70.0] - 2026-10-20
 

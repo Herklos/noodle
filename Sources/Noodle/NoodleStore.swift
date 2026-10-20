@@ -686,6 +686,7 @@ final class NoodleStore {
             runtime.refresh(agents: agents)
             refreshAppShortcuts()
             storageReady = true
+            dropCallsOfGoneBots()
 
             if let selectedConversationID,
                conversations.contains(where: { $0.id == selectedConversationID }) {
@@ -769,6 +770,7 @@ final class NoodleStore {
             let updated = try repository.setAgentArchived(archived, agentID: agentID)
             if let index = agents.firstIndex(where: { $0.id == agentID }) { agents[index] = updated }
             runtime.archivedAgentIDs = Set(agents.filter { $0.archivedAt != nil }.map(\.id))
+            dropCallsOfGoneBots()
             // Out of the sidebar, an unread chat could never be read.
             if archived, let direct = conversations.first(where: { $0.kind == .direct && $0.participantIDs == [agentID] }) {
                 markConversationRead(direct.id)
@@ -2453,6 +2455,7 @@ final class NoodleStore {
                 self.runtime.reconcile(agents: self.agents, repository: self.repository)
                 self.runtime.checkHeartbeats()
                 self.runtime.checkWakes(repository: self.repository)
+                if !self.ringingCalls.isEmpty { self.dropCallsOfGoneBots() }
                 if self.connectsServices { self.botWidgets.publish(self.widgetBots) }
             }
         }
