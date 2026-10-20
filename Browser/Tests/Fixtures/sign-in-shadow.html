@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>Log in</title>
+<form id="login"><fancy-field kind="email"></fancy-field><fancy-field kind="password"></fancy-field><button type="submit">Log in</button></form>
+<script>
+window.seen = {};
+customElements.define('fancy-field', class extends HTMLElement {
+    connectedCallback() {
+        const kind = this.getAttribute('kind'), input = document.createElement('input');
+        input.type = kind;
+        input.setAttribute('aria-label', kind === 'email' ? 'Email' : 'Password');
+        input.addEventListener('input', () => { seen[kind] = input.value; });
+        this.attachShadow({mode: 'open'}).append(input);
+    }
+});
+</script>
