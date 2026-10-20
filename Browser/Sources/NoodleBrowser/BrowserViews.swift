@@ -244,15 +244,15 @@ private struct BrowserDetailView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { do { try await presentation.runtime.setMuted(!profile.muted, browserID: profile.id) } catch { presentation.runtime.failure = error.localizedDescription } }
-                } label: { Label(profile.muted ? "Unmute" : "Mute", systemImage: profile.muted ? "speaker.slash" : "speaker.wave.2") }
-                    .help(profile.muted ? "Unmute" : "Mute")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
                     do { try presentation.runtime.setPaused(!profile.paused, browserID: profile.id) } catch { presentation.runtime.failure = error.localizedDescription }
                 } label: { Label(profile.paused ? "Resume Agents" : "Pause Agents", systemImage: profile.paused ? "play.fill" : "pause.fill") }
                     .help(profile.paused ? "Resume Agents" : "Pause Agents")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { do { try await presentation.runtime.setMuted(!profile.muted, browserID: profile.id) } catch { presentation.runtime.failure = error.localizedDescription } }
+                } label: { Label(profile.muted ? "Unmute" : "Mute", systemImage: profile.muted ? "speaker.slash" : "speaker.wave.2") }
+                    .help(profile.muted ? "Unmute" : "Mute")
             }
             CompanionSettingsToolbarItem()
         }
