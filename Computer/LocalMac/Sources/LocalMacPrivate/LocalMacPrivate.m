@@ -8,6 +8,8 @@
 #include <sys/ioctl.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
 #include <mach-o/dyld.h>
 #include <crt_externs.h>
 
@@ -203,4 +205,73 @@ BOOL NLMRemoveHome(NSString *name, uid_t uid, NSError **error) {
     if (users < 0) return removalFailure(error, errno, @"", @"open", YES);
     BOOL result = NLMRemoveManagedHomeAt(users, name, uid, error);
     close(users); return result;
+}
+
+int NLMCreateSharedMemory(size_t size) {
+    if (size == 0 || size > (size_t)OFF_MAX) { errno = EINVAL; return -1; }
+    for (int attempt = 0; attempt < 8; attempt++) {
+        char name[32];
+        snprintf(name, sizeof name, "/nlm.%08x%08x", arc4random(), arc4random());
+        // shm_open refuses O_CLOEXEC.
+        int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+        if (fd < 0) { if (errno == EEXIST) continue; return -1; }
+        shm_unlink(name);
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
+        if (ftruncate(fd, (off_t)size) != 0) { int error = errno; close(fd); errno = error; return -1; }
+        return fd;
+    }
+    errno = EEXIST;
+    return -1;
+}
+
+BOOL NLMIsSharedMemory(int fd, size_t size) {
+    // POSIX shared memory reports no file type; files, pipes and sockets all do.
+    struct stat info;
+    return fstat(fd, &info) == 0 && (info.st_mode & S_IFMT) == 0 && info.st_size >= 0 && (size_t)info.st_size >= size;
+}
+
+int NLMSendAll(int socket, const void *bytes, size_t length, int descriptor) {
+    const uint8_t *next = bytes;
+    if (descriptor >= 0) {
+        union { struct cmsghdr header; char space[CMSG_SPACE(sizeof(int))]; } control;
+        memset(&control, 0, sizeof control);
+        struct iovec part = { (void *)next, length };
+        struct msghdr message = { .msg_iov = &part, .msg_iovlen = 1, .msg_control = control.space, .msg_controllen = sizeof control.space };
+        struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = SOL_SOCKET; header->cmsg_type = SCM_RIGHTS; header->cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(header), &descriptor, sizeof(int));
+        ssize_t sent;
+        do { sent = sendmsg(socket, &message, 0); } while (sent < 0 && errno == EINTR);
+        if (sent < 0) return errno;
+        next += sent; length -= (size_t)sent;
+    }
+    while (length > 0) {
+        ssize_t sent = write(socket, next, length);
+        if (sent < 0) { if (errno == EINTR) continue; return errno; }
+        next += sent; length -= (size_t)sent;
+    }
+    return 0;
+}
+
+ssize_t NLMReceive(int fd, void *buffer, size_t length, int *descriptors, int capacity, int *count) {
+    union { struct cmsghdr header; char space[CMSG_SPACE(4 * sizeof(int))]; } control;
+    struct iovec part = { buffer, length };
+    struct msghdr message = { .msg_iov = &part, .msg_iovlen = 1, .msg_control = control.space, .msg_controllen = sizeof control.space };
+    ssize_t received;
+    do { received = recvmsg(fd, &message, 0); } while (received < 0 && errno == EINTR);
+    if (received < 0 && errno == ENOTSOCK) {
+        do { received = read(fd, buffer, length); } while (received < 0 && errno == EINTR);
+        return received;
+    }
+    if (received < 0) return received;
+    for (struct cmsghdr *header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
+        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS) continue;
+        size_t found = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        for (size_t index = 0; index < found; index++) {
+            int descriptor;
+            memcpy(&descriptor, CMSG_DATA(header) + index * sizeof(int), sizeof(int));
+            if (*count < capacity) descriptors[(*count)++] = descriptor; else close(descriptor);
+        }
+    }
+    return received;
 }

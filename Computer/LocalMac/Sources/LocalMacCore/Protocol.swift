@@ -97,6 +97,8 @@ public enum LocalMacOperation: String, Codable, Sendable {
     case status, screenshot, stream, windowList, windowPreview, input, terminalOpen, terminalRead, terminalWrite, terminalResize, terminalClose
     case fileHome, fileList, fileStat, fileRead, fileWrite, fileMkdir, fileRemove, fileRename, fileCopy
     case fileUploadOpen, fileUploadCommit, fileUploadCancel
+    /// Hands a frame's slot back to the helper. It has no reply.
+    case frameRelease
 }
 public struct LocalMacRequest: Codable, Sendable {
     public var protocolVersion: Int? = LocalMacWire.version
@@ -117,6 +119,7 @@ public struct LocalMacRequest: Codable, Sendable {
     public var protectedDisplayIDs: [UInt32]?
     public var previewID: UUID?
     public var window: LocalMacWindow?
+    public var frame: LocalMacSharedFrame?
     public init(_ operation: LocalMacOperation) { self.operation = operation }
     public func validate() throws {
         try LocalMacWire.checkVersion(protocolVersion)
@@ -129,6 +132,7 @@ public struct LocalMacRequest: Codable, Sendable {
         if operation == .terminalResize {
             guard (1...500).contains(width ?? 0), (1...200).contains(height ?? 0) else { throw LocalMacError("Invalid terminal size.") }
         }
+        if operation == .frameRelease, frame == nil { throw LocalMacError("Missing frame.") }
         if operation == .input { guard let input else { throw LocalMacError("Missing input event.") }; try input.validate() }
         if operation == .stream, enabled == true {
             try LocalMacCapturePolicy.validateProtectedDisplays(protectedDisplayIDs ?? [])
@@ -189,6 +193,9 @@ public struct LocalMacReply: Codable, Sendable {
     public var transferID: UUID?
     public var status: LocalMacStatus?
     public var frame = false
+    public var sharedFrame: LocalMacSharedFrame?
+    /// Sent with the region's memory attached as a descriptor.
+    public var region: LocalMacFrameRegion?
     public var windowFrame: LocalMacWindowFrame?
     public var windows: [LocalMacWindow]?
     /// A preview-scoped end/error must never disconnect the desktop or terminals.
@@ -217,7 +224,7 @@ public struct LocalMacStatus: Codable, Sendable {
 
 /// Bounded binary framing. Video is disposable; never write a recording to disk.
 public enum LocalMacWire {
-    public static let version = 3
+    public static let version = 4
     public static let maximum = 12 * 1_048_576
     public static func checkVersion(_ version: Int?) throws {
         guard version == Self.version else {
@@ -230,26 +237,63 @@ public enum LocalMacWire {
         try checkVersion(decoder.decode(Version.self, from: data).protocolVersion)
         return try decoder.decode(type, from: data)
     }
-    public static func read(_ handle: FileHandle) throws -> Data? {
-        func exact(_ count: Int, eof: Bool = false) throws -> Data? {
-            var data = Data()
-            while data.count < count {
-                guard let next = try handle.read(upToCount: count - data.count), !next.isEmpty else {
-                    if data.isEmpty && eof { return nil }; throw LocalMacError("Desktop connection ended mid-message.")
-                }
-                data.append(next)
-            }
-            return data
-        }
-        guard let header = try exact(4, eof: true) else { return nil }
-        let count = header.reduce(0) { ($0 << 8) | Int($1) }
-        guard count > 0, count <= maximum else { throw LocalMacError("Desktop message exceeds the size limit.") }
-        return try exact(count)
-    }
-    public static func write(_ data: Data, to handle: FileHandle) throws {
+    /// Descriptors sent by a peer that expects none are closed.
+    public static func read(_ handle: FileHandle) throws -> Data? { try Reader(handle).read() }
+    /// `descriptor` stays the caller's to close.
+    public static func write(_ data: Data, to handle: FileHandle, descriptor: Int32? = nil) throws {
         guard !data.isEmpty, data.count <= maximum else { throw LocalMacError("Desktop message exceeds the size limit.") }
         var size = UInt32(data.count).bigEndian
         var packet = withUnsafeBytes(of: &size) { Data($0) }; packet.append(data)
-        try handle.write(contentsOf: packet)
+        guard let descriptor else { try handle.write(contentsOf: packet); return }
+        let error = packet.withUnsafeBytes { NLMSendAll(handle.fileDescriptor, $0.baseAddress!, $0.count, descriptor) }
+        guard error == 0 else { throw POSIXError(POSIXErrorCode(rawValue: error) ?? .EIO) }
+    }
+    /// The desktop connection: one socket, so frame memory can travel with the messages.
+    public static func socketPair() throws -> (FileHandle, FileHandle) {
+        var ends: [Int32] = [-1, -1]
+        guard socketpair(AF_UNIX, SOCK_STREAM, 0, &ends) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var on: Int32 = 1
+        for end in ends {
+            _ = fcntl(end, F_SETFD, FD_CLOEXEC)
+            setsockopt(end, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        }
+        return (FileHandle(fileDescriptor: ends[0], closeOnDealloc: true), FileHandle(fileDescriptor: ends[1], closeOnDealloc: true))
+    }
+    /// Reads messages and keeps the descriptors that arrive with them, in order. It reads through
+    /// its own copy of the handle's descriptor, so closing the handle does not end a read; shutting
+    /// a socket down does.
+    public final class Reader {
+        private static let pendingLimit = 4
+        private let socket: Int32
+        private var descriptors: [Int32] = []
+        public init(_ handle: FileHandle) { socket = dup(handle.fileDescriptor) }
+        deinit { descriptors.forEach { close($0) }; if socket >= 0 { close(socket) } }
+        public func read() throws -> Data? {
+            guard let header = try exact(4, eof: true) else { return nil }
+            let count = header.reduce(0) { ($0 << 8) | Int($1) }
+            guard count > 0, count <= maximum else { throw LocalMacError("Desktop message exceeds the size limit.") }
+            return try exact(count)
+        }
+        /// The oldest descriptor not yet taken.
+        public func takeDescriptor() -> Int32? { descriptors.isEmpty ? nil : descriptors.removeFirst() }
+        private func exact(_ count: Int, eof: Bool = false) throws -> Data? {
+            var data = Data(count: count), filled = 0
+            while filled < count {
+                var received: [Int32] = [-1, -1, -1, -1], found: Int32 = 0
+                let read = data.withUnsafeMutableBytes {
+                    NLMReceive(socket, $0.baseAddress! + filled, count - filled, &received, Int32(received.count), &found)
+                }
+                descriptors += received.prefix(Int(found))
+                if descriptors.count > Self.pendingLimit {
+                    throw LocalMacError("The desktop helper sent memory that no frame uses.")
+                }
+                if read < 0 { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                if read == 0 {
+                    if filled == 0 && eof { return nil }; throw LocalMacError("Desktop connection ended mid-message.")
+                }
+                filled += read
+            }
+            return data
+        }
     }
 }

@@ -161,15 +161,17 @@ private final class Once<T>: @unchecked Sendable {
     @Published var windowPreviews: [UUID: LocalMacWindowPreview] = [:]
     @Published private(set) var openingAllWindows = false
     lazy var windowPresenter = LocalMacWindowPreviewPresenter(runtime: self)
-    var latestFrame: Data?
     var onDisconnect: ((String) -> Void)?
     private var input: FileHandle?
     private var output: FileHandle?
     private let writer = DispatchQueue(label: "LocalMac.client.write")
-    private var pending: [UUID: CheckedContinuation<LocalMacReply, Error>] = [:]
+    private let frames = LocalMacFrameReader()
+    private var pending: [UUID: (Result<LocalMacReply, Error>) -> Void] = [:]
     private var timeouts: [UUID: Task<Void, Never>] = [:]
     private var inputQueue = LocalMacInputQueue()
-    private var inputPump: Task<Void, Never>?
+    /// Input goes out without waiting for each reply; the helper handles it in order.
+    private static let inputsInFlightLimit = 8
+    private var inputsInFlight = 0
     private var inputFailure: String?
     private var closed = true
     private var connectedOnce = false
@@ -218,11 +220,28 @@ private final class Once<T>: @unchecked Sendable {
         if !protectedDisplays.isEmpty { try LocalMacCapturePolicy.validateProtectedDisplays(Array(protectedDisplays)) }
         connectedOnce = true; mainDisplays = protectedDisplays
         self.input = input; self.output = output; closed = false
+        let frames = frames, writer = writer
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let reader = LocalMacWire.Reader(input)
             do {
-                while let data = try LocalMacWire.read(input) {
+                while let data = try reader.read() {
                     let reply = try LocalMacWire.decode(LocalMacReply.self, from: data)
-                    DispatchQueue.main.async { [weak self] in self?.receive(reply) }
+                    if let region = reply.region {
+                        guard let descriptor = reader.takeDescriptor() else {
+                            throw ComputerError("The desktop helper sent pictures without their memory.")
+                        }
+                        try frames.add(region, descriptor: descriptor)
+                    }
+                    // Copied here, off the main thread, so the slot goes back to the helper at once.
+                    var image: NSImage?
+                    if let frame = reply.sharedFrame, let picture = frames.image(frame) {
+                        image = NSImage(cgImage: picture, size: CGSize(width: picture.width, height: picture.height))
+                        var release = LocalMacRequest(.frameRelease); release.frame = frame
+                        if let request = try? JSONEncoder().encode(release) {
+                            writer.async { try? LocalMacWire.write(request, to: output) }
+                        }
+                    }
+                    DispatchQueue.main.async { [weak self] in self?.receive(reply, image: image) }
                 }
                 DispatchQueue.main.async { [weak self] in self?.disconnect("The background desktop connection closed. Retry Start to reconnect.") }
             } catch { DispatchQueue.main.async { [weak self] in self?.disconnect(error.localizedDescription) } }
@@ -250,8 +269,11 @@ private final class Once<T>: @unchecked Sendable {
         _ = try await call(stream)
     }
     private func pauseCapture() {
-        image = nil; latestFrame = nil
-        if !windowPreviews.isEmpty { windowPreviews.removeAll(); windowPresenter.dismissAll() }
+        image = nil
+        if !windowPreviews.isEmpty {
+            for id in windowPreviews.keys { frames.remove(stream: id) }
+            windowPreviews.removeAll(); windowPresenter.dismissAll()
+        }
         streamRequested = false
         // Already stopped and waiting for the displays: status updates while
         // locked need no further stop.
@@ -281,8 +303,10 @@ private final class Once<T>: @unchecked Sendable {
             }
         }
     }
-    private func receive(_ reply: LocalMacReply) {
+    private func receive(_ reply: LocalMacReply, image frame: NSImage?) {
         guard !closed else { return }
+        // A region can arrive for a preview closed while it was on the way.
+        if let stream = reply.region?.stream, windowPreviews[stream] == nil { frames.remove(stream: stream) }
         if let id = reply.previewID {
             // Only the ended root is removed; sibling previews and the desktop
             // keep running. Unknown IDs are late messages from closed streams.
@@ -297,19 +321,18 @@ private final class Once<T>: @unchecked Sendable {
             if verifyCaptureDisplay(), status.canControl, inputFailure == LocalMacStatus.inputPermissionError { clearInputFailure() }
             guard !closed else { return }
         }
-        if reply.frame, let data = reply.data, status?.displayID != nil, verifyCaptureDisplay() {
+        if reply.frame, let frame, status?.displayID != nil, verifyCaptureDisplay() {
             if let geometry = reply.windowFrame {
-                if windowPreviews[geometry.previewID] != nil, let image = NSImage(data: data) {
-                    windowPreviews[geometry.previewID]?.image = image
+                if windowPreviews[geometry.previewID] != nil {
+                    windowPreviews[geometry.previewID]?.image = frame
                     windowPreviews[geometry.previewID]?.geometry = geometry
                     windowPresenter.sync(geometry.previewID)
                 }
-            } else if let image = NSImage(data: data) { latestFrame = data; self.image = image }
+            } else { image = frame }
         }
-        if let id = reply.id, let continuation = pending.removeValue(forKey: id) {
+        if let id = reply.id, let finish = pending.removeValue(forKey: id) {
             timeouts.removeValue(forKey: id)?.cancel()
-            if let error = reply.error { continuation.resume(throwing: ComputerError(error)) }
-            else { continuation.resume(returning: reply) }
+            finish(reply.error.map { .failure(ComputerError($0)) } ?? .success(reply))
         }
     }
     /// Frames are shown only while the main desktop's displays are known and
@@ -319,7 +342,7 @@ private final class Once<T>: @unchecked Sendable {
         guard let id = status?.displayID else { return true }
         let current = displayIDs()
         if mainDisplays.contains(id) || current.contains(id) {
-            image = nil; latestFrame = nil
+            image = nil
             disconnect("Desktop capture stopped because its display could not be kept separate from the main desktop.")
             return false
         }
@@ -327,53 +350,60 @@ private final class Once<T>: @unchecked Sendable {
         return true
     }
     func call(_ request: LocalMacRequest) async throws -> LocalMacReply {
+        try await withCheckedThrowingContinuation { continuation in
+            do { try submit(request) { continuation.resume(with: $0) } }
+            catch { continuation.resume(throwing: error) }
+        }
+    }
+    /// Writes the request at once, in the order submitted; `finish` runs on the main actor.
+    private func submit(_ request: LocalMacRequest, finish: @escaping (Result<LocalMacReply, Error>) -> Void) throws {
         try request.validate()
         guard let output, !closed, pending.count < 64 else { throw ComputerError("The desktop connection is unavailable or busy.") }
         let data = try JSONEncoder().encode(request)
-        return try await withCheckedThrowingContinuation { continuation in
-            pending[request.id] = continuation
-            timeouts[request.id] = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(30))
-                guard !Task.isCancelled, let self else { return }
-                let message = request.operation == .stream
-                    ? "The desktop did not finish starting. Stop this computer and try Start again, or delete it."
-                    : "Desktop request timed out. Its result is uncertain; it was not repeated."
-                self.pending.removeValue(forKey: request.id)?.resume(throwing: ComputerError(message))
-                self.timeouts.removeValue(forKey: request.id)
-            }
-            writer.async { [weak self] in
-                do { try LocalMacWire.write(data, to: output) }
-                catch { DispatchQueue.main.async { [weak self] in self?.disconnect(error.localizedDescription) } }
-            }
+        pending[request.id] = finish
+        timeouts[request.id] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled, let self else { return }
+            let message = request.operation == .stream
+                ? "The desktop did not finish starting. Stop this computer and try Start again, or delete it."
+                : "Desktop request timed out. Its result is uncertain; it was not repeated."
+            self.pending.removeValue(forKey: request.id)?(.failure(ComputerError(message)))
+            self.timeouts.removeValue(forKey: request.id)
+        }
+        writer.async { [weak self] in
+            do { try LocalMacWire.write(data, to: output) }
+            catch { DispatchQueue.main.async { [weak self] in self?.disconnect(error.localizedDescription) } }
         }
     }
     func send(_ event: LocalMacInput) {
         guard !closed else { return }
         if !inputQueue.append(event) { recordInputFailure("Desktop input fell behind and was released. Try again.") }
-        guard inputPump == nil else { return }
-        inputPump = Task {
-            defer { inputPump = nil }
-            while !Task.isCancelled, let event = inputQueue.next() {
-                if let id = event.previewID, windowPreviews[id] == nil, event.kind != .reset { continue }
-                var request = LocalMacRequest(.input); request.input = event
-                do {
-                    _ = try await call(request)
-                    if let id = event.previewID { windowPreviews[id]?.error = nil }
-                    else { clearInputFailure() }
-                }
-                catch {
-                    if !closed {
-                        if let id = event.previewID { windowPreviews[id]?.error = error.localizedDescription }
-                        else { recordInputFailure(error.localizedDescription) }
-                    }
-                    if let id = event.previewID {
-                        inputQueue.remove(previewID: id)
-                    } else {
-                        inputQueue.removeAll(); break
-                    }
-                }
-            }
+        sendQueuedInput()
+    }
+    private func sendQueuedInput() {
+        while !closed, inputsInFlight < Self.inputsInFlightLimit, let event = inputQueue.next() {
+            if let id = event.previewID, windowPreviews[id] == nil, event.kind != .reset { continue }
+            var request = LocalMacRequest(.input); request.input = event
+            inputsInFlight += 1
+            do { try submit(request) { [weak self] in self?.inputFinished(event, $0) } }
+            catch { inputFinished(event, .failure(error)) }
         }
+    }
+    private func inputFinished(_ event: LocalMacInput, _ result: Result<LocalMacReply, Error>) {
+        inputsInFlight -= 1
+        switch result {
+        case .success:
+            if let id = event.previewID { windowPreviews[id]?.error = nil }
+            else { clearInputFailure() }
+        case .failure(let error):
+            if !closed {
+                if let id = event.previewID { windowPreviews[id]?.error = error.localizedDescription }
+                else { recordInputFailure(error.localizedDescription) }
+            }
+            // Input already sent cannot be recalled; drop what has not gone out yet.
+            if let id = event.previewID { inputQueue.remove(previewID: id) } else { inputQueue.removeAll() }
+        }
+        sendQueuedInput()
     }
     private func recordInputFailure(_ message: String) { inputFailure = message; error = message }
     private func clearInputFailure() {
@@ -431,6 +461,7 @@ private final class Once<T>: @unchecked Sendable {
     }
     func closeWindowPreview(_ id: UUID) {
         guard windowPreviews.removeValue(forKey: id) != nil else { return }
+        frames.remove(stream: id)
         windowPresenter.dismiss(id)
         var reset = LocalMacInput(.reset); reset.previewID = id
         send(reset)
@@ -445,11 +476,14 @@ private final class Once<T>: @unchecked Sendable {
     func expectDisconnect(_ expected: Bool) { disconnectExpected = expected }
     private func disconnect(_ message: String) {
         let notify = !closed && !disconnectExpected; closed = true
-        windowPreviews.removeAll(); windowPresenter.dismissAll()
-        inputPump?.cancel(); inputPump = nil; inputQueue.removeAll()
+        windowPreviews.removeAll(); windowPresenter.dismissAll(); frames.removeAll()
+        inputQueue.removeAll()
         captureStop?.cancel(); captureStop = nil; captureResume?.cancel(); captureResume = nil
+        // Wakes the reader, which reads through a descriptor of its own.
+        if let output { Darwin.shutdown(output.fileDescriptor, SHUT_RDWR) }
         try? output?.close(); output = nil; try? input?.close(); input = nil
-        for continuation in pending.values { continuation.resume(throwing: ComputerError(message)) }; pending.removeAll()
+        let failed = pending.values; pending.removeAll()
+        for finish in failed { finish(.failure(ComputerError(message))) }
         for task in timeouts.values { task.cancel() }; timeouts.removeAll()
         if notify { error = message; onDisconnect?(message) }
     }

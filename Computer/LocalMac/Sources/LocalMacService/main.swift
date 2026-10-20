@@ -285,7 +285,7 @@ private final class Service: NSObject, NSXPCListenerDelegate {
         sessionMonitor = monitor
         monitor.resume()
     }
-    /// A desktop helper exits when the app's pipe closes, but that pipe bypasses
+    /// A desktop helper exits when the app's connection closes, but that connection bypasses
     /// this service, so a helper can outlive a previous service instance.
     /// Count running helpers by account, not only this instance's children.
     private func desktopHelperUIDs() -> Set<UInt32> {
@@ -507,22 +507,23 @@ private final class Service: NSObject, NSXPCListenerDelegate {
         try restoreConsole(original)
         // The executable path is derived from this signed app, never from XPC.
         try stopDesktop(account.computerID)
-        let input = Pipe(), output = Pipe()
+        let (desktopEnd, appEnd) = try LocalMacWire.socketPair()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["asuser", String(account.uid), "/usr/bin/sudo", "-n", "-u", account.name, "/usr/bin/env",
             "HOME=" + account.home, "USER=" + account.name, "LOGNAME=" + account.name,
             desktop.path, try JSONEncoder().encode(session).base64EncodedString()]
         process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        process.standardInput = input; process.standardOutput = output
+        process.standardInput = desktopEnd; process.standardOutput = desktopEnd
         process.standardError = FileHandle.nullDevice
         try process.run()
-        try input.fileHandleForReading.close()
-        try output.fileHandleForWriting.close()
+        try desktopEnd.close()
         children[account.computerID] = process
         // Only descriptors are handed to the app. The root helper never parses
         // desktop operations, terminal commands, frames, or file contents.
-        return (session, output.fileHandleForReading, input.fileHandleForWriting)
+        let appWrites = dup(appEnd.fileDescriptor)
+        guard appWrites >= 0 else { throw LocalMacError("Cannot connect to the desktop helper.") }
+        return (session, appEnd, FileHandle(fileDescriptor: appWrites, closeOnDealloc: true))
     }
 }
 
@@ -590,7 +591,7 @@ private final class Client: NSObject, LocalMacLifecycle {
                 if let account = try self.service.accounts.existing(id, owner: self.owner) {
                     // A failed desktop transport can leave a background login
                     // alive. Explicit deletion owns the stop as well; it never
-                    // depends on a reply from the desktop's capture/input pipe.
+                    // depends on a reply from the desktop's capture/input connection.
                     try self.service.stop(account)
                     try self.service.accounts.remove(account)
                 }

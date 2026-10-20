@@ -4,7 +4,7 @@ import LocalMacCore
 import LocalMacPrivate
 import Darwin
 
-/// The desktop protocol runs as the managed standard user over inherited pipes.
+/// The desktop protocol runs as the managed standard user over an inherited socket.
 /// There is no listening socket, privileged command execution, or host clipboard.
 @MainActor final class Desktop {
     let session: LocalMacSession
@@ -13,6 +13,9 @@ import Darwin
     private var windowCaptures: [UUID: AccountWindowCapture] = [:]
     private var inputOwner: UUID?
     private var inputGeneration = 0
+    /// The app sends input without waiting for replies; it is handled strictly in order.
+    private var queuedInput: [LocalMacRequest] = []
+    private var inputRunning = false
     private var focusedWindow: LocalMacWindow?
     var terminals: [UUID: Terminal] = [:]
     let files: LocalMacFileWorker
@@ -56,6 +59,16 @@ import Darwin
             }
         }
         sendStatus()
+    }
+    func receive(_ request: LocalMacRequest) {
+        guard request.operation == .input else { Task { await handle(request) }; return }
+        queuedInput.append(request)
+        guard !inputRunning else { return }
+        inputRunning = true
+        Task {
+            while !queuedInput.isEmpty { await handle(queuedInput.removeFirst()) }
+            inputRunning = false
+        }
     }
     func handle(_ request: LocalMacRequest) async {
         guard !shuttingDown else { return }
@@ -121,6 +134,7 @@ import Darwin
                     await resizeWindowBudgets()
                 }
             case .input: try await post(request.input!)
+            case .frameRelease: output.releaseFrame(request.frame!); return
             case .terminalOpen:
                 // Unlimited here so the person's terminal always opens; the app limits agents' shells.
                 let terminal = try Terminal(home: session.account.home); terminals[terminal.id] = terminal
@@ -161,6 +175,11 @@ import Darwin
             }
             do {
                 let geometry = try preview.geometry(for: input)
+                // Pointer moves inside the window that already holds input skip the Accessibility
+                // focus query, which would otherwise run for every one of them.
+                if input.kind == .move, inputOwner == id {
+                    try controls?.post(input, bounds: geometry.bounds, display: geometry.display); return
+                }
                 let focused = AccountWindowFocus.read(session: session, displayBounds: capture.bounds)
                 if focused?.window.hasSameIdentity(as: target) != true {
                     // Hover/release events never steal focus from a different root.
@@ -241,7 +260,7 @@ DispatchQueue.global().async {
     do {
         while let data = try LocalMacWire.read(.standardInput) {
             let request = try LocalMacWire.decode(LocalMacRequest.self, from: data)
-            DispatchQueue.main.async { Task { await desktop.handle(request) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { desktop.receive(request) } }
         }
     } catch {
         output.send(LocalMacReply(error: error.localizedDescription)) { desktop.shutdown() }
