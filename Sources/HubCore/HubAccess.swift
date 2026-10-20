@@ -29,18 +29,21 @@ public struct HubPlan: Identifiable, Codable, Hashable, Sendable {
     public var computerLimit: Int?
     /// How many browsers each user on it may keep; nil for any number.
     public var browserLimit: Int?
+    /// How many tokens each user's bots on it may use in a period; nil for any number.
+    public var tokenLimit: HubTokenLimit?
 
     public init(id: UUID = UUID(), name: String, harnesses: Set<HubHarness> = [], models: [HubHarness: Set<String>] = [:],
-                computerLimit: Int? = nil, browserLimit: Int? = nil) {
+                computerLimit: Int? = nil, browserLimit: Int? = nil, tokenLimit: HubTokenLimit? = nil) {
         self.id = id
         self.name = name
         self.harnesses = harnesses
         self.models = models
         self.computerLimit = computerLimit
         self.browserLimit = browserLimit
+        self.tokenLimit = tokenLimit
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, harnesses, models, computerLimit, browserLimit }
+    private enum CodingKeys: String, CodingKey { case id, name, harnesses, models, computerLimit, browserLimit, tokenLimit }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,9 +53,48 @@ public struct HubPlan: Identifiable, Codable, Hashable, Sendable {
         models = try c.decodeIfPresent([HubHarness: Set<String>].self, forKey: .models) ?? [:]
         computerLimit = try c.decodeIfPresent(Int.self, forKey: .computerLimit)
         browserLimit = try c.decodeIfPresent(Int.self, forKey: .browserLimit)
+        // A period a later Hub knows and this one does not must not cost the file its users.
+        tokenLimit = try? c.decodeIfPresent(HubTokenLimit.self, forKey: .tokenLimit)
     }
 
     public var isDefault: Bool { id == Self.defaultID }
+}
+
+/// How many tokens each user's bots may use in any period of the same length up to now: a rolling
+/// window, so tokens count again for nobody until they are older than the period.
+public struct HubTokenLimit: Codable, Hashable, Sendable {
+    public enum Unit: String, Codable, CaseIterable, Sendable {
+        case hours, days, weeks, months
+
+        /// A month is 30 days, so every period is as long as the last.
+        var seconds: TimeInterval {
+            switch self {
+            case .hours: 3600
+            case .days: 86_400
+            case .weeks: 7 * 86_400
+            case .months: 30 * 86_400
+            }
+        }
+
+        /// "hour" or "hours".
+        public func name(count: Int) -> String { count == 1 ? String(rawValue.dropLast()) : rawValue }
+    }
+
+    public var tokens: Int
+    /// How many units the period lasts.
+    public var length: Int
+    public var unit: Unit
+
+    public init(tokens: Int, length: Int = 1, unit: Unit = .weeks) {
+        self.tokens = max(1, tokens)
+        self.length = max(1, length)
+        self.unit = unit
+    }
+
+    public var period: TimeInterval { Double(length) * unit.seconds }
+
+    /// What follows "per": "7 days", "month".
+    public var periodName: String { length == 1 ? unit.name(count: 1) : "\(length) \(unit.name(count: length))" }
 }
 
 /// A person the Hub lends harnesses to. Each user is on exactly one plan.
@@ -132,6 +174,8 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     @ObservationIgnored private let url: URL
     /// Runs when a bot's, computer's or browser's owner, or an owner's name, changed.
     @ObservationIgnored public var onOwnersChange: (() -> Void)?
+    /// Runs when the token limit someone is on may have changed: a plan's limit, or a user's plan.
+    @ObservationIgnored public var onTokenLimitsChange: (() -> Void)?
     /// Runs synchronously so running bots stop before suspension returns.
     @ObservationIgnored public var onSuspensionChange: (() -> Void)?
     /// Where changes to users and devices are kept, for the Hub's Activity window.
@@ -210,6 +254,12 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
         return plans.first { $0.id == current.plan }?.browserLimit
     }
 
+    /// How many tokens the user's plan lets their bots use in a period; nil when any number.
+    public func tokenLimit(for user: HubUser) -> HubTokenLimit? {
+        guard !isPersonal, let current = current(user) else { return nil }
+        return plans.first { $0.id == current.plan }?.tokenLimit
+    }
+
     /// Why a user at their plan's limit cannot make another computer or browser.
     static func limitReached(_ limit: Int, _ one: String, _ many: String) -> LinkError {
         switch limit {
@@ -263,6 +313,7 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
         guard let plan = plans.first(where: { $0.id == plan.id }), let old = current(user), old.plan != plan.id else { return }
         update(user) { $0.plan = plan.id }
         note("Moved \(old.name) to the \(plan.name) plan", about: [user.id])
+        onTokenLimitsChange?()
     }
 
     public func setCanPairDevices(_ canPairDevices: Bool, for user: HubUser) {
@@ -457,6 +508,14 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
         update(plan) { $0.browserLimit = limit.map { max(0, $0) } }
     }
 
+    /// Limits the tokens each user's bots on the plan may use in a period; nil lets them use any number.
+    /// It applies straight away, to tokens already used in the period too.
+    public func setTokenLimit(_ limit: HubTokenLimit?, in plan: HubPlan) {
+        guard let current = plans.first(where: { $0.id == plan.id }), current.tokenLimit != limit else { return }
+        update(plan) { $0.tokenLimit = limit }
+        onTokenLimitsChange?()
+    }
+
     /// Users on a deleted plan go back to Default.
     public func delete(_ plan: HubPlan) {
         guard !plan.isDefault, let plan = plans.first(where: { $0.id == plan.id }) else { return }
@@ -467,6 +526,7 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
             note("Moved \(users[index].name) to the \(defaultName) plan, as the \(plan.name) plan was deleted", about: [users[index].id])
         }
         save()
+        onTokenLimitsChange?()
     }
 
     /// Called when a harness profile is deleted.

@@ -4,6 +4,7 @@
 
 ### Added
 
+- A plan can limit how many tokens each of its users' bots use over a number of hours, days, weeks or months, counted over a rolling period. Once a user reaches it, a turn under way finishes and then their bots stop until the period allows more; messages to them still go through and are answered then. Settings → Users shows how much each user used.
 - Admins can also suspend and restore regular users from Noodle Mobile.
 - Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
 

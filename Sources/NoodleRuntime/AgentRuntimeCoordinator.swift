@@ -161,8 +161,35 @@ public final class AgentRuntimeCoordinator {
             }
         }
     }
-    /// Remote, archived and suspended bots never start here.
-    private func neverStarts(_ id: UUID) -> Bool { remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) || suspendedAgentIDs.contains(id) }
+    /// Remote, archived, suspended and held bots never start here.
+    private func neverStarts(_ id: UUID) -> Bool {
+        remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) || suspendedAgentIDs.contains(id) || heldAgents[id] != nil
+    }
+    /// Bots that may take no new turn for now, each with why, shown as its status: on a Hub, the bots of
+    /// someone who used up their plan's tokens. One at work finishes its turn, then stops; whoever lets
+    /// it go starts it again.
+    public var heldAgents: [UUID: String] = [:] {
+        didSet {
+            for (id, reason) in heldAgents where oldValue[id] != reason { hold(id) }
+            for id in oldValue.keys where heldAgents[id] == nil && processes[id] == nil { snapshots[id] = nil }
+        }
+    }
+
+    /// Stops a held bot unless it is at work, keeping what it was doing for when it starts again,
+    /// and shows why it waits.
+    private func hold(_ id: UUID) {
+        guard let reason = heldAgents[id], !remoteAgentIDs.contains(id), !archivedAgentIDs.contains(id) else { return }
+        if let process = processes[id] {
+            guard process.snapshot.phase != .working else { return }
+            runtimeIDs[id] = nil
+            cancelSupervision(for: id)
+            processes[id] = nil
+            if process.hasInterruptedWork { recoveryPending.insert(id) }
+            // At once, before the process could take the next message waiting for it.
+            process.stop { _ in }
+        }
+        snapshots[id] = AgentRuntimeSnapshot(agentID: id, phase: .offline, detail: reason)
+    }
     /// Receives what each model call cost. Nothing is kept here.
     @ObservationIgnored public var onUsage: (@MainActor (UsageSample) -> Void)?
     /// How much of each signed-in account's plan limits is used, as the harnesses last reported.
@@ -655,6 +682,7 @@ public final class AgentRuntimeCoordinator {
         for agent in agents {
             if blockedRestarts.contains(agent.id) { continue }
             if blockedRecoveries.contains(agent.id), connectionRecoveryAttempts[agent.id] != nil { continue }
+            if heldAgents[agent.id] != nil, processes[agent.id] == nil { hold(agent.id); continue }
             if let process = processes[agent.id] {
                 snapshots[agent.id] = process.snapshot
             } else if agent.harnessIdentifier == nil {
@@ -780,6 +808,7 @@ public final class AgentRuntimeCoordinator {
     }
 
     public func start(agent: AgentRecord, repository: WorkspaceRepository) {
+        if heldAgents[agent.id] != nil { hold(agent.id); return }
         guard !neverStarts(agent.id), processes[agent.id] == nil, !changingAccess.contains(agent.id), !blockedRestarts.contains(agent.id),
               !blockedRecoveries.contains(agent.id) else { return }
         if HarnessProvider(rawValue: agent.harnessIdentifier ?? "")?.supportsRestrictedAccess == false,
@@ -1207,6 +1236,7 @@ public final class AgentRuntimeCoordinator {
         detail: String,
         immediately: Bool = false
     ) {
+        if heldAgents[agent.id] != nil { hold(agent.id); return }
         guard !isStoppingAll, restartTasks[agent.id] == nil, !neverStarts(agent.id) else { return }
         let attempt = min((restartAttempts[agent.id] ?? 0) + 1, 7)
         restartAttempts[agent.id] = attempt
@@ -1268,6 +1298,8 @@ public final class AgentRuntimeCoordinator {
                 self.onPaused?(agentID)
             }
             if snapshot.phase == .ready { self.markStable(agentID: agentID) }
+            // A held bot's turn is over: it stops before it takes another.
+            if snapshot.phase != .working, self.heldAgents[agentID] != nil { self.hold(agentID) }
         }
     }
 

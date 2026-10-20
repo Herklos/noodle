@@ -32,6 +32,8 @@ import NoodleVoicePeer
     public let applets: AppletController
     /// The image models and which bots may use them, kept where the bots run: the Hub, or Noodle for This Mac.
     public var imageGeneration: ImageGenerationController?
+    /// Who used up their plan's tokens; their bots take no new turn. Nil where nobody is on a plan: on the owner's own Mac.
+    public var tokenLimits: HubTokenLimits?
     /// The default image model's name, which devices show beside the tool. Nil while none is downloaded.
     public var imageModel: String? { imageGeneration?.currentModel?.name }
     /// Serves bots the tools their owners assigned them from the Hub's own connections.
@@ -140,6 +142,7 @@ import NoodleVoicePeer
                 guard let self, !Task.isCancelled else { return }
                 round += 1
                 if round.isMultiple(of: 60) { await self.checkIdleComputers() }
+                self.tokenLimits?.checkExpired()
                 if let agents = try? self.repository.loadAgents() {
                     self.runtime.reconcile(agents: agents, repository: self.repository)
                 }
@@ -204,6 +207,32 @@ import NoodleVoicePeer
                   user.name != guest.name else { continue }
             conversation.guest?.name = user.name
             try? repository.updateConversation(conversation)
+        }
+    }
+
+    /// Holds the bots here of everyone out of tokens, and starts again those whose owners may use them again.
+    public func applyTokenLimits() {
+        guard let tokenLimits, let agents = try? repository.loadAgents() else { return }
+        var held: [UUID: String] = [:]
+        for agent in agents where access.host(ofBot: agent.id) == nil {
+            guard let until = access.owner(ofBot: agent.id).flatMap({ tokenLimits.holds[$0] }) else { continue }
+            held[agent.id] = HubTokenLimits.status(until: until)
+        }
+        let released = Set(runtime.heldAgents.keys).subtracting(held.keys)
+        runtime.heldAgents = held
+        guard running || watching else { return }
+        for agent in agents where released.contains(agent.id) { runtime.start(agent: agent, repository: repository) }
+    }
+
+    /// Why a call or Organize cannot reach these bots now, as their owner used up their plan's tokens. Messages
+    /// still go through: they wait in the bots' inboxes until the period allows more.
+    private func requireTokens(for agents: [AgentRecord], from user: HubUser) throws {
+        guard let tokenLimits else { return }
+        for agent in agents where access.host(ofBot: agent.id) == nil {
+            guard let owner = access.owner(ofBot: agent.id) else { continue }
+            let refusal = owner == user.id ? tokenLimits.refusal(for: user)
+                : tokenLimits.refusal(forGuestOf: agent.displayName, ownedBy: owner)
+            if let refusal { throw LinkError(refusal) }
         }
     }
 
@@ -348,6 +377,8 @@ import NoodleVoicePeer
         if running {
             try? messenger.start(agents: try repository.loadAgents())
             runtime.refresh(agents: try repository.loadAgents())
+            // A new bot of someone out of tokens waits with the rest of theirs.
+            applyTokenLimits()
             runtime.start(agent: created.agent, repository: repository)
         }
         if toolBroker != nil { try? startTools() }
@@ -515,6 +546,7 @@ import NoodleVoicePeer
 
     public func organize(_ id: UUID, for user: HubUser) throws {
         let agent = try runHere(id, by: user)
+        try requireTokens(for: [agent], from: user)
         guard runtime.canOrganize(agent.id) else { throw LinkError("\(agent.displayName) is busy. Try again when it is idle.") }
         runtime.organize(agent.id)
     }
@@ -985,6 +1017,7 @@ import NoodleVoicePeer
         } else {
             try requireLends(agent, to: user)
         }
+        try requireTokens(for: [agent], from: user)
         let recentLines = try repository.loadMessages(conversationID: conversation.id).suffix(12).compactMap { message -> VoiceCallLine? in
             switch message.author {
             case .user: .init(.person, message.body)

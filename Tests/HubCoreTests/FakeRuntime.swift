@@ -15,6 +15,7 @@ final class FakeProcess: AgentRuntimeProcess {
     var canReceiveHeartbeat = false
     var stops = 0
     var organizes = 0
+    var notifications = 0
     var callRequests: [VoiceCallRequest] = []
     var callEvents: (@MainActor (VoiceCallEvent) -> Void)?
     var callTexts: [String] = []
@@ -31,7 +32,7 @@ final class FakeProcess: AgentRuntimeProcess {
     }
     func start() { isAlive = true; set(.ready) }
     func stop(completion: @escaping (Bool) -> Void) { stops += 1; isAlive = false; set(.offline); completion(true) }
-    func notify(immediately: Bool) -> UUID { UUID() }
+    func notify(immediately: Bool) -> UUID { notifications += 1; return UUID() }
     func promoteNotification(_ id: UUID) {}
     func heartbeat() {}
     func wake() {}
