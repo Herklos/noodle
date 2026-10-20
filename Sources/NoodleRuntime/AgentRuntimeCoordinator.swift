@@ -152,8 +152,17 @@ public final class AgentRuntimeCoordinator {
             }
         }
     }
-    /// Remote and archived bots never start here.
-    private func neverStarts(_ id: UUID) -> Bool { remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) }
+    /// Hub owners may suspend a user's bots without archiving or deleting them.
+    public var suspendedAgentIDs: Set<UUID> = [] {
+        didSet {
+            for id in suspendedAgentIDs.subtracting(oldValue) {
+                stop(agentID: id, revokeAccess: false)
+                cancelSupervision(for: id)
+            }
+        }
+    }
+    /// Remote, archived and suspended bots never start here.
+    private func neverStarts(_ id: UUID) -> Bool { remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) || suspendedAgentIDs.contains(id) }
     /// Receives what each model call cost. Nothing is kept here.
     @ObservationIgnored public var onUsage: (@MainActor (UsageSample) -> Void)?
     /// How much of each signed-in account's plan limits is used, as the harnesses last reported.

@@ -85,8 +85,11 @@ import NoodleRuntime
         bots.imageGeneration = imageGeneration
         let imageHelper = ImageGenerationHelper(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NoodleAppleAgent"))
         try? tools.register(ImageToolProvider(library: { [root] in ImageLibrary.load(root: root) }, generate: { try await imageHelper.png($0) }))
+        access.onSuspensionChange = { [weak bots] in bots?.synchronizeSuspensions() }
+        bots.synchronizeSuspensions()
         access.onOwnersChange = { [weak bots, weak computers, weak browsers] in
             bots?.synchronizeOwners()
+            bots?.synchronizeSuspensions()
             Task { await computers?.synchronizeOwners() }
             Task { await browsers?.synchronizeOwners() }
         }

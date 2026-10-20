@@ -99,12 +99,13 @@ struct HubUsersSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.name).lineLimit(1)
                 if let plan = access.plans.first(where: { $0.id == user.plan }) {
-                    Text(user.isAdmin ? "\(plan.name) · Admin" : plan.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(user.isSuspended ? "\(plan.name) · Suspended" : (user.isAdmin ? "\(plan.name) · Admin" : plan.name)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 8)
             Button("Invite") { inviting = Invitation(user: user, invitation: host.hub.link.invite(user)) }
                 .buttonStyle(.link)
+                .disabled(user.isSuspended)
             Menu {
                 Picker("Plan", selection: Binding(
                     get: { user.plan },
@@ -114,6 +115,10 @@ struct HubUsersSettingsView: View {
                 }
                 .pickerStyle(.menu)
                 Divider()
+                Toggle("Suspended", isOn: Binding(
+                    get: { user.isSuspended },
+                    set: { access.setSuspended($0, for: user) }
+                ))
                 Toggle("Can Pair Devices", isOn: Binding(
                     get: { user.canPairDevices },
                     set: { access.setCanPairDevices($0, for: user) }

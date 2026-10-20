@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
+
 ### Fixed
 
 - A bot without a model runs on its harness's default model, even when the plan lists the models it lends, instead of turning messages away.

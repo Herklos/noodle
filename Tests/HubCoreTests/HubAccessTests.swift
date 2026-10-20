@@ -12,6 +12,27 @@ import XCTest
         return (HubAccess(url: url), url)
     }
 
+    func testSuspendedUserCannotBorrowHarnessesAfterRelaunch() throws {
+        let (access, url) = access()
+        let harness = HubHarness(provider: .codex, profile: nil)
+        access.set(harness, included: true, in: access.plans[0])
+        let user = try access.addUser(named: "Ada")
+        var stored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var users = try XCTUnwrap(stored["users"] as? [[String: Any]])
+        users[0]["isSuspended"] = true
+        stored["users"] = users
+        try JSONSerialization.data(withJSONObject: stored).write(to: url)
+        let reopened = HubAccess(url: url)
+        XCTAssertFalse(reopened.lends(harness, to: user))
+        XCTAssertTrue(reopened.harnesses(for: reopened.users[0]).isEmpty)
+        XCTAssertEqual(reopened.users[0].plan, user.plan)
+        reopened.setSuspended(false, for: user)
+        XCTAssertTrue(reopened.lends(harness, to: user))
+        XCTAssertFalse(HubAccess(url: url).users[0].isSuspended)
+        reopened.setSuspended(true, for: user)
+        XCTAssertTrue(HubAccess(url: url).users[0].isSuspended)
+    }
+
     func testHubStartsWithAnEmptyDefaultPlanThatNewUsersGet() throws {
         let (access, _) = access()
         XCTAssertEqual(access.plans.map(\.name), ["Default"])
@@ -174,6 +195,7 @@ import XCTest
         let json = #"{"users":[{"id":"\#(UUID())","name":"Ada","plan":"\#(HubPlan.defaultID)"}],"plans":[]}"#
         try Data(json.utf8).write(to: url)
         XCTAssertEqual(HubAccess(url: url).users.first?.canPairDevices, true)
+        XCTAssertEqual(HubAccess(url: url).users.first?.isSuspended, false)
     }
 }
 

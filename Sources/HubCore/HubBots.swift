@@ -120,6 +120,7 @@ import NoodleVoicePeer
         guard !running else { return }
         try repository.prepare()
         let agents = try repository.loadAgents()
+        synchronizeSuspensions()
         try repository.synchronizeAgentWorkspaces(agents)
         try messenger.start(agents: agents)
         runtime.archivedAgentIDs = Set(agents.filter { $0.archivedAt != nil }.map(\.id))
@@ -175,6 +176,18 @@ import NoodleVoicePeer
         loop?.cancel()
         loop = nil
         watching = false
+    }
+
+    /// Stops subscription use, including calls, while preserving bots and conversations.
+    public func synchronizeSuspensions() {
+        guard !access.isPersonal else { return }
+        let users = Set(access.users.filter(\.isSuspended).map(\.id))
+        let agents = (try? repository.loadAgents()) ?? []
+        let suspended = Set(agents.filter { access.owner(ofBot: $0.id).map(users.contains) ?? false }.map(\.id))
+        for call in Array(calls.values) where suspended.contains(call.agentID) {
+            finish(call, failure: "This user is suspended.", hangingUp: true)
+        }
+        runtime.suspendedAgentIDs = suspended
     }
 
     /// Names each bot's owner in its agent.json, for Noodle Applet to list its noodlets under them.
