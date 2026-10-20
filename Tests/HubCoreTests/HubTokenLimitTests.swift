@@ -50,7 +50,7 @@ import XCTest
         _ = try f.hub.bots.send(body, id: UUID(), in: f.conversation, for: f.ada)
     }
 
-    func testABotFinishesItsTurnThenWaitsUntilItsOwnersTokensLeaveThePeriod() throws {
+    func testABotFinishesItsTurnThenWaitsUntilItsOwnersTokensLeaveThePeriod() async throws {
         let f = try fixture()
         f.hub.access.setTokenLimit(HubTokenLimit(tokens: 1_000, length: 1, unit: .days), in: f.plan)
         f.runtime.start(agent: f.kai, repository: f.hub.repository)
@@ -69,25 +69,25 @@ import XCTest
         // The turn under way goes on.
         XCTAssertEqual(turn.stops, 0)
         XCTAssertEqual(f.runtime.snapshot(for: f.kai.id).phase, .working)
-        XCTAssertThrowsError(try send(f, "Hello")) { error in
-            XCTAssertEqual(error.localizedDescription,
-                           "You have used the 1,000 tokens your plan allows per day. Your bots can continue in 23 hours.")
-        }
-        XCTAssertEqual(try f.hub.repository.loadMessages(conversationID: f.conversation).filter { $0.author == .user }.count, 0)
 
-        // Once it ends, the bot stops before taking another, and says until when it waits.
+        // Once it ends, the bot stops before taking another, shown as stopped rather than failed.
         turn.set(.ready)
         XCTAssertEqual(turn.stops, 1)
         let held = f.runtime.snapshot(for: f.kai.id)
         XCTAssertEqual(held.phase, .offline)
+        XCTAssertNil(held.failure)
+        XCTAssertEqual(f.hub.bots.phase(of: f.kai.id), .offline)
         XCTAssertTrue(held.detail.hasPrefix("Token limit reached."), held.detail)
-        f.runtime.notify([f.kai], repository: f.hub.repository)
+
+        // A message still goes through and waits for the bot; nothing starts it meanwhile.
+        try send(f, "Hello")
+        XCTAssertEqual(try f.hub.repository.loadMessages(conversationID: f.conversation).filter { $0.author == .user }.map(\.body), ["Hello"])
         f.runtime.reconcile(agents: [f.kai], repository: f.hub.repository, immediately: true)
         f.runtime.refresh(agents: [f.kai], repository: f.hub.repository)
         XCTAssertEqual(f.processes().count, 1, "No new turn starts while it waits")
         XCTAssertEqual(f.runtime.snapshot(for: f.kai.id).detail, held.detail)
 
-        // A day after the first tokens, the rest are under the limit, and the bot starts again.
+        // A day after the first tokens, the rest are under the limit; the bot starts again and reads the message.
         now = start.addingTimeInterval(86_400 - 1)
         f.hub.tokenLimits.checkExpired()
         XCTAssertNotNil(f.hub.tokenLimits.holds[f.ada.id])
@@ -95,9 +95,11 @@ import XCTest
         f.hub.tokenLimits.checkExpired()
         XCTAssertNil(f.hub.tokenLimits.holds[f.ada.id])
         XCTAssertEqual(f.processes().count, 2)
-        XCTAssertTrue(try XCTUnwrap(f.processes().last).isAlive)
+        let resumed = try XCTUnwrap(f.processes().last)
+        XCTAssertTrue(resumed.isAlive)
+        await waitUntil { resumed.notifications > 0 }
+        XCTAssertEqual(resumed.notifications, 1, "The message sent while it waited reaches it")
         XCTAssertEqual(f.hub.tokenLimits.used(by: f.ada)?.tokens, 100)
-        XCTAssertNoThrow(try send(f, "Hello again"))
     }
 
     /// Changing a plan's limit holds or lets go its users at once, counting tokens already used.
@@ -112,12 +114,12 @@ import XCTest
         XCTAssertEqual(f.hub.tokenLimits.holds[f.ada.id], start.addingTimeInterval(2 * 3600))
         XCTAssertEqual(f.runtime.snapshot(for: f.kai.id).phase, .offline, "An idle bot stops at once")
         XCTAssertEqual(f.processes().first?.stops, 1)
-        XCTAssertThrowsError(try send(f, "Again"))
+        XCTAssertNoThrow(try send(f, "Again"))
+        XCTAssertEqual(f.processes().count, 1)
 
         f.hub.access.setTokenLimit(HubTokenLimit(tokens: 600, length: 2, unit: .hours), in: f.plan)
         XCTAssertNil(f.hub.tokenLimits.holds[f.ada.id])
         XCTAssertEqual(f.processes().count, 2)
-        XCTAssertNoThrow(try send(f, "Again"))
 
         // So does moving someone to a plan with a lower limit.
         let small = try f.hub.access.addPlan(named: "Small")
@@ -127,17 +129,18 @@ import XCTest
         XCTAssertEqual(f.hub.tokenLimits.holds[f.ada.id], start.addingTimeInterval(7 * 86_400))
     }
 
-    /// Someone a bot is shared with talks with it on its owner's plan, so its owner's limit holds it for them too.
-    func testSomeoneABotIsSharedWithIsToldItsOwnersTokensAreUsedUp() throws {
+    /// Someone a bot is shared with talks with it on its owner's plan: their messages wait while its owner is out of tokens.
+    func testSomeoneABotIsSharedWithCanStillWriteWhileItsOwnerIsOutOfTokens() throws {
         let f = try fixture()
         let grace = try f.hub.access.addUser(named: "Grace")
         let shared = try f.hub.bots.share(f.kai.id, with: [grace.id], for: f.ada)
         let theirs = try XCTUnwrap(f.hub.bots.bots(for: grace).first { $0.id == shared.id })
         f.hub.access.setTokenLimit(HubTokenLimit(tokens: 10, length: 3, unit: .days), in: f.plan)
         use(f, input: 10, at: 0)
-        XCTAssertThrowsError(try f.hub.bots.send("Hi", id: UUID(), in: theirs.conversationID, for: grace)) { error in
-            XCTAssertEqual(error.localizedDescription, "Kai has used the tokens its owner’s plan allows. It can continue in 3 days.")
-        }
+        XCTAssertNotNil(f.hub.tokenLimits.holds[f.ada.id])
+        _ = try f.hub.bots.send("Hi", id: UUID(), in: theirs.conversationID, for: grace)
+        XCTAssertEqual(try f.hub.repository.loadMessages(conversationID: theirs.conversationID).filter { $0.author == .user }.count, 1)
+        XCTAssertTrue(f.processes().isEmpty, "It does not start for them either")
         // Grace's own plan has no limit; what Ada's bot used is not hers.
         XCTAssertNil(f.hub.tokenLimits.holds[grace.id])
     }
