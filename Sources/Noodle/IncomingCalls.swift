@@ -1,0 +1,167 @@
+import AppKit
+import NoodleCore
+import SwiftUI
+
+/// Calls bots on this Mac place with `messenger --call`. They ring in a panel until the person
+/// answers or declines, or until they expire; only answering connects to the bot's voice.
+extension NoodleStore {
+    /// Rings the call a bot placed, or leaves it as missed when it can no longer ring.
+    func ringCall(of agentID: UUID, now: Date = Date()) {
+        guard let request = repository.pendingCall(agentID: agentID),
+              !ringingCalls.contains(where: { $0.id == request.id }) else { return }
+        guard request.expiresAt > now, runsHere(agentID),
+              let conversation = conversations.first(where: { $0.id == request.conversationID }),
+              voiceCallTarget(for: conversation)?.id == agentID else {
+            return endUnansweredCall(request, .missed, at: now)
+        }
+        ringingCalls.append(request)
+        guard connectsServices else { return }
+        IncomingCallPanel.shared.update(self)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(0, request.expiresAt.timeIntervalSinceNow)))
+            self?.expireCalls(at: Date())
+        }
+    }
+
+    /// Ends the calls that rang for too long as missed.
+    func expireCalls(at now: Date) {
+        for request in ringingCalls where request.expiresAt <= now { endUnansweredCall(request, .missed, at: now) }
+    }
+
+    /// Answering is calling the bot, told why it called, in the window that shows its conversation.
+    func answerCall(_ id: UUID, media: (any VoiceCallMedia)? = nil) {
+        guard let request = takeRingingCall(id),
+              (try? repository.endCall(agentID: request.agentID, id: id)) != nil,
+              let conversation = conversations.first(where: { $0.id == request.conversationID }) else { return }
+        startVoiceCall(in: conversation, media: media, answeredCallReason: request.reason)
+        guard connectsServices else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        if !conversationWindows.focus(conversation.id) {
+            selectedConversationID = conversation.id
+            conversationWindows.showMainWindow()
+        }
+    }
+
+    func declineCall(_ id: UUID) {
+        guard let request = ringingCalls.first(where: { $0.id == id }) else { return }
+        endUnansweredCall(request, .declined, at: Date())
+    }
+
+    /// Leaves the card in the conversation, which shows it unread, and tells the bot, once per call.
+    private func endUnansweredCall(_ request: AgentCallRequest, _ outcome: UnansweredCall, at now: Date) {
+        _ = takeRingingCall(request.id)
+        guard (try? repository.endCall(agentID: request.agentID, id: request.id)) != nil else { return }
+        do {
+            try repository.recordUnansweredCall(request, outcome, at: now)
+        } catch {
+            errorMessage = "Could not add the missed call to the conversation: \(error.localizedDescription)"
+        }
+        refreshTranscripts()
+        guard let agent = agents.first(where: { $0.id == request.agentID }) else { return }
+        let personName = (try? repository.loadAgentOwner(agent))?.name ?? "Your person"
+        runtime.wake(agent.id, note: AgentCallDocumentation.unansweredNote(outcome, personName: personName, reason: request.reason,
+                                                                          conversationID: request.conversationID),
+                     repository: repository)
+    }
+
+    private func takeRingingCall(_ id: UUID) -> AgentCallRequest? {
+        guard let index = ringingCalls.firstIndex(where: { $0.id == id }) else { return nil }
+        let request = ringingCalls.remove(at: index)
+        if connectsServices { IncomingCallPanel.shared.update(self) }
+        return request
+    }
+}
+
+/// Floats in the top right corner over every app and Space while a call rings, and rings.
+@MainActor final class IncomingCallPanel {
+    static let shared = IncomingCallPanel()
+    static let size = NSSize(width: 360, height: 76)
+    private var panel: NSPanel?
+    private var ringer: Task<Void, Never>?
+
+    func update(_ store: NoodleStore) {
+        guard !store.ringingCalls.isEmpty else {
+            panel?.orderOut(nil)
+            ringer?.cancel(); ringer = nil
+            return
+        }
+        let panel = self.panel ?? makePanel(store)
+        self.panel = panel
+        if let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(x: visible.maxX - Self.size.width - 16, y: visible.maxY - Self.size.height - 16))
+        }
+        panel.orderFrontRegardless()
+        guard ringer == nil else { return }
+        ringer = Task { @MainActor in
+            while !Task.isCancelled {
+                NSSound(named: "Glass")?.play()
+                try? await Task.sleep(for: .seconds(2.5))
+            }
+        }
+    }
+
+    private func makePanel(_ store: NoodleStore) -> NSPanel {
+        let panel = IncomingCallWindow(contentRect: NSRect(origin: .zero, size: Self.size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.title = "Incoming Call"
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
+        panel.contentView = NSHostingView(rootView: IncomingCallView().environment(store))
+        return panel
+    }
+}
+
+/// Takes clicks without bringing Noodle forward first.
+private final class IncomingCallWindow: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// The ringing call: who calls and why, with Decline and Answer.
+struct IncomingCallView: View {
+    @Environment(NoodleStore.self) private var store
+
+    var body: some View {
+        Group {
+            if let call = store.ringingCalls.first, let agent = store.agents.first(where: { $0.id == call.agentID }) {
+                HStack(spacing: 12) {
+                    ConversationAvatar(participants: [agent], isGroup: false, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(agent.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Text(call.reason)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(agent.displayName) is calling: \(call.reason)")
+                    button("Decline", systemImage: "phone.down.fill", color: .red) { store.declineCall(call.id) }
+                    button("Answer", systemImage: "phone.fill", color: .green) { store.answerCall(call.id) }
+                }
+                .padding(.horizontal, 14)
+            }
+        }
+        .frame(width: IncomingCallPanel.size.width, height: IncomingCallPanel.size.height)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func button(_ title: String, systemImage: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(color, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .help(title)
+    }
+}

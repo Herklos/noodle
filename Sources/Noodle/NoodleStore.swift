@@ -116,6 +116,8 @@ final class NoodleStore {
     var editsSpaces = false
     private(set) var backgrounds: [UUID: ConversationBackground] = [:]
     var errorMessage: String?
+    /// Calls bots on this Mac placed that ring here now, oldest first.
+    var ringingCalls: [AgentCallRequest] = []
     private(set) var storageReady = false
     var pendingAttachments: [ConversationAttachment] {
         get { selectedConversationID.map { drafts[$0].attachments } ?? [] }
@@ -179,7 +181,7 @@ final class NoodleStore {
     @ObservationIgnored private var hubMirrorTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     @ObservationIgnored private let botWidgets = BotWidgetPublisher()
     let harnessSetup: HarnessSetupController
-    private let connectsServices: Bool
+    let connectsServices: Bool
     private var transcriptRefreshTask: Task<Void, Never>?
     private var harnessUpdateTask: Task<Void, Never>?
     private var hubCheckInTask: Task<Void, Never>?
@@ -310,6 +312,7 @@ final class NoodleStore {
         messenger.onWakesChanged = { [weak self] id in
             Task { @MainActor in guard let self else { return }; self.runtime.refreshWakes(for: id, repository: self.repository) }
         }
+        messenger.onCallRequested = { [weak self] id in Task { @MainActor in self?.ringCall(of: id) } }
         messenger.noodletHasPreview = { [applets] url in await applets.hasPreview(url) }
         thisMac.onBotsEdited = { [weak self] in self?.reload() }
         noodletAnnotations.present = { [weak self] capture in
@@ -1556,7 +1559,7 @@ final class NoodleStore {
         return agent
     }
 
-    func startVoiceCall(in conversation: BotConversation, media: (any VoiceCallMedia)? = nil) {
+    func startVoiceCall(in conversation: BotConversation, media: (any VoiceCallMedia)? = nil, answeredCallReason: String? = nil) {
         guard let agent = voiceCallTarget(for: conversation) else { return }
         let personName = (try? repository.loadAgentOwner(agent))?.name ?? "User"
         let recentLines = messages(for: conversation).suffix(12).compactMap { message -> VoiceCallLine? in
@@ -1575,7 +1578,7 @@ final class NoodleStore {
             // A Hub starts its bot and picks its voice itself.
             let voice = onHub ? nil : await BotVoice.forCall(agent, repository: repository, guesser: voiceGuesser)
             voiceCalls.start(agentID: agent.id, conversationID: conversation.id, voice: voice,
-                             personName: personName, identity: identity, recentLines: recentLines, media: media)
+                             personName: personName, identity: identity, recentLines: recentLines, answeredCallReason: answeredCallReason, media: media)
         }
     }
 
@@ -2431,6 +2434,8 @@ final class NoodleStore {
         }
         runtime.startAll(agents: agents, repository: repository)
         runtime.refreshCapabilities()
+        // A call that rang when Noodle quit rings on, or is left as missed.
+        for agent in agents where runsHere(agent.id) { ringCall(of: agent.id) }
     }
 
     func startMonitoring() {

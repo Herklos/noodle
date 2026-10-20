@@ -24,11 +24,18 @@ public struct VoiceCallRecord: Codable, Hashable, Sendable {
     /// Nil while the call is on, or when Noodle quit during it.
     public var endedAt: Date?
     public var lines: [VoiceCallLine]
+    /// Set for a call the bot placed that nobody answered; its card then stands for a missed call.
+    public var unanswered: UnansweredCall?
+    /// Why the bot called, for a call it placed.
+    public var reason: String?
 
-    public init(agentID: UUID, endedAt: Date? = nil, lines: [VoiceCallLine] = []) {
+    public init(agentID: UUID, endedAt: Date? = nil, lines: [VoiceCallLine] = [],
+                unanswered: UnansweredCall? = nil, reason: String? = nil) {
         self.agentID = agentID
         self.endedAt = endedAt
         self.lines = lines
+        self.unanswered = unanswered
+        self.reason = reason
     }
 }
 
@@ -58,15 +65,18 @@ public struct VoiceCallRequest: Sendable {
     public var identity: VoiceCallIdentity?
     /// Recent conversation lines, oldest first, so the call starts with context.
     public var recentLines: [VoiceCallLine]
+    /// Why the bot called, when the person answered a call the bot placed.
+    public var answeredCallReason: String?
 
     public init(offer: String, voice: String?, conversationID: UUID, personName: String,
-                identity: VoiceCallIdentity? = nil, recentLines: [VoiceCallLine] = []) {
+                identity: VoiceCallIdentity? = nil, recentLines: [VoiceCallLine] = [], answeredCallReason: String? = nil) {
         self.offer = offer
         self.voice = voice
         self.conversationID = conversationID
         self.personName = personName
         self.identity = identity
         self.recentLines = recentLines
+        self.answeredCallReason = answeredCallReason
     }
 }
 
@@ -86,9 +96,12 @@ public struct VoiceCallUnavailable: LocalizedError {
 public enum VoiceCallDocumentation {
     /// Given to the bot when a call starts. Spoken requests arrive in its own
     /// thread rather than through Messenger, so it needs to know where they come from.
-    public static func startInstructions(conversationID: UUID, personName: String) -> String {
-        """
-        \(personName) started a voice call with you from Noodle conversation \(conversationID.uuidString.lowercased()). Requests spoken on the call arrive here directly, not through Messenger. Your final message for a spoken request is read aloud on the call, so keep it brief and conversational, without Markdown, lists, links or code. During the call \(personName) may also type messages or share files in that conversation; they arrive through Messenger as usual and belong to the same discussion. Send files, links and anything that is better read than heard to the conversation through Messenger, and mention on the call that you sent them.
+    public static func startInstructions(conversationID: UUID, personName: String, answeredCallReason: String? = nil) -> String {
+        let start = answeredCallReason.map {
+            "\(personName) answered the voice call you placed from Noodle conversation \(conversationID.uuidString.lowercased()). You called about: \($0). Start by saying why you called."
+        } ?? "\(personName) started a voice call with you from Noodle conversation \(conversationID.uuidString.lowercased())."
+        return """
+        \(start) Requests spoken on the call arrive here directly, not through Messenger. Your final message for a spoken request is read aloud on the call, so keep it brief and conversational, without Markdown, lists, links or code. During the call \(personName) may also type messages or share files in that conversation; they arrive through Messenger as usual and belong to the same discussion. Send files, links and anything that is better read than heard to the conversation through Messenger, and mention on the call that you sent them.
         """
     }
 

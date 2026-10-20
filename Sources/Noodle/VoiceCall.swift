@@ -34,10 +34,12 @@ struct VoiceCallSetup: Equatable {
     /// Nil for a bot on a Hub, which tells the voice itself.
     var identity: VoiceCallIdentity?
     var recentLines: [VoiceCallLine] = []
+    /// Why the bot called, when the person answered a call it placed.
+    var answeredCallReason: String?
 
     func request(offer: String) -> VoiceCallRequest {
         VoiceCallRequest(offer: offer, voice: voice, conversationID: conversationID, personName: personName,
-                         identity: identity, recentLines: recentLines)
+                         identity: identity, recentLines: recentLines, answeredCallReason: answeredCallReason)
     }
 }
 
@@ -212,7 +214,7 @@ struct VoiceCallSetup: Equatable {
     }
 
     func start(agentID: UUID, conversationID: UUID, voice: String?, personName: String, identity: VoiceCallIdentity? = nil,
-               recentLines: [VoiceCallLine], media: (any VoiceCallMedia)? = nil) {
+               recentLines: [VoiceCallLine], answeredCallReason: String? = nil, media: (any VoiceCallMedia)? = nil) {
         hangUp()
         let call = Call(agentID: agentID, conversationID: conversationID)
         let media = media ?? makeMedia()
@@ -230,7 +232,7 @@ struct VoiceCallSetup: Equatable {
             do {
                 let send = try await router.startVoiceCall(
                     agentID: agentID, VoiceCallSetup(voice: voice, conversationID: conversationID, personName: personName,
-                                                     identity: identity, recentLines: recentLines),
+                                                     identity: identity, recentLines: recentLines, answeredCallReason: answeredCallReason),
                     playout: media.playout) { [weak self] in self?.handle($0, of: call.id) }
                 guard self.call?.id == call.id else { return }
                 speaking.connect(send)
