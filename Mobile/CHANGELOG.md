@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Hub admins can suspend and restore regular users from their user details, keeping their plan, data and paired devices.
+
+### What to Test
+
+- As a Hub admin, open Users, select a regular user and turn on Suspended. Their bots stop and devices lose access. Turn it off to restore access without pairing again. Admin users cannot be suspended from a device.
+
 ## [0.40.0] - 2026-10-20
 
 ### Added

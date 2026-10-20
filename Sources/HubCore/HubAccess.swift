@@ -106,6 +106,8 @@ public struct HubUser: Identifiable, Codable, Hashable, Sendable {
     public var canPairDevices: Bool
     /// Whether they may manage the users who are not admins from their devices. Only the Hub itself makes admins.
     public var isAdmin: Bool
+    /// Suspended users keep their data and devices but cannot use the Hub.
+    public var isSuspended: Bool = false
     /// The picture they chose, its image kept apart under its digest. Nil shows their initials.
     public var avatar: LinkAvatar?
 
@@ -117,7 +119,7 @@ public struct HubUser: Identifiable, Codable, Hashable, Sendable {
         self.isAdmin = isAdmin
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, plan, canPairDevices, isAdmin, avatar }
+    private enum CodingKeys: String, CodingKey { case id, name, plan, canPairDevices, isAdmin, isSuspended, avatar }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -126,6 +128,7 @@ public struct HubUser: Identifiable, Codable, Hashable, Sendable {
         plan = try c.decode(UUID.self, forKey: .plan)
         canPairDevices = try c.decodeIfPresent(Bool.self, forKey: .canPairDevices) ?? true
         isAdmin = try c.decodeIfPresent(Bool.self, forKey: .isAdmin) ?? false
+        isSuspended = try c.decodeIfPresent(Bool.self, forKey: .isSuspended) ?? false
         avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
     }
 }
@@ -173,6 +176,8 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     @ObservationIgnored public var onOwnersChange: (() -> Void)?
     /// Runs when the token limit someone is on may have changed: a plan's limit, or a user's plan.
     @ObservationIgnored public var onTokenLimitsChange: (() -> Void)?
+    /// Runs synchronously so running bots stop before suspension returns.
+    @ObservationIgnored public var onSuspensionChange: (() -> Void)?
     /// Where changes to users and devices are kept, for the Hub's Activity window.
     @ObservationIgnored public var log: HubActivityLog?
     /// Who the changes being made now are made by.
@@ -220,13 +225,14 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     }
 
     public func harnesses(for user: HubUser) -> Set<HubHarness> {
+        guard let user = current(user), !user.isSuspended else { return [] }
         if isPersonal { return Set(HarnessProvider.allCases.map { HubHarness(provider: $0, profile: nil) }) }
         return plans.first { $0.id == user.plan }?.harnesses ?? []
     }
 
     /// Whether the user may run a bot on `harness`; the owner of a personal Mac may run any.
     public func lends(_ harness: HubHarness, to user: HubUser) -> Bool {
-        guard let current = users.first(where: { $0.id == user.id }) else { return false }
+        guard let current = users.first(where: { $0.id == user.id }), !current.isSuspended else { return false }
         return isPersonal || harnesses(for: current).contains(harness)
     }
 
@@ -267,7 +273,7 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     public func lends(_ harness: HubHarness, model: String?, to user: HubUser) -> Bool {
         guard lends(harness, to: user), let current = users.first(where: { $0.id == user.id }) else { return false }
         guard let allowed = models(on: harness, for: current) else { return true }
-        return model.map(allowed.contains) ?? false
+        return model.map(allowed.contains) ?? true
     }
 
     /// The owner of everything on a personal Mac.
@@ -314,6 +320,13 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
         guard let old = current(user), old.canPairDevices != canPairDevices else { return }
         update(user) { $0.canPairDevices = canPairDevices }
         note(canPairDevices ? "Let \(old.name) pair devices" : "Stopped \(old.name) pairing devices", about: [user.id])
+    }
+
+    public func setSuspended(_ suspended: Bool, for user: HubUser) {
+        guard !isPersonal, let old = current(user), old.isSuspended != suspended else { return }
+        update(user) { $0.isSuspended = suspended }
+        note(suspended ? "Suspended \(old.name)" : "Restored access for \(old.name)", about: [user.id])
+        onSuspensionChange?()
     }
 
     /// Nobody is an admin on the owner's own Mac: there is nobody else to manage.

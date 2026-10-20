@@ -210,4 +210,80 @@ import XCTest
         XCTAssertEqual(capture.bytes, [3])
         XCTAssertEqual(view.getTerminal().getBufferAsData(), before)
     }
+
+    private func privatePasteboard() -> NSPasteboard {
+        NSPasteboard(name: .init("NoodleTerminalCopyTest-\(UUID().uuidString)"))
+    }
+
+    func testCopyIsEnabledOnlyWithASelection() {
+        let (view, _, window) = fixture()
+        defer { window.orderOut(nil) }
+        let copy = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        view.feed(text: "hello world")
+        XCTAssertFalse(view.validateUserInterfaceItem(copy))
+        view.selectAll()
+        XCTAssertTrue(view.validateUserInterfaceItem(copy))
+    }
+
+    func testCommandCCopiesTheSelectionAsPlainTextWithoutReachingTheGuest() {
+        let (view, capture, window) = fixture()
+        defer { window.orderOut(nil) }
+        let pasteboard = privatePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        view.pasteboard = pasteboard
+        view.feed(text: "hello world")
+        view.selectAll()
+        XCTAssertTrue(view.performKeyEquivalent(with: key("c", code: 8, modifiers: .command, in: window)))
+        XCTAssertEqual(pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), "hello world")
+        XCTAssertTrue(view.selectionActive, "Copying keeps the selection")
+        XCTAssertTrue(capture.bytes.isEmpty)
+    }
+
+    func testCommandCWithoutASelectionLeavesThePasteboardAlone() {
+        let (view, capture, window) = fixture()
+        defer { window.orderOut(nil) }
+        let pasteboard = privatePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("earlier", forType: .string)
+        view.pasteboard = pasteboard
+        view.feed(text: "hello world")
+        XCTAssertFalse(view.performKeyEquivalent(with: key("c", code: 8, modifiers: .command, in: window)))
+        view.copy(NSMenuItem())
+        XCTAssertEqual(pasteboard.string(forType: .string), "earlier")
+        XCTAssertTrue(capture.bytes.isEmpty)
+    }
+
+    func testClickingTheHostedTerminalMakesTheEditMenuReachIt() throws {
+        let terminal = GuestTerminal()
+        let host = NSHostingView(rootView: ComputerTerminalView(terminal: terminal))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 320),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        defer { window.orderOut(nil) }
+        let view = terminal.view
+        view.feed(text: "hello world")
+        XCTAssertFalse(window.firstResponder === view)
+        let point = view.convert(NSPoint(x: 2, y: view.bounds.height - 6), to: nil)
+        func click(_ type: NSEvent.EventType) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        }
+        // Straight to the view: a test window is never key, so the window would not route the click.
+        view.mouseDown(with: try click(.leftMouseDown))
+        view.mouseUp(with: try click(.leftMouseUp))
+        XCTAssertTrue(window.firstResponder === view)
+        // Edit › Copy, Paste and Select All go to the first responder that implements them.
+        view.selectAll()
+        for item in [NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
+                     NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
+                     NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")] {
+            var responder = window.firstResponder
+            while let current = responder, !current.responds(to: item.action) { responder = current.nextResponder }
+            XCTAssertTrue(responder === view, item.title)
+            XCTAssertTrue(view.validateUserInterfaceItem(item), item.title)
+        }
+    }
 }

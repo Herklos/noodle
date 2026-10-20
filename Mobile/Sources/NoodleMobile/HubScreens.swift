@@ -778,7 +778,7 @@ struct UsersView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(user.name)
                                 let plan = users.planName(of: user) ?? ""
-                                Text(user.isAdmin ? "\(plan) · Admin" : plan).font(.subheadline).foregroundStyle(.secondary)
+                                Text(user.isSuspended ? "\(plan) · Suspended" : (user.isAdmin ? "\(plan) · Admin" : plan)).font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -843,6 +843,10 @@ struct UserView: View {
                 )) {
                     ForEach(users.plans) { Text($0.name).tag($0.id) }
                 }
+                Toggle("Suspended", isOn: Binding(
+                    get: { user.isSuspended },
+                    set: { on in Task { await users.setSuspended(on, for: user) } }
+                ))
                 Toggle("Can Pair Devices", isOn: Binding(
                     get: { user.canPairDevices },
                     set: { on in Task { await users.setCanPairDevices(on, for: user) } }
@@ -877,6 +881,7 @@ struct UserView: View {
                 }
                 if !user.isAdmin {
                     Button("Invite") { inviting = true }
+                        .disabled(user.isSuspended)
                 }
             }
             if !user.isAdmin {

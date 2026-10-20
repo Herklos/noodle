@@ -10,6 +10,8 @@ pairing your first device.
 In Settings, Users lists the people who can use the Hub, and Plans decides which
 harnesses each plan lends. Every user is on one plan. New users start on Default,
 which lends nothing until you add harnesses to it.
+Turn on Suspended in a user’s actions menu to stop their bots and block their devices
+without deleting their data. Turn it off to restore access with the same plan and paired devices.
 
 To pair a device, choose Pair… in the menu bar menu, or Invite next to a user, and open
 the link in Noodle on that Mac, or choose Join under Noodle Hubs in Noodle's Settings > Hub
@@ -23,6 +25,7 @@ the Hub in Noodle's Settings > Hub: add, rename and remove people, change their 
 whether they can pair devices, and invite or remove their devices. Admins cannot change
 themselves or other admins; only the Hub's Settings can. An admin can still pair a device
 of their own as anyone who is not an admin, so make only people you trust admins.
+Admins can also suspend and restore regular users from Users in Noodle Mobile.
 Logs in the menu bar menu lists, for 90 days, who added, changed or removed users,
 made invitations and paired or removed devices, here or from a device, and every attempt
 the Hub refused; choose a person to see only what concerns them. Network shows how many people

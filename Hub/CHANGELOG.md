@@ -5,6 +5,14 @@
 ### Added
 
 - A plan can limit how many tokens each of its users' bots use over a number of hours, days, weeks or months, counted over a rolling period. Once a user reaches it, a turn under way finishes and then their bots stop until the period allows more; messages to them still go through and are answered then. Settings → Users shows how much each user used.
+- Admins can also suspend and restore regular users from Noodle Mobile.
+- Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
+
+### Fixed
+
+- A bot without a model runs on its harness's default model, even when the plan lists the models it lends, instead of turning messages away.
+- A message to a bot the plan no longer lends is kept instead of showing as not delivered, and the bot reads it once it runs again. In a group, the other bots get it at once.
+- A bot the plan no longer lends shows as failed instead of ready.
 
 ## [0.37.0] - 2026-10-20
 

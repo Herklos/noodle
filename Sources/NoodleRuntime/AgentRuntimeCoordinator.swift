@@ -152,6 +152,19 @@ public final class AgentRuntimeCoordinator {
             }
         }
     }
+    /// Hub owners may suspend a user's bots without archiving or deleting them.
+    public var suspendedAgentIDs: Set<UUID> = [] {
+        didSet {
+            for id in suspendedAgentIDs.subtracting(oldValue) {
+                stop(agentID: id, revokeAccess: false)
+                cancelSupervision(for: id)
+            }
+        }
+    }
+    /// Remote, archived, suspended and held bots never start here.
+    private func neverStarts(_ id: UUID) -> Bool {
+        remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) || suspendedAgentIDs.contains(id) || heldAgents[id] != nil
+    }
     /// Bots that may take no new turn for now, each with why, shown as its status: on a Hub, the bots of
     /// someone who used up their plan's tokens. One at work finishes its turn, then stops; whoever lets
     /// it go starts it again.
@@ -160,10 +173,6 @@ public final class AgentRuntimeCoordinator {
             for (id, reason) in heldAgents where oldValue[id] != reason { hold(id) }
             for id in oldValue.keys where heldAgents[id] == nil && processes[id] == nil { snapshots[id] = nil }
         }
-    }
-    /// Remote, archived and held bots never start here.
-    private func neverStarts(_ id: UUID) -> Bool {
-        remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) || heldAgents[id] != nil
     }
 
     /// Stops a held bot unless it is at work, keeping what it was doing for when it starts again,

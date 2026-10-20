@@ -52,7 +52,7 @@ struct HubBotProfileButton: View {
             if agent.archivedAt != nil {
                 ArchivedTag()
             } else {
-                let phase = host.hub.bots.phase(of: agent.id)
+                let phase = host.hub.bots.phase(of: agent)
                 SettingsStatusLabel(title: phase.title, systemImage: "circle.fill", color: phase.color)
                     .help(snapshot.detail)
             }

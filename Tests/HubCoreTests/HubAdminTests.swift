@@ -25,6 +25,28 @@ import XCTest
         return Fixture(access: access, url: url, admin: try XCTUnwrap(access.users.first { $0.id == admin.id }), ada: ada, family: family)
     }
 
+    func testAdminCanSuspendAndRestoreARegularUserFromADevice() throws {
+        let f = try fixture()
+        let admin = try HubAdmin(f.admin, access: f.access)
+        let suspend = try JSONDecoder().decode(LinkUserDraft.self, from: Data(#"{"isSuspended":true}"#.utf8))
+        let changed = try admin.updateUser(f.ada.id, with: suspend)
+        XCTAssertTrue(try XCTUnwrap(f.access.users.first { $0.id == f.ada.id }).isSuspended)
+        let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(changed)) as? [String: Any])
+        XCTAssertEqual(encoded["isSuspended"] as? Bool, true)
+        _ = try admin.updateUser(f.ada.id, with: LinkUserDraft(name: "Ada L."))
+        XCTAssertTrue(try XCTUnwrap(f.access.users.first { $0.id == f.ada.id }).isSuspended)
+        let restore = try JSONDecoder().decode(LinkUserDraft.self, from: Data(#"{"isSuspended":false}"#.utf8))
+        _ = try admin.updateUser(f.ada.id, with: restore)
+        XCTAssertFalse(try XCTUnwrap(f.access.users.first { $0.id == f.ada.id }).isSuspended)
+    }
+
+    func testUsersFromAnOlderHubDefaultToActive() throws {
+        let json = #"{"id":"\#(UUID())","name":"Ada","plan":"\#(UUID())","canPairDevices":true,"isAdmin":false,"devices":[]}"#
+        let user = try JSONDecoder().decode(LinkUser.self, from: Data(json.utf8))
+        XCTAssertFalse(user.isSuspended)
+        XCTAssertNil(try JSONDecoder().decode(LinkUserDraft.self, from: Data(#"{"name":"Ada"}"#.utf8)).isSuspended)
+    }
+
     private func key() -> LinkPublicKey { LinkIdentity().publicKey }
 
     private func assertRefused(_ message: String, file: StaticString = #filePath, line: UInt = #line,
@@ -215,6 +237,7 @@ import XCTest
             assertRefused(message) { _ = try admin.updateUser(target.id, with: LinkUserDraft(plan: f.family.id)) }
             assertRefused(message) { _ = try admin.updateUser(target.id, with: LinkUserDraft(name: "Mallory")) }
             assertRefused(message) { _ = try admin.updateUser(target.id, with: LinkUserDraft(canPairDevices: false)) }
+            assertRefused(message) { _ = try admin.updateUser(target.id, with: LinkUserDraft(isSuspended: true)) }
             assertRefused(message) { _ = try admin.managedUser(target.id) }
         }
         XCTAssertEqual(f.access.users.map(\.plan), [HubPlan.defaultID, HubPlan.defaultID, HubPlan.defaultID])

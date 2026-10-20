@@ -51,6 +51,10 @@ import Observation
         await change(.updateUser(id: user.id, LinkUserDraft(canPairDevices: canPairDevices)))
     }
 
+    public func setSuspended(_ suspended: Bool, for user: LinkUser) async {
+        await change(.updateUser(id: user.id, LinkUserDraft(isSuspended: suspended)))
+    }
+
     /// Removes the user with their devices and everything they keep on the Hub.
     public func remove(_ user: LinkUser) async {
         await change(.removeUser(id: user.id))

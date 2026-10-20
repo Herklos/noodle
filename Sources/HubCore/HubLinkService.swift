@@ -244,6 +244,9 @@ import os
         case .success(let decoded): request = decoded
         case .failure(let error): return .response(LinkProtocol.encode(LinkResponse.failure(error.message)))
         }
+        if let device = access.device(for: key), access.user(for: device)?.isSuspended == true {
+            return .response(LinkProtocol.encode(LinkResponse.failure("Your access to this Hub is suspended.")))
+        }
         if case .subscribe = request {
             guard let device = access.device(for: key) else {
                 return .response(LinkProtocol.encode(LinkResponse.failure("This device is not paired with \(hubName).")))
@@ -406,6 +409,7 @@ import os
                 guard let self else { return }
                 let seen = UsersSeen(self.access)
                 if seen != self.usersSeen {
+                    self.updateGate()
                     self.usersSeen = seen
                     for admin in self.access.users where admin.isAdmin { self.push(.usersChanged, to: admin.id) }
                 }
@@ -426,8 +430,11 @@ import os
 
     /// Lets in paired devices and the keys of open invitations; drops whoever that no longer covers.
     private func updateGate() {
-        invitations = invitations.filter { $0.value.expires > now() }
-        gate.update(keys: Set(access.devices.map(\.key)), invitations: invitations.mapValues(\.expires))
+        invitations = invitations.filter { invitation in
+            invitation.value.expires > now() && access.users.contains { $0.id == invitation.value.user && !$0.isSuspended }
+        }
+        let devices = access.devices.filter { access.user(for: $0)?.isSuspended == false }
+        gate.update(keys: Set(devices.map(\.key)), invitations: invitations.mapValues(\.expires))
         server?.disconnectRefused()
     }
 
@@ -562,7 +569,7 @@ import os
             return try access.acting(as: actor) {
                 do {
                     guard let invitation, invitation.expires > now(),
-                          let user = access.users.first(where: { $0.id == invitation.user }) else {
+                          let user = access.users.first(where: { $0.id == invitation.user }), !user.isSuspended else {
                         throw LinkError("This invitation is no longer valid. Ask for a new one.")
                     }
                     guard deviceKey.isJoinProof(proof, for: key) else { throw LinkError("This device could not prove its key.") }
@@ -896,6 +903,7 @@ import os
 
     private func paired(_ key: LinkPublicKey) throws -> HubDevice {
         guard let device = access.device(for: key) else { throw LinkError("This device is not paired with \(hubName).") }
+        guard access.user(for: device)?.isSuspended != true else { throw LinkError("Your access to this Hub is suspended.") }
         return device
     }
 

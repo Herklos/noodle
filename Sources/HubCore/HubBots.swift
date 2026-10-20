@@ -122,6 +122,7 @@ import NoodleVoicePeer
         guard !running else { return }
         try repository.prepare()
         let agents = try repository.loadAgents()
+        synchronizeSuspensions()
         try repository.synchronizeAgentWorkspaces(agents)
         try messenger.start(agents: agents)
         runtime.archivedAgentIDs = Set(agents.filter { $0.archivedAt != nil }.map(\.id))
@@ -178,6 +179,18 @@ import NoodleVoicePeer
         loop?.cancel()
         loop = nil
         watching = false
+    }
+
+    /// Stops subscription use, including calls, while preserving bots and conversations.
+    public func synchronizeSuspensions() {
+        guard !access.isPersonal else { return }
+        let users = Set(access.users.filter(\.isSuspended).map(\.id))
+        let agents = (try? repository.loadAgents()) ?? []
+        let suspended = Set(agents.filter { access.owner(ofBot: $0.id).map(users.contains) ?? false }.map(\.id))
+        for call in Array(calls.values) where suspended.contains(call.agentID) {
+            finish(call, failure: "This user is suspended.", hangingUp: true)
+        }
+        runtime.suspendedAgentIDs = suspended
     }
 
     /// Names each bot's owner in its agent.json, for Noodle Applet to list its noodlets under them.
@@ -760,21 +773,20 @@ import NoodleVoicePeer
         guard attachmentIDs.allSatisfy({ files[$0] != nil }) else {
             throw LinkError("An attachment has not reached the Hub yet.")
         }
-        for agent in bots {
+        // The Hub keeps the message either way; a bot the plan no longer lends is not woken
+        // and reads it once it runs again.
+        let reached = bots.filter { agent in
             // Someone a bot is shared with talks with it on its owner's plan.
             if conversation.guest != nil {
                 // A bot its owner's Mac hosts runs on no plan here.
-                guard let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }),
-                      access.host(ofBot: agent.id) != nil || lendsBot(agent, to: owner) else {
-                    throw LinkError("\(agent.displayName) cannot take messages right now.")
-                }
-                continue
+                guard let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }) else { return false }
+                return access.host(ofBot: agent.id) != nil || lendsBot(agent, to: owner)
             }
-            try requireLends(agent, to: user)
+            return (try? requireLends(agent, to: user)) != nil
         }
         let message = try repository.sendUserMessage(conversationID: conversationID, body: body,
                                                      attachmentIDs: attachmentIDs, id: id)
-        if running || watching { runtime.notify(bots, repository: repository) }
+        if running || watching { runtime.notify(reached, repository: repository) }
         // The bot reads it from its inbox; the call hears about it here.
         if let call = calls[conversationID] {
             runtime.sendToVoiceCall(agentID: call.agentID, VoiceCallDocumentation.typedMessage(
@@ -794,18 +806,25 @@ import NoodleVoicePeer
             let name = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.displayName ?? "this harness"
             throw LinkError("Your plan no longer lends \(name).")
         }
-        if let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)),
-           !access.lends(HubHarness(provider: provider, profile: profile), model: agent.modelIdentifier, to: user) {
-            throw LinkError(agent.modelIdentifier.map { "Your plan no longer lends \($0) on \(provider.displayName)." }
-                            ?? "Your plan needs a model chosen for \(provider.displayName).")
+        if let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)), let model = agent.modelIdentifier,
+           !access.lends(HubHarness(provider: provider, profile: profile), model: model, to: user) {
+            throw LinkError("Your plan no longer lends \(model) on \(provider.displayName).")
         }
     }
 
     // MARK: Bots hosted on their owners' devices
 
     /// What a bot is doing: one its owner's device hosts only while that device is connected, as it says.
-    public func phase(of bot: UUID) -> AgentRuntimePhase {
-        guard let host = access.host(ofBot: bot) else { return runtime.snapshot(for: bot).phase }
+    public func phase(of agent: AgentRecord) -> AgentRuntimePhase {
+        let bot = agent.id
+        guard let host = access.host(ofBot: bot) else {
+            // One its owner's plan no longer lends cannot answer, whatever its runtime is doing.
+            if let owner = access.owner(ofBot: bot).flatMap({ id in access.users.first { $0.id == id } }),
+               !lendsBot(agent, to: owner) {
+                return .failed
+            }
+            return runtime.snapshot(for: bot).phase
+        }
         guard isHostConnected(host), let phase = hostedPhases[bot] else { return .offline }
         return AgentRuntimePhase(rawValue: phase.rawValue) ?? .offline
     }
@@ -1193,7 +1212,7 @@ import NoodleVoicePeer
         var restated: Set<UUID> = []
         for agent in agents {
             guard let owner = access.owner(ofBot: agent.id) else { continue }
-            let phase = self.phase(of: agent.id)
+            let phase = self.phase(of: agent)
             if let known = phases[agent.id], known != phase, let link = LinkBotPhase(rawValue: phase.rawValue) {
                 // Whether it is working reaches the people it is shared with too; the status it sets does not.
                 let guests = conversations.filter { $0.participantIDs == [agent.id] }.compactMap(\.guest?.id)
@@ -1365,9 +1384,8 @@ import NoodleVoicePeer
         guard lends(harness, to: user) else {
             throw LinkError("Your plan \(verb) \(provider.displayName).")
         }
-        guard access.lends(harness, model: draft.model, to: user) else {
-            throw LinkError(draft.model.map { "Your plan \(verb) \($0) on \(provider.displayName)." }
-                            ?? "Your plan needs a model chosen for \(provider.displayName).")
+        if let model = draft.model, !access.lends(harness, model: model, to: user) {
+            throw LinkError("Your plan \(verb) \(model) on \(provider.displayName).")
         }
         return provider
     }
@@ -1512,7 +1530,7 @@ import NoodleVoicePeer
         draft.voice = try repository.loadAgentVoice(agent)
         draft.imageGeneration = imageGeneration?.isAssigned(agent.id) ?? false
         return LinkBot(id: agent.id, conversationID: conversation.id, draft: draft, createdAt: agent.createdAt,
-                       phase: LinkBotPhase(rawValue: phase(of: agent.id).rawValue), readUpTo: readMarks[conversation.id],
+                       phase: LinkBotPhase(rawValue: phase(of: agent).rawValue), readUpTo: readMarks[conversation.id],
                        status: agent.status, archivedAt: agent.archivedAt, background: background(of: conversation.id),
                        // On the owner's own Mac, those are people on another Hub.
                        sharedWith: access.isPersonal ? [] : direct.compactMap(\.guest?.id),
@@ -1528,7 +1546,7 @@ import NoodleVoicePeer
                                  avatarImageData: agent.avatarImageData)
         draft.avatarImageDigest = agent.avatarImageData.map(LinkPicture.digest)
         return LinkBot(id: agent.id, conversationID: conversation.id, draft: draft, createdAt: agent.createdAt,
-                       phase: LinkBotPhase(rawValue: phase(of: agent.id).rawValue),
+                       phase: LinkBotPhase(rawValue: phase(of: agent).rawValue),
                        readUpTo: readMarks[conversation.id], background: background(of: conversation.id), owner: owner.name,
                        canCall: agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.voices.isEmpty == false,
                        pinnedAt: pins[conversation.id])
