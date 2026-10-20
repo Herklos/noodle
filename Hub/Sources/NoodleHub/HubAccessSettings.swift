@@ -93,13 +93,26 @@ struct HubUsersSettingsView: View {
         .padding(.leading, 32)
     }
 
+    /// What the user's bots used of their plan's tokens, or until when they wait; nil without a limit.
+    private func tokens(of user: HubUser) -> String? {
+        _ = host.hub.usage.revision
+        let limits = host.hub.tokenLimits
+        if let until = limits.holds[user.id] {
+            return "Token limit reached until \(until.formatted(date: .abbreviated, time: .shortened))"
+        }
+        guard let used = limits.used(by: user) else { return nil }
+        return "\(used.tokens.formatted(.number.notation(.compactName))) of "
+            + "\(used.limit.tokens.formatted(.number.notation(.compactName))) tokens"
+    }
+
     private func userRow(_ user: HubUser) -> some View {
         HStack(spacing: 10) {
             HubPersonBadge(user: user, access: access, size: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.name).lineLimit(1)
                 if let plan = access.plans.first(where: { $0.id == user.plan }) {
-                    Text(user.isSuspended ? "\(plan.name) · Suspended" : (user.isAdmin ? "\(plan.name) · Admin" : plan.name)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(([user.isSuspended ? "\(plan.name) · Suspended" : (user.isAdmin ? "\(plan.name) · Admin" : plan.name)] + [tokens(of: user)].compactMap { $0 }).joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 8)
@@ -187,7 +200,8 @@ struct HubPlansSettingsView: View {
         let names = HubPlanEditor.harnesses(host).filter { plan.harnesses.contains($0.harness) }.map(\.title)
         let users = access.users.filter { $0.plan == plan.id }.count
         let lends = names.isEmpty ? "Lends nothing" : "Lends " + names.joined(separator: ", ")
-        return lends + " · \(users) \(users == 1 ? "user" : "users")"
+        let tokens = plan.tokenLimit.map { " · \($0.tokens.formatted()) tokens per \($0.periodName)" } ?? ""
+        return lends + " · \(users) \(users == 1 ? "user" : "users")" + tokens
     }
 }
 
@@ -317,14 +331,49 @@ struct HubPlanEditor: View {
         }
     }
 
-    /// How many computers and browsers each user on the plan may keep, blank for any number.
+    /// How many computers and browsers each user on the plan may keep, and tokens their bots may use, blank for any number.
     private func limitList(_ plan: HubPlan) -> some View {
         VStack(spacing: 0) {
             limitRow("Computers per user", limit: plan.computerLimit) { access.setComputerLimit($0, in: plan) }
             Divider()
             limitRow("Browsers per user", limit: plan.browserLimit) { access.setBrowserLimit($0, in: plan) }
+            Divider()
+            tokenLimitRow(plan)
         }
         .planPanel()
+    }
+
+    /// Tokens per user, and once there is a limit, the period it counts them over.
+    private func tokenLimitRow(_ plan: HubPlan) -> some View {
+        let limit = plan.tokenLimit
+        let set = { (tokens: Int?, length: Int?, unit: HubTokenLimit.Unit?) in
+            access.setTokenLimit((tokens ?? limit?.tokens).map {
+                HubTokenLimit(tokens: $0, length: length ?? limit?.length ?? 1, unit: unit ?? limit?.unit ?? .weeks)
+            }, in: plan)
+        }
+        return HStack(spacing: 8) {
+            Text("Tokens per user")
+            Spacer()
+            TextField("Tokens per user", value: Binding(get: { limit?.tokens }, set: { tokens in
+                if let tokens { set(tokens, nil, nil) } else { access.setTokenLimit(nil, in: plan) }
+            }), format: .number, prompt: Text("No limit"))
+                .labelsHidden()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 110)
+            if let limit {
+                Text("per")
+                TextField("Period", value: Binding(get: { limit.length }, set: { set(nil, $0, nil) }), format: .number)
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 44)
+                Picker("Period", selection: Binding(get: { limit.unit }, set: { set(nil, nil, $0) })) {
+                    ForEach(HubTokenLimit.Unit.allCases, id: \.self) { Text($0.name(count: limit.length)).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     private func limitRow(_ title: String, limit: Int?, set: @escaping (Int?) -> Void) -> some View {

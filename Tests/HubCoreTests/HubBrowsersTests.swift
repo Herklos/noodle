@@ -13,6 +13,10 @@ import XCTest
         private var browsers: [RemoteBrowser] = []
         /// What this Noodle Browser says it can do; nil for one from before it said.
         var features: [String]?
+        static let signInToken = UUID()
+        private var fills: [(browser: UUID, values: BrowserSignInValues)] = []
+        /// What people filled in, by browser.
+        var filled: [(browser: UUID, values: BrowserSignInValues)] { lock.withLock { fills } }
 
         func call(_ request: BrowserRequest) throws -> BrowserResponse {
             try lock.withLock {
@@ -36,6 +40,15 @@ import XCTest
                     // Deleted before the Hub's word arrived, as can happen.
                     guard let index = browsers.firstIndex(where: { $0.id == request.browserID }) else { throw BrowserError("No such browser.") }
                     browsers[index].owner = request.owner
+                case .signInForm, .signInFill:
+                    // One from before sign-in cannot read the request.
+                    guard features?.contains(BrowserSignInForm.feature) == true else { throw BrowserError("This needs a newer app. Update it.") }
+                    if let values = request.signIn { fills.append((try XCTUnwrap(request.browserID), values)); response.submitted = values.submit }
+                    else {
+                        response.signInForm = BrowserSignInForm(token: Self.signInToken, host: "login.example.test", pageHost: "shop.example.test",
+                                                                secure: true, crossOrigin: true,
+                                                                fields: [BrowserSignInField(kind: .username, label: "Email"), BrowserSignInField(kind: .password)])
+                    }
                 default:
                     break
                 }
@@ -233,6 +246,9 @@ import XCTest
         XCTAssertEqual(left, [])
     }
 
+    /// Another card in the same conversation, for another tab of the same browser.
+    private var otherCard: ConversationAttachment?
+
     /// A tab one of Ada's bots shared in its conversation, and a device of hers to open it from.
     private func sharedTab() async throws -> (HubPairing, LinkBot, ConversationAttachment, RemoteBrowser, UUID) {
         let (hub, ada, _) = try hub()
@@ -254,6 +270,11 @@ import XCTest
         let card = try hub.repository.importLinkAttachment(BrowserLink.url(browser: made.id, tab: tab), into: bot.conversationID,
                                                            card: LinkCard(title: "Example", detail: "https://example.com"))
         _ = try hub.repository.sendAgentMessage(agentID: bot.id, conversationID: bot.conversationID, body: "Example", attachmentIDs: [card.id])
+        // Another tab of the same browser, shared in the same conversation.
+        let other = try hub.repository.importLinkAttachment(BrowserLink.url(browser: made.id, tab: UUID()), into: bot.conversationID,
+                                                            card: LinkCard(title: "Other", detail: "https://example.org"))
+        _ = try hub.repository.sendAgentMessage(agentID: bot.id, conversationID: bot.conversationID, body: "Other", attachmentIDs: [other.id])
+        otherCard = other
 
         return (device, bot, card, made, tab)
     }
@@ -286,6 +307,62 @@ import XCTest
         await waitUntil { !surfaces.inputs.isEmpty }
         XCTAssertEqual(surfaces.inputs.map(\.view), ["\(made.id) \(tab)"])
         XCTAssertEqual(surfaces.inputs.map(\.input), [.text("hi")])
+    }
+
+    /// Someone watching a tab live signs in with their device's own fields: the Hub finds the page's
+    /// form and hands what they typed to the browser they watch, and only while they watch it.
+    func testAPersonWatchingABrowserSignsInToIt() async throws {
+        browser.features = [SurfaceSocket.feature, BrowserSignInForm.feature]
+        let (device, bot, card, made, _) = try await sharedTab()
+        guard case .status(let status) = try await device.request(.status) else { return XCTFail("no status") }
+        XCTAssertTrue(status.signsInToBrowsers)
+        let ask = LinkRequest.signInForm(conversationID: bot.conversationID, attachmentID: card.id)
+        let fill = LinkSignInFill(conversationID: bot.conversationID, attachmentID: card.id, token: FakeBrowser.signInToken,
+                                  username: "ada@example.com", password: "correct horse")
+        for request in [ask, .fillSignIn(fill)] {
+            do { _ = try await device.request(request); XCTFail("signed in with nobody watching") }
+            catch { XCTAssertEqual(error.localizedDescription, "Open the browser live to sign in.") }
+        }
+        XCTAssertTrue(browser.filled.isEmpty)
+
+        let (channel, _) = try await device.firstSurfacePackets(.openSurface(conversationID: bot.conversationID, attachmentID: card.id))
+        defer { channel.cancel() }
+        guard case .signInForm(let form) = try await device.request(ask) else { return XCTFail("no form") }
+        XCTAssertEqual(form, LinkSignInForm(token: FakeBrowser.signInToken, host: "login.example.test", pageHost: "shop.example.test",
+                                            secure: true, crossOrigin: true,
+                                            fields: [LinkSignInField(kind: .username, label: "Email"), LinkSignInField(kind: .password)]))
+        guard case .done = try await device.request(.fillSignIn(fill)) else { return XCTFail("not filled") }
+        XCTAssertEqual(browser.filled.map(\.browser), [made.id])
+        XCTAssertEqual(browser.filled.map(\.values), [BrowserSignInValues(token: FakeBrowser.signInToken, username: "ada@example.com",
+                                                                          password: "correct horse")])
+    }
+
+    /// Watching another card in the same conversation does not let a device sign in to this one.
+    func testSigningInNeedsThisCardWatched() async throws {
+        browser.features = [SurfaceSocket.feature, BrowserSignInForm.feature]
+        let (device, bot, card, _, _) = try await sharedTab()
+        let other = try XCTUnwrap(otherCard)
+        let (channel, _) = try await device.firstSurfacePackets(.openSurface(conversationID: bot.conversationID, attachmentID: other.id))
+        defer { channel.cancel() }
+        do {
+            _ = try await device.request(.signInForm(conversationID: bot.conversationID, attachmentID: card.id))
+            XCTFail("signed in to a card nobody watches")
+        } catch { XCTAssertEqual(error.localizedDescription, "Open the browser live to sign in.") }
+        guard case .signInForm = try await device.request(.signInForm(conversationID: bot.conversationID, attachmentID: other.id)) else {
+            return XCTFail("the card watched offered no form")
+        }
+    }
+
+    /// A Noodle Browser from before sign-in cannot say why it does nothing; the Hub names the app to update.
+    func testSigningInWithAnOldBrowserNamesTheAppToUpdate() async throws {
+        browser.features = [SurfaceSocket.feature]
+        let (device, bot, card, _, _) = try await sharedTab()
+        let (channel, _) = try await device.firstSurfacePackets(.openSurface(conversationID: bot.conversationID, attachmentID: card.id))
+        defer { channel.cancel() }
+        do {
+            _ = try await device.request(.signInForm(conversationID: bot.conversationID, attachmentID: card.id))
+            XCTFail("an old browser offered sign-in fields")
+        } catch { XCTAssertEqual(error.localizedDescription, HubBrowsers.updateToSignIn) }
     }
 }
 

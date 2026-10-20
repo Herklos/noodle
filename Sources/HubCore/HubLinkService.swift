@@ -101,8 +101,9 @@ import os
     /// Each conversation's unread replies, as last pushed or as first seen.
     @ObservationIgnored private var pushedUnread: [UUID: Int] = [:]
     @ObservationIgnored private var pendingPushes: [UUID: Task<Void, Never>] = [:]
-    /// Live views open on each conversation, and whose they are, to close when someone loses it.
-    @ObservationIgnored private var surfaces: [UUID: [(user: UUID, stream: LinkStream)]] = [:]
+    /// Live views open on each conversation, whose they are and which card they show, to close when someone
+    /// loses it and to sign in only to what is watched.
+    @ObservationIgnored private var surfaces: [UUID: [(user: UUID, attachment: UUID, stream: LinkStream)]] = [:]
 
     private struct Settings: Codable {
         var manualAddress: String
@@ -330,7 +331,7 @@ import os
                 return .stream { stream in
                     Task { @MainActor in
                         self.surfaces[conversationID, default: []].removeAll { $0.stream.isClosed }
-                        self.surfaces[conversationID, default: []].append((user.id, stream))
+                        self.surfaces[conversationID, default: []].append((user.id, attachmentID, stream))
                         stream.send(LinkProtocol.encode(LinkEvent.surfaceOpened(sessionID: UUID())))
                         do {
                             let (socket, controls) = try await open()
@@ -443,6 +444,10 @@ import os
         streams[id] = stream
         // The device waits for a first word, so it hears whatever is pushed from here on.
         stream.send(Data())
+        // Calls that started ringing before it subscribed ring on it too.
+        if let user = access.device(for: stream.peer)?.user {
+            for call in bots?.ringingCalls(for: user) ?? [] { stream.send(LinkProtocol.encode(LinkEvent.callRinging(call))) }
+        }
         // The bots a device hosts are online while it follows the Hub.
         bots?.hostsChanged()
         stream.onClose { [weak self] in
@@ -770,6 +775,15 @@ import os
             return .computer(computers.link(changed, for: user))
         case .openSurface:
             throw LinkError("Surfaces open a stream.")
+        case .signInForm(let conversationID, let attachmentID):
+            let user = try user(key)
+            let browser = try await watchedBrowser(attachmentID, in: conversationID, by: user)
+            return .signInForm(try await hubBrowsers().signInForm(browser: browser, for: user))
+        case .fillSignIn(let fill):
+            let user = try user(key)
+            let browser = try await watchedBrowser(fill.attachmentID, in: fill.conversationID, by: user)
+            try await hubBrowsers().fillSignIn(fill, browser: browser, for: user)
+            return .done
         case .startCall:
             throw LinkError("Calls open a stream.")
         case .browsers:
@@ -825,6 +839,9 @@ import os
             return .hubSharing(try await sharingThroughHubs(botID, from: key).list(botID))
         case .takeEffect(let conversationID):
             return .effect(try hubBots().takeEffect(in: conversationID, for: try user(key)))
+        case .declineCall(let id):
+            try hubBots().declineCall(id, for: try user(key))
+            return .done
         case .shareOnHub(let botID, let hub, let people):
             return .hubSharing(try await sharingThroughHubs(botID, from: key).share(botID, hub, people))
         }
@@ -884,6 +901,21 @@ import os
             try computers?.reloadAssignments()
             try browsers?.reloadAssignments()
         } catch { throw LinkError("Could not read this Mac's tools, computers and browsers.") }
+    }
+
+    /// The browser a card in the user's conversation shows, by the same rule as opening it live, while they
+    /// watch that card live from a device: only the person watching it signs in to it, and watching something
+    /// else in the conversation does not count.
+    private func watchedBrowser(_ attachmentID: UUID, in conversationID: UUID, by user: HubUser) async throws -> UUID {
+        if access.isPersonal { try readNoodlesTools() }
+        guard case .browser(let browser, _) = try await hubBots().companionLink(attachmentID, in: conversationID, for: user).link,
+              try access.isPersonal || hubBrowsers().browsers(for: user).contains(where: { $0.id == browser }) else {
+            throw LinkError("That browser is not yours or no longer exists.")
+        }
+        guard (surfaces[conversationID] ?? []).contains(where: { $0.user == user.id && $0.attachment == attachmentID && !$0.stream.isClosed }) else {
+            throw LinkError("Open the browser live to sign in.")
+        }
+        return browser
     }
 
     private func hubBrowsers() throws -> HubBrowsers {
@@ -1019,7 +1051,8 @@ import os
         return LinkStatus(hubName: hubName, userName: user?.name ?? "", planName: plan?.name ?? "",
                           harnesses: harnesses, endpoints: endpoints, canPairDevices: user?.canPairDevices ?? false,
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
-                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil)
+                          userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil,
+                          signsInToBrowsers: browsers != nil)
     }
 
     /// Opens the port on the router, then keeps it open.

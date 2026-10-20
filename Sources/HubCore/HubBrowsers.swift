@@ -106,6 +106,42 @@ import NoodleCore
         }
     }
 
+    /// The sign-in fields of the tab the user watches live in one of their browsers, found once as they ask.
+    public func signInForm(browser: UUID, for user: HubUser) async throws -> LinkSignInForm {
+        try owned(browser, by: user)
+        let found = try await signingIn { try await call(BrowserRequest(.signInForm, browserID: browser)).checked().signInForm }
+        return LinkSignInForm(token: found.token, host: found.host, pageHost: found.pageHost, secure: found.secure,
+                              crossOrigin: found.crossOrigin,
+                              fields: found.fields.compactMap { field in
+                                  LinkSignInField.Kind(rawValue: field.kind.rawValue).map { LinkSignInField(kind: $0, label: field.label, length: field.length) }
+                              })
+    }
+
+    /// Fills the form `signInForm` found with what the user typed or picked, handed straight to Noodle Browser
+    /// and kept nowhere here.
+    public func fillSignIn(_ fill: LinkSignInFill, browser: UUID, for user: HubUser) async throws {
+        try owned(browser, by: user)
+        var request = BrowserRequest(.signInFill, browserID: browser)
+        request.signIn = BrowserSignInValues(token: fill.token, username: fill.username, password: fill.password,
+                                             newPassword: fill.newPassword, oneTimeCode: fill.oneTimeCode, submit: fill.submit)
+        _ = try await signingIn { try await call(request).checked().submitted }
+    }
+
+    /// A Noodle Browser from before sign-in cannot say why it did nothing; the Hub names the app to update.
+    private func signingIn<T>(_ body: () async throws -> T?) async throws -> T {
+        let answer: T?
+        do { answer = try await body() }
+        catch {
+            if let listed = try? await call(BrowserRequest(.list)), !(listed.features ?? []).contains(BrowserSignInForm.feature) {
+                throw LinkError(Self.updateToSignIn)
+            }
+            throw error
+        }
+        guard let answer else { throw LinkError(Self.updateToSignIn) }
+        return answer
+    }
+    public static let updateToSignIn = "Update \(BrowserBuildIdentity.current.appName) to sign in from here."
+
     /// Replaces which of the user's browsers one of their bots may use.
     public func assign(_ ids: Set<UUID>, to bot: UUID, for user: HubUser) throws {
         guard access.owner(ofBot: bot) == user.id else { throw LinkError("That bot is not yours.") }

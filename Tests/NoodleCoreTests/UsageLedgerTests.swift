@@ -42,6 +42,36 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(try ledger.days(from: today, to: today.addingTimeInterval(86_400), agentID: bob).count, 1)
     }
 
+    /// A Hub plan's token limit counts input and output, cache writes included, of one person's bots;
+    /// cache reads and samples from before owners were kept do not count.
+    func testSpendingCountsNewTokensOfOnePersonsBotsAfterAStart() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("usage.sqlite")
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let ada = UUID(), grace = UUID(), bot = UUID()
+        func sample(_ owner: UUID?, at seconds: TimeInterval, input: Int) -> UsageSample {
+            UsageSample(date: start.addingTimeInterval(seconds), agentID: bot, agentName: "Kai", harness: "codex", model: "gpt-5",
+                        tokens: UsageTokens(input: input, output: 20, cacheRead: 5_000, cacheWrite: 3, reasoning: 7),
+                        costUSD: nil, owner: owner)
+        }
+        do {
+            let ledger = try UsageLedger(url: url)
+            try ledger.record(sample(ada, at: 0, input: 1))
+            try ledger.record(sample(ada, at: 20, input: 200))
+            try ledger.record(sample(ada, at: 10, input: 100))
+            try ledger.record(sample(grace, at: 15, input: 1_000))
+            try ledger.record(sample(nil, at: 30, input: 10_000))
+        }
+        let ledger = try UsageLedger(url: url)
+        XCTAssertEqual(try ledger.spending(owner: ada, after: start), [
+            UsageSpend(date: start.addingTimeInterval(10), tokens: 123),
+            UsageSpend(date: start.addingTimeInterval(20), tokens: 223)
+        ])
+        XCTAssertEqual(try ledger.spending(owner: grace, after: start).map(\.tokens), [1_023])
+        XCTAssertEqual(try ledger.spending(owner: UUID(), after: start), [])
+    }
+
     func testRecordedTotalsSumOneSessionPerModelInHistoriesFromBeforeSessions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -24,10 +24,14 @@ public enum BrowserOperation: String, Codable, CaseIterable, Sendable {
     case setOwner = "browser-set-owner"
     /// An app outside Noodle asking the person to lend it one of their browsers.
     case borrow = "browser-borrow"
+    /// A person watching a browser live asking for the sign-in fields of the page they see, once, and
+    /// filling them with what they typed or picked from their passwords. Bots never do either.
+    case signInForm = "sign-in-form", signInFill = "sign-in-fill"
     public var timeout: Int { isFileTransfer ? 600 : 60 }
     public var isFileTransfer: Bool { self == .upload || self == .download || self == .screenshot }
-    public var isManagement: Bool { [.create, .update, .delete, .surfaceStream, .setOwner, .borrow].contains(self) }
-    public var needsTab: Bool { ![.list, .status, .tabs, .open, .downloads, .download, .history, .bookmarks, .bookmarkAdd, .bookmarkUpdate, .bookmarkRemove, .create, .update, .delete, .setOwner, .borrow].contains(self) }
+    public var isManagement: Bool { [.create, .update, .delete, .surfaceStream, .setOwner, .borrow, .signInForm, .signInFill].contains(self) }
+    public var needsTab: Bool { ![.list, .status, .tabs, .open, .downloads, .download, .history, .bookmarks, .bookmarkAdd, .bookmarkUpdate, .bookmarkRemove, .create, .update, .delete, .setOwner, .borrow,
+        .signInForm, .signInFill].contains(self) }
     /// What bots may call.
     public static var agentCases: [Self] { allCases.filter { !$0.isManagement } }
     /// What apps outside Noodle may call: what bots may, apart from posting into a conversation,
@@ -191,6 +195,8 @@ public struct BrowserRequest: Codable, Sendable {
     public var profile: BrowserDraft?
     /// For setOwner; nil clears it.
     public var owner: BrowserOwner?
+    /// For signInFill alone: what the person typed or picked. Its description leaves the values out.
+    public var signIn: BrowserSignInValues?
     public init(_ operation: BrowserOperation, browserID: UUID? = nil, tabID: UUID? = nil) {
         self.operation = operation; self.browserID = browserID; self.tabID = tabID
     }
@@ -229,6 +235,12 @@ public struct BrowserRequest: Codable, Sendable {
         }
         if let clickCount, operation != .click || !(1...2).contains(clickCount) { throw BrowserError("Use --count 1 or 2 with click.") }
         if [.eval, .fill, .key].contains(operation), text == nil { throw BrowserError("Specify --text or --file.") }
+        if operation == .signInFill {
+            guard let signIn else { throw BrowserError("Enter something to sign in with.") }
+            try signIn.validate()
+        } else if signIn != nil {
+            throw BrowserError("Sign-in values go with sign-in-fill alone.")
+        }
         if operation == .download, fileID == nil { throw BrowserError("Specify --download UUID from downloads.") }
         if operation == .dialog, accept == nil { throw BrowserError("Specify --accept true or false.") }
         if let query, query.utf8.count > 1000 || query.utf8.contains(0) { throw BrowserError("Search must be at most 1,000 UTF-8 bytes without null characters.") }
@@ -259,6 +271,10 @@ public struct BrowserResponse: Codable, Sendable {
     public var attachmentID: UUID?
     public var dialog: BrowserDialog?
     public var pointer: BrowserPointerState?
+    /// For signInForm.
+    public var signInForm: BrowserSignInForm?
+    /// For signInFill: whether the form was submitted.
+    public var submitted: Bool?
     public var text: String?
     public var byteCount: Int64?
     public var filename: String?

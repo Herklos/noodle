@@ -170,6 +170,31 @@ import WebKit
     }
     /// Someone is watching the browser live.
     func isWatched(_ browser: UUID) -> Bool { surfaces[browser]?.isWatched == true }
+    /// Browsers whose filled passwords are being emptied after the last viewer left, with how many emptyings
+    /// are under way; bots wait until none is.
+    private var clearingSignIn: [UUID: Int] = [:]
+    /// How many times emptying a page's passwords is tried before the page itself is stopped.
+    static let signInClearAttempts = 3
+    /// Empties the password fields people filled in the browser's pages while watching, so that a bot
+    /// using the browser next cannot read them. A page that will not let them be emptied is stopped, as an
+    /// idle one is, and loads afresh when next used; bots never get a page still holding a password.
+    func clearSignIns(_ browserID: UUID) {
+        let filled = tabs.values.filter { $0.browserID == browserID && $0.hasSignInToClear }
+        guard !filled.isEmpty else { return }
+        clearingSignIn[browserID, default: 0] += 1
+        Task {
+            for tab in filled {
+                var cleared = false
+                for _ in 0..<Self.signInClearAttempts where !cleared { cleared = await tab.clearSignIn() }
+                guard !cleared, tabs[tab.id] === tab else { continue }
+                tab.info.loading = false; saveTab(tab)
+                stopped[tab.id] = (tab.favicon ?? stopped[tab.id]?.favicon, nil)
+                tabs.removeValue(forKey: tab.id)?.stop()
+            }
+            clearingSignIn[browserID, default: 1] -= 1
+            if clearingSignIn[browserID] == 0 { clearingSignIn[browserID] = nil }
+        }
+    }
     /// Only the tab a person is watching draws as if seen.
     private func showWatchedTab(_ browserID: UUID, watched: Bool? = nil) {
         let watched = watched ?? isWatched(browserID)
@@ -303,7 +328,7 @@ import WebKit
         var response = BrowserResponse()
         if request.operation == .list {
             guard library.failure == nil else { throw BrowserError(library.failure!) }
-            response.browsers = library.profiles.map(\.remote); response.features = [SurfaceSocket.feature]; return response
+            response.browsers = library.profiles.map(\.remote); response.features = [SurfaceSocket.feature, BrowserSignInForm.feature]; return response
         }
         let hub = caller == BrowserBuildIdentity.current.hubID
         if request.operation == .create, let draft = request.profile {
@@ -365,15 +390,29 @@ import WebKit
             let streamer = surfaces[id] ?? {
                 let view = BrowserLiveView(browserID: id, runtime: self)
                 let streamer = SurfaceStreamer(capture: { try await view.picture() }, apply: { try view.apply($0) })
-                streamer.watchingChanged = { [weak self] watched in self?.showWatchedTab(id, watched: watched) }
+                streamer.watchingChanged = { [weak self] watched in
+                    // Bots are kept off until the passwords people filled are emptied, before the browser counts as unwatched.
+                    if !watched { self?.clearSignIns(id) }
+                    self?.showWatchedTab(id, watched: watched)
+                }
                 return streamer
             }()
             surfaces[id] = streamer
             streamer.attach(surface)
             return response
         }
+        // Only the person watching signs in, on the tab they see, whether or not bots are paused.
+        if request.operation == .signInForm || request.operation == .signInFill {
+            guard isWatched(id) else { throw BrowserError("Open the browser live to sign in.") }
+            guard let tabID = profile.selectedTabID ?? profile.tabs.first?.id else { throw BrowserError("This browser has no tabs.") }
+            let tab = try tab(browserID: id, tabID: tabID)
+            response.tabID = tab.id
+            if request.operation == .signInForm { response.signInForm = try await tab.findSignIn() }
+            else { response.submitted = try await tab.fillSignIn(request.signIn!) }
+            return response
+        }
         guard !profile.paused else { throw BrowserError("Agent control is paused for this browser. Wait for the user to resume it.") }
-        guard !isWatched(id) else { throw BrowserError("A person is using this browser right now. Try again when they're done.") }
+        guard !isWatched(id), clearingSignIn[id] == nil else { throw BrowserError("A person is using this browser right now. Try again when they're done.") }
         // Dialog replies must remain available while a JS command is waiting.
         if request.operation == .dialog {
             let tab = try tab(browserID: id, tabID: request.tabID!)
@@ -416,6 +455,8 @@ import WebKit
         case .inspect: response.text = try await tab.inspect(frame: request.frame)
         case .webMCPList, .webMCPCall: response.text = try await tab.webMCP(request)
         case .eval:
+            // The bot's script may leave listeners behind in the page; a person is not offered to sign in to it.
+            tab.botScriptedDocument = true
             let result = try await tab.evaluate("return JSON.stringify(await (async()=>{\n\(request.text!)\n})());", frame: request.frame)
             let text = result as? String ?? "null"
             guard text.utf8.count <= 2 * 1_048_576 else { throw BrowserError("JavaScript result exceeds 2 MiB. Return less data.") }

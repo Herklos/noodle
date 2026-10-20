@@ -4,8 +4,11 @@
 
 ### Added
 
+- A plan can limit how many tokens each of its users' bots use over a number of hours, days, weeks or months, counted over a rolling period. Once a user reaches it, a turn under way finishes and then their bots stop until the period allows more; messages to them still go through and are answered then. Settings → Users shows how much each user used.
 - Admins can also suspend and restore regular users from Noodle Mobile.
 - Suspend a user from Settings → Users to stop their bots and block their devices until you restore access, keeping their plan and data.
+- Bots whose harness takes voice calls (Codex) can call their owner with messenger --call when something needs them now. The call rings on the owner's devices that run a Noodle with calls, until one answers or declines it or 45 seconds pass; the Hub connects the bot's voice only once it is answered. A declined or missed call leaves a card in the bot's conversation and tells the bot. A bot can call at most once every 30 minutes and three times a day.
+- Someone watching one of their browsers live from a device can sign in to the page they see with the device's own fields and saved passwords, once Noodle on the device offers it. Noodle Browser on the Hub's Mac needs updating too.
 
 ### Fixed
 

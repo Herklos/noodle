@@ -48,9 +48,11 @@ public struct UsageSample: Hashable, Sendable {
     public var costUSD: Double?
     /// Set for harnesses whose totals carry over when a session is resumed.
     public var session: String?
+    /// The person on a Hub whose bot this is, whose plan the tokens count against.
+    public var owner: UUID?
 
     public init(date: Date, agentID: UUID, agentName: String, harness: String, model: String,
-                tokens: UsageTokens, costUSD: Double?, session: String? = nil) {
+                tokens: UsageTokens, costUSD: Double?, session: String? = nil, owner: UUID? = nil) {
         self.date = date
         self.agentID = agentID
         self.agentName = agentName
@@ -59,6 +61,18 @@ public struct UsageSample: Hashable, Sendable {
         self.tokens = tokens
         self.costUSD = costUSD
         self.session = session
+        self.owner = owner
+    }
+}
+
+/// When a person's bot used tokens, and how many of them a plan's limit counts.
+public struct UsageSpend: Hashable, Sendable {
+    public var date: Date
+    public var tokens: Int
+
+    public init(date: Date, tokens: Int) {
+        self.date = date
+        self.tokens = tokens
     }
 }
 
@@ -98,10 +112,13 @@ public final class UsageLedger: @unchecked Sendable {
                     cache_write INTEGER NOT NULL, reasoning INTEGER NOT NULL, cost_usd REAL);
                 CREATE INDEX IF NOT EXISTS usage_time ON usage(time);
                 """)
-            if try !withStatement("SELECT 1 FROM pragma_table_info('usage') WHERE name = 'session'", { sqlite3_step($0) == SQLITE_ROW }) {
-                try execute("ALTER TABLE usage ADD COLUMN session TEXT")
+            for column in ["session", "owner"] {
+                if try !withStatement("SELECT 1 FROM pragma_table_info('usage') WHERE name = '\(column)'", { sqlite3_step($0) == SQLITE_ROW }) {
+                    try execute("ALTER TABLE usage ADD COLUMN \(column) TEXT")
+                }
             }
             try execute("CREATE INDEX IF NOT EXISTS usage_session ON usage(session)")
+            try execute("CREATE INDEX IF NOT EXISTS usage_owner ON usage(owner, time)")
         } catch {
             sqlite3_close(db)
             throw error
@@ -112,8 +129,8 @@ public final class UsageLedger: @unchecked Sendable {
 
     public func record(_ sample: UsageSample) throws {
         try withStatement("""
-            INSERT INTO usage (time, agent_id, agent_name, harness, model, input, output, cache_read, cache_write, reasoning, cost_usd, session)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO usage (time, agent_id, agent_name, harness, model, input, output, cache_read, cache_write, reasoning, cost_usd, session, owner)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """) { statement in
             sqlite3_bind_double(statement, 1, sample.date.timeIntervalSince1970)
             bind(sample.agentID.uuidString, to: statement, at: 2)
@@ -126,6 +143,7 @@ public final class UsageLedger: @unchecked Sendable {
             }
             if let cost = sample.costUSD { sqlite3_bind_double(statement, 11, cost) } else { sqlite3_bind_null(statement, 11) }
             if let session = sample.session { bind(session, to: statement, at: 12) } else { sqlite3_bind_null(statement, 12) }
+            if let owner = sample.owner { bind(owner.uuidString, to: statement, at: 13) } else { sqlite3_bind_null(statement, 13) }
             guard sqlite3_step(statement) == SQLITE_DONE else { throw UsageLedgerError("Could not save usage.") }
         }
     }
@@ -186,6 +204,24 @@ public final class UsageLedger: @unchecked Sendable {
                     cacheRead: column(3), cacheWrite: column(4), reasoning: column(5)), costUSD: sqlite3_column_double(statement, 6))
             }
             return totals
+        }
+    }
+
+    /// Each sample of one person's bots after `start`, oldest first, with the tokens a plan's limit
+    /// counts: input and output, as the Usage window shows them, cache writes included. Cache reads
+    /// repeat input already counted when it was written. Samples from before owners were kept belong to nobody.
+    public func spending(owner: UUID, after start: Date) throws -> [UsageSpend] {
+        try withStatement("""
+            SELECT time, input + cache_write + output FROM usage WHERE owner = ? AND time > ? ORDER BY time
+            """) { statement in
+            bind(owner.uuidString, to: statement, at: 1)
+            sqlite3_bind_double(statement, 2, start.timeIntervalSince1970)
+            var spending: [UsageSpend] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                spending.append(UsageSpend(date: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                                           tokens: Int(sqlite3_column_int64(statement, 1))))
+            }
+            return spending
         }
     }
 

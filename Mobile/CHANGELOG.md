@@ -5,10 +5,19 @@
 ### Added
 
 - Hub admins can suspend and restore regular users from their user details, keeping their plan, data and paired devices.
+- Your bots on a Noodle Hub can call you when something needs you now. While Noodle is open, the call rings on the phone's call screen with the bot's name; Answer starts the call and Decline turns it down. A call you decline or miss shows as a card in the bot's conversation, with why it called. Needs the Hub updated.
+- Sign in to a page in a browser you watch live with your iPhone's own fields: tap the key, pick your login from Passwords or type it, and tap Fill. Codes from Messages are offered too. Turn on Submit to send the form as well. Needs a Hub and Noodle Browser that offer it.
 
 ### What to Test
 
 - As a Hub admin, open Users, select a regular user and turn on Suspended. Their bots stop and devices lose access. Turn it off to restore access without pairing again. Admin users cannot be suspended from a device.
+- With Noodle open, ask a Codex bot on your Hub to call you (it runs messenger --call --reason "…"): check the call screen rings with the bot's name, and that Answer connects the call in its conversation, with the bot saying why it called.
+- Let a call ring out, and decline another: check each leaves a Missed call or Declined call card from the bot with its reason, and that the bot writes to you instead.
+- With Noodle on a Mac paired with the same Hub, answer or decline on one device: check the other stops ringing.
+- Open a browser a bot shared at a sign-in page and tap the key: check the sheet names the site with a lock, and offers only the fields the page has. Pick a login from Passwords, tap Fill, and check the page shows the username and dots for the password, and is not submitted. Repeat with Submit on and check it signs in.
+- On a page asking for a code sent by text message, tap the key: check the code from Messages is offered above the keyboard and fills the page's boxes.
+- Fill a password without signing in and close the live view: open it again and check the password field is empty.
+- On a page with no sign-in fields, tap the key: check it says none were found. With a Hub or Noodle Browser that cannot sign in, check the key does not show or the message names what to update.
 
 ## [0.40.0] - 2026-10-20
 

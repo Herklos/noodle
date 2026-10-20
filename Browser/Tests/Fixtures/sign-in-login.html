@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>Sign in</title>
+<form role="search"><input id="search" type="search" placeholder="Search"></form>
+<form id="login">
+<label for="user">Email or username</label><input id="user" name="login">
+<input id="decoy" type="password" style="display:none">
+<label for="pass">Password</label><input id="pass" type="password" name="password">
+<button id="sign-in" type="submit">Sign in</button>
+</form>
+<script>
+// As React does: the page keeps the value it last set itself, and an input event counts only when the
+// field holds something else, so a value set behind its back without the native setter goes unseen.
+window.seen = {}; window.submitted = 0;
+const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+for (const input of document.querySelectorAll('#login input')) {
+    let tracked = native.get.call(input);
+    Object.defineProperty(input, 'value', {configurable: true, get() { return native.get.call(this); }, set(value) { tracked = value; native.set.call(this, value); }});
+    input.addEventListener('input', () => { const now = native.get.call(input); if (now !== tracked) { tracked = now; seen[input.id] = now; } });
+}
+document.querySelector('#login').addEventListener('submit', event => { event.preventDefault(); submitted++; });
+</script>
