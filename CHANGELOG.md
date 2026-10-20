@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - Settings → Hub has Computers & Browsers… for each Noodle Hub you joined. It lists all your computers and browsers there, whichever bots have them. Edit… changes one's name and description, and Delete removes it after saying which bots lose it.
+- Settings → Harness shows how much of each signed-in Codex and Claude Code account's plan limits is used, such as the 5-hour and weekly limits, and when each resets, beside the harness and under each of its profiles. Codex reports its limits when Settings opens and both report them during their bots' turns; where nothing has been reported it says Not available.
 
 ### Changed
 

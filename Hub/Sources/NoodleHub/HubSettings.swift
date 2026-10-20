@@ -27,6 +27,7 @@ enum HubSettingsTab: Hashable {
         mcp = MCPController(repository: hub.repository)
         setup = HarnessSetupController(versionChecker: HarnessVersionChecker(),
                                        installer: ManagedHarnessInstaller(store: hub.repository.managedHarnesses))
+        setup.subscriptionUsage = hub.runtime.subscriptionUsage
     }
 
     var runtime: AgentRuntimeCoordinator { hub.runtime }

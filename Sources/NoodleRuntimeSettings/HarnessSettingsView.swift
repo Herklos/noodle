@@ -181,6 +181,9 @@ public struct HarnessInstallationRow: View {
                 if installation.isAvailable {
                     versionDetails
                 }
+                if installation.isAvailable, setup.authentication[id] == .authenticated {
+                    SubscriptionUsageView(usage: store.runtime.subscriptionUsage.usage(id, profile: nil))
+                }
                 if needsSignIn, setup.authentication[id] == .managedExternally {
                     Text("Could not determine the saved sign-in status.")
                         .font(.caption).foregroundStyle(.secondary)

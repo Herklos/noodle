@@ -112,6 +112,10 @@ public struct HarnessProfilesView: View {
                 .fixedSize()
                 .accessibilityLabel("Profile Actions")
             }
+            if controller.activity[profile.id] == nil, controller.authentication[profile.id] == .authenticated {
+                SubscriptionUsageView(usage: store.runtime.subscriptionUsage.usage(installation.provider, profile: profile.id))
+                    .padding(.leading, 34)
+            }
             if let challenge = controller.challenges[profile.id] {
                 HarnessSignInChallengeView(challenge: challenge)
             }

@@ -16,9 +16,16 @@ public final class CodexAccountProvider: HarnessSetupProviding {
 
     public var installationGuide: HarnessInstallationGuide { direct.installationGuide }
 
+    /// Receives the plan limits a sign-in check of a signed-in account reads, here or in the Agent Host.
+    public var onUsage: (@MainActor (SubscriptionUsage) -> Void)? {
+        get { direct.onUsage }
+        set { direct.onUsage = newValue }
+    }
+
     public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
         guard let path = hostPath(installation) else { return try await direct.status(for: installation) }
-        return try await HarnessAccountOperation().run(executablePath: path, signIn: false, provider: .codex, profile: profile)
+        return try await HarnessAccountOperation().run(executablePath: path, signIn: false, provider: .codex, profile: profile,
+                                                       onUsage: direct.onUsage)
     }
 
     public func signIn(for installation: HarnessInstallation,

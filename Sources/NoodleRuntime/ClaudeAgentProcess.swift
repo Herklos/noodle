@@ -323,7 +323,8 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         if ownSession, !turnIsActive, !paused, type == "assistant", message["parent_tool_use_id"] as? String == nil {
             beginSelfStartedTurn()
         }
-        if ownSession, turnIsActive || backgroundTaskCount > 0 {
+        // Plan limits may be reported as a turn ends, and hold for the account whenever they come.
+        if ownSession, turnIsActive || backgroundTaskCount > 0 || type == "rate_limit_event" {
             onActivity(message)
         }
         // Tool results going back to the model carry the steered message with them.
