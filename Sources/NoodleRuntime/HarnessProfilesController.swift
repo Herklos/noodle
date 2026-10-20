@@ -14,6 +14,8 @@ public final class HarnessProfilesController {
     /// The command a profile signs in with from Terminal, once the person asks to.
     public private(set) var terminalSignIns: [UUID: String] = [:]
     @ObservationIgnored private let store: HarnessProfileStore
+    /// Where a profile's plan limits go when its sign-in check reads them.
+    @ObservationIgnored public var subscriptionUsage: SubscriptionUsageStore?
     @ObservationIgnored private var operations: [UUID: (id: UUID, task: Task<Void, Never>)] = [:]
 
     public init(store: HarnessProfileStore) {
@@ -47,6 +49,7 @@ public final class HarnessProfilesController {
     public func delete(_ profile: HarnessProfile) throws {
         cancel(profile)
         try store.delete(profile)
+        subscriptionUsage?.forget(profile.provider, profile: profile.id)
         authentication[profile.id] = nil
         errors[profile.id] = nil
         terminalSignIns[profile.id] = nil
@@ -126,9 +129,12 @@ public final class HarnessProfilesController {
 
     private func setupProvider(for profile: HarnessProfile) -> (any HarnessProfileAccount)? {
         switch profile.provider {
-        case .codex: CodexAccountProvider(codexHome: store.accountHome(profile), profile: profile.id)
-        case .grokBuild, .muse, .claudeCode, .fx, .antigravity, .openCode: HostProfileSetupProvider(profile: profile)
-        default: nil
+        case .codex:
+            let provider = CodexAccountProvider(codexHome: store.accountHome(profile), profile: profile.id)
+            provider.onUsage = { [weak usage = self.subscriptionUsage] in usage?.record($0, provider: .codex, profile: profile.id) }
+            return provider
+        case .grokBuild, .muse, .claudeCode, .fx, .antigravity, .openCode: return HostProfileSetupProvider(profile: profile)
+        default: return nil
         }
     }
 

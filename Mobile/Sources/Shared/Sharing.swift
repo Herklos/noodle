@@ -194,7 +194,7 @@ enum PickedFiles {
     }
 
     // Each handler is @Sendable: iOS calls them off the main thread, where one isolated to it would abort.
-    private static func object<T: _ObjectiveCBridgeable & Sendable>(_: T.Type, from provider: NSItemProvider) async -> T?
+    static func object<T: _ObjectiveCBridgeable & Sendable>(_: T.Type, from provider: NSItemProvider) async -> T?
         where T._ObjectiveCType: NSItemProviderReading {
         guard provider.canLoadObject(ofClass: T.self) else { return nil }
         return await withCheckedContinuation { continuation in
@@ -203,7 +203,7 @@ enum PickedFiles {
     }
 
     /// Named as the app shared it, with the extension its type has.
-    private static func file(_ type: UTType, from provider: NSItemProvider) async -> OutgoingFile? {
+    static func file(_ type: UTType, from provider: NSItemProvider) async -> OutgoingFile? {
         let suggested = provider.suggestedName
         return await withCheckedContinuation { continuation in
             _ = provider.loadFileRepresentation(for: type, openInPlace: false) { @Sendable url, _, _ in

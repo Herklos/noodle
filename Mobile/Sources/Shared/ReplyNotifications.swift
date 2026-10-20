@@ -18,6 +18,8 @@ enum AppGroup {
 struct NotificationRoute: Equatable, Sendable {
     let topic: String
     let conversation: UUID
+    /// Whether to call the bot once its conversation is open, as its widget's call button asks.
+    var call = false
 }
 
 /// What the phone gave each Hub to leave word of unread replies under.

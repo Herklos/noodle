@@ -156,10 +156,14 @@ public final class AgentRuntimeCoordinator {
     private func neverStarts(_ id: UUID) -> Bool { remoteAgentIDs.contains(id) || archivedAgentIDs.contains(id) }
     /// Receives what each model call cost. Nothing is kept here.
     @ObservationIgnored public var onUsage: (@MainActor (UsageSample) -> Void)?
+    /// How much of each signed-in account's plan limits is used, as the harnesses last reported.
+    public let subscriptionUsage: SubscriptionUsageStore
     /// What the usage ledger holds for a session, so resumed totals are not counted twice.
     @ObservationIgnored public var recordedUsage: (@MainActor (String) -> [String: UsageTotal])?
     /// Called once when a bot's harness needs the person to sign in again.
     @ObservationIgnored public var onSignInRequired: (@MainActor (UUID) -> Void)?
+    /// Called once each time a bot pauses until Kick for a reported failure other than sign-in.
+    @ObservationIgnored public var onPaused: (@MainActor (UUID) -> Void)?
     /// Retries before a turn finishes fail the same way, so they stay quiet.
     @ObservationIgnored private var signInAnnounced: Set<UUID> = []
     /// Whether a bot's harness login works now, asked without starting the bot or a turn;
@@ -278,6 +282,7 @@ public final class AgentRuntimeCoordinator {
         self.inspectHost = inspectHost
         self.discovery = discovery
         self.defaults = defaults
+        subscriptionUsage = SubscriptionUsageStore(defaults: defaults)
         self.harnesses = harnesses ?? HarnessSelection()
         preventIdleSleepWhileWorking = defaults.bool(forKey: Self.preventIdleSleepDefaultsKey)
         accessConfiguration = AgentAccessConfiguration.load(from: defaults)
@@ -814,6 +819,7 @@ public final class AgentRuntimeCoordinator {
                 guard let self, self.runtimeIDs[agent.id] == runtimeID else { return }
                 self.activity.record(message, provider: installation.provider, agentID: agent.id)
                 self.recordUsage(message, provider: installation.provider, agent: agent)
+                self.recordSubscriptionUsage(message, provider: installation.provider, agent: agent, repository: repository)
             }))
         processes[agent.id] = process
         process.start()
@@ -831,6 +837,13 @@ public final class AgentRuntimeCoordinator {
                 model: reading.model.isEmpty ? agent.modelIdentifier ?? "" : reading.model,
                 tokens: reading.tokens, costUSD: reading.costUSD, session: reading.session))
         }
+    }
+
+    /// Plan limits belong to the login the bot runs on, its profile's or the system one.
+    private func recordSubscriptionUsage(_ message: [String: Any], provider: HarnessProvider, agent: AgentRecord,
+                                         repository: WorkspaceRepository) {
+        guard SubscriptionUsage.isReport(message, provider: provider) else { return }
+        subscriptionUsage.record(message, provider: provider, profile: try? repository.loadAgentHarnessProfile(agent), at: now())
     }
 
     /// Organize waits for an idle bot, like a heartbeat, so it never cuts into work.
@@ -1238,7 +1251,13 @@ public final class AgentRuntimeCoordinator {
             if snapshot.failure == .authenticationRequired, self.signInAnnounced.insert(agentID).inserted {
                 self.onSignInRequired?(agentID)
             }
+            let previous = self.snapshots[agentID]
             self.snapshots[agentID] = snapshot
+            // Only failures the runtime keeps until Kick; a plain stop restarts by itself.
+            if snapshot.phase == .failed, let failure = snapshot.failure, failure != .authenticationRequired,
+               previous?.phase != .failed || previous?.failure != failure {
+                self.onPaused?(agentID)
+            }
             if snapshot.phase == .ready { self.markStable(agentID: agentID) }
         }
     }

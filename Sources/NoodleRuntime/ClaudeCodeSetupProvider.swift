@@ -47,13 +47,20 @@ public final class HarnessAccountOperation {
     public init() throws { connection = try ExtendedAgentConnection() }
 
     public func run(executablePath: String, signIn: Bool, provider: HarnessProvider = .claudeCode, profile: UUID? = nil,
-             onChallenge: (@MainActor (HarnessSignInChallenge) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
+             onChallenge: (@MainActor (HarnessSignInChallenge) -> Void)? = nil,
+             onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
                 connection.onFailure = { [weak self] error in
                     Task { @MainActor in self?.finish(.failure(HarnessSetupError(error))) }
+                }
+                // Sent by a Codex account check before its reply.
+                connection.onAccountUsage = { data in
+                    Task { @MainActor in
+                        if let usage = try? JSONDecoder().decode(SubscriptionUsage.self, from: data) { onUsage?(usage) }
+                    }
                 }
                 connection.onSignInChallenge = { url, code in
                     Task { @MainActor in

@@ -229,6 +229,7 @@ final class NoodleStore {
                               deviceName: Host.current().localizedName ?? "Mac")
         harnessSetup = HarnessSetupController(versionChecker: HarnessVersionChecker(),
             installer: repository == nil ? ManagedHarnessInstaller(store: self.repository.managedHarnesses) : nil)
+        harnessSetup.subscriptionUsage = self.runtime.subscriptionUsage
 
         transcriptPositions = TranscriptPositionStore(fileURL: self.repository.rootURL.appendingPathComponent("scroll-positions.json"))
         patchReviewState = PatchReviewStore(fileURL: self.repository.rootURL.appendingPathComponent("patch-reviews.json"))
@@ -297,6 +298,7 @@ final class NoodleStore {
         }
         noodletAnnotations = NoodletAnnotations(applets: applets)
         harnessProfiles = HarnessProfilesController(store: self.repository.harnessProfiles)
+        harnessProfiles.subscriptionUsage = self.runtime.subscriptionUsage
         thisMac = ThisMacHub(repository: self.repository, runtime: self.runtime, applets: applets, profiles: harnessProfiles,
                              service: mcp.service)
         thisMac.imageGeneration = imageGeneration
@@ -330,6 +332,13 @@ final class NoodleStore {
         self.runtime.onSignInRequired = { [weak self] id in
             guard let self, self.connectsServices, let agent = self.agents.first(where: { $0.id == id }) else { return }
             NoodleNotifications.postSignInRequired(for: agent)
+        }
+        self.runtime.onPaused = { [weak self] id in
+            guard let self, self.connectsServices, let agent = self.agents.first(where: { $0.id == id }) else { return }
+            let snapshot = self.runtime.snapshot(for: id)
+            guard let summary = snapshot.pauseSummary else { return }
+            let conversation = self.conversations.first { $0.kind == .direct && $0.participantIDs == [id] }
+            NoodleNotifications.postPaused(agent, summary: summary, detail: snapshot.detail, conversationID: conversation?.id)
         }
         self.runtime.checkSignIn = { [weak self] agent in
             guard let self, let installation = self.runtime.installation(for: agent) else { return nil }
@@ -1634,6 +1643,33 @@ final class NoodleStore {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Sends a file on to another bot or group as one message from the person, with the comment as its
+    /// words, as if they had attached it there. What is being written there stays as it is. A conversation
+    /// on a Noodle Hub gets the copy as any file sent there: the Hub keeps each conversation's files apart,
+    /// so it goes up again from this Mac.
+    @discardableResult
+    func forward(_ attachment: ConversationAttachment, to conversationID: UUID, comment: String) throws -> ChatMessage {
+        guard let conversation = conversations.first(where: { $0.id == conversationID }) else {
+            throw WorkspaceError.missingConversation(conversationID)
+        }
+        guard AttachmentForwarding.canForward(attachment) else { throw WorkspaceError.invalidAttachment }
+        let copy = try repository.importAttachment(from: attachmentFileURL(attachment), into: conversationID,
+                                                   mediaType: attachment.mediaType, originalFilename: attachment.originalFilename)
+        attachmentsByConversation[conversationID, default: []].append(copy)
+        let body = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = try repository.sendUserMessage(conversationID: conversationID,
+                                                     body: body.isEmpty ? "Sent 1 attachment" : body, attachmentIDs: [copy.id])
+        messagesByConversation[conversationID, default: []].append(message)
+        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+            conversations[index].updatedAt = message.createdAt
+            conversations.sort { $0.updatedAt > $1.updatedAt }
+        }
+        runtime.notify(participants(for: conversation), repository: repository)
+        voiceCalls.shared(in: conversationID, body: body, attachmentNames: [copy.originalFilename])
+        sendToHub(conversationID)
+        return message
     }
 
     @discardableResult
