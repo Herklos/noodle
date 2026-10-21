@@ -1472,6 +1472,53 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(CloudKitSubscriptions.subscription(topic: "xyz").subscriptionID != subscription.subscriptionID)
     }
 
+    /// The phone hears in silence when the Hub takes its word back, under a subscription that names the topic.
+    @Test func theWithdrawalsSubscriptionListensInSilence() {
+        let withdrawals = CloudKitSubscriptions.withdrawals(topic: "abc")
+        #expect(withdrawals.recordType == LinkPush.recordType)
+        #expect(withdrawals.predicate == NSPredicate(format: "%K == %@", LinkPush.topicField, "abc"))
+        #expect(withdrawals.querySubscriptionOptions == [.firesOnRecordDeletion])
+        #expect(withdrawals.notificationInfo?.shouldSendContentAvailable == true)
+        #expect(withdrawals.notificationInfo?.alertBody == nil)
+        #expect(withdrawals.notificationInfo?.soundName == nil)
+        #expect(withdrawals.subscriptionID != CloudKitSubscriptions.subscription(topic: "abc").subscriptionID)
+        #expect(PushTopic.withdrawal(subscriptionID: withdrawals.subscriptionID, recordName: "name")
+            == PushWithdrawal(topic: "abc", recordName: "name"))
+        #expect(PushTopic.withdrawal(subscriptionID: CloudKitSubscriptions.subscriptionID("abc"), recordName: "name") == nil)
+        #expect(PushTopic.withdrawal(subscriptionID: nil, recordName: "name") == nil)
+    }
+
+    /// The icon counts the listed conversations with a reply not read yet, once the live stream is
+    /// open; read here, a conversation leaves the count at once.
+    @Test func theIconCountsUnreadConversations() async throws {
+        let hub = FakeHub()
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+        try await chats.reload()
+        let house = await hub.addGroup(named: "House", saying: "Dinner at eight.")
+        await hub.botSays("Done")
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        // What this phone kept may miss replies until the Hub is heard.
+        #expect(chats.badgedConversations == nil)
+
+        let following = Task { await chats.follow() }
+        defer { following.cancel() }
+        for _ in 0..<100 where !chats.isConnected { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.badgedConversations == [scout.conversationID, house.id])
+        AppBadge.publish([chats])
+        #expect(AppBadge.unread(in: chats.pairing.directory) == [scout.conversationID, house.id])
+        #expect(AppBadge.count(hubs: hubs) == 2)
+
+        chats.markRead(scout)
+        #expect(AppBadge.unread(in: chats.pairing.directory) == [house.id])
+        #expect(chats.badgedConversations == [house.id])
+
+        try await chats.setArchived(true, .group(house))
+        #expect(chats.badgedConversations == [])
+    }
+
     @Test func aNotificationLeadsToItsConversation() {
         let conversation = UUID()
         let route = PushTopic.route(fields: [LinkPush.topicField: "abc", LinkPush.conversationField: conversation.uuidString])

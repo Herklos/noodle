@@ -8,6 +8,14 @@ final class LinkCompatibilityTests: XCTestCase {
         try LinkProtocol.decoder.decode(type, from: Data(json.utf8))
     }
 
+    /// Phones work out which conversation a Hub's deleted push record was about from its name, so
+    /// the name must not change between a Hub and a phone of different versions.
+    func testPushRecordNamesStayTheSame() {
+        let conversation = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        XCTAssertEqual(LinkPush.recordName(topic: "abc", conversation: conversation),
+                       "716a1b0a93e487e5cec902308aa2ed100b026dc1c76feeddb08d1163bad5b652")
+    }
+
     func testLiveCardMetadataReadsWirePayloads() throws {
         let b = UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!
         let c = UUID(uuidString: "00000000-0000-0000-0000-00000000000C")!

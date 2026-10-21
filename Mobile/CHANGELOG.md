@@ -8,6 +8,10 @@
 - Your bots on a Noodle Hub can call you when something needs you now. While Noodle is open, the call rings on the phone's call screen with the bot's name; Answer starts the call and Decline turns it down. A call you decline or miss shows as a card in the bot's conversation, with why it called. Needs the Hub updated.
 - Sign in to a page in a browser you watch live with your iPhone's own fields: tap the key, pick your login from Passwords or type it, and tap Fill. Codes from Messages are offered too. Turn on Submit to send the form as well. Needs a Hub and Noodle Browser that offer it.
 
+### Fixed
+
+- The app icon shows how many conversations have replies you haven't read, on all your Hubs, as Messages does. It counts replies that come while Noodle is closed, and goes down as you read them here or, while Noodle is still in the app switcher, on another device.
+
 ### What to Test
 
 - As a Hub admin, open Users, select a regular user and turn on Suspended. Their bots stop and devices lose access. Turn it off to restore access without pairing again. Admin users cannot be suspended from a device.
@@ -18,6 +22,8 @@
 - On a page asking for a code sent by text message, tap the key: check the code from Messages is offered above the keyboard and fills the page's boxes.
 - Fill a password without signing in and close the live view: open it again and check the password field is empty.
 - On a page with no sign-in fields, tap the key: check it says none were found. With a Hub or Noodle Browser that cannot sign in, check the key does not show or the message names what to update.
+- Leave Noodle and have two bots reply: check the app icon shows 2, and that a third reply from one of them keeps it at 2. Open one conversation and check the icon shows 1 once you are back on the Home Screen.
+- With Noodle in the background, not closed from the app switcher, read a conversation in Noodle on your Mac: check the icon's number goes down and its notification leaves Notification Center.
 
 ## [0.40.0] - 2026-10-20
 

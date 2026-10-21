@@ -273,13 +273,25 @@ enum HubThread: HubConversation {
         return seen[conversation.conversationID].map { reply.createdAt > $0 } ?? true
     }
 
+    /// The conversations the app's icon counts: those listed with a reply not read yet. Nil while
+    /// the live stream is down, since replies may have come that this phone has not heard of.
+    var badgedConversations: Set<UUID>? {
+        isConnected ? Set(listedThreads.filter { isUnread($0) }.map(\.conversationID)) : nil
+    }
+
     /// Also tells the Hub, up to the latest message it has, so the person's other devices show it read.
     func markRead(_ conversation: some HubConversation) {
         let messages = messages(of: conversation)
         guard let latest = messages.last?.createdAt, (seen?[conversation.conversationID] ?? .distantPast) < latest else { return }
         seen = (seen ?? [:]).merging([conversation.conversationID: latest]) { $1 }
         saveSeen()
-        Task { await HubNotifications.clearDelivered(conversation: conversation.conversationID) }
+        // Off the icon at once, connected or not.
+        AppBadge.read(conversation.conversationID, in: pairing.directory)
+        let hubs = pairing.directory.deletingLastPathComponent()
+        Task {
+            await AppBadge.show(AppBadge.count(hubs: hubs))
+            await HubNotifications.clearDelivered(conversation: conversation.conversationID)
+        }
         guard let kept = messages.last(where: { unsent[$0.id] == nil }) else { return }
         let mark = LinkReadMark(conversationID: conversation.conversationID, messageID: kept.id)
         // A Hub from before read state was shared does not know the request; this phone keeps its own.
@@ -1452,6 +1464,8 @@ struct AgentsView: View {
         .onChange(of: widgetSource, initial: true) { _, source in
             if let source { BotWidgetPublisher.shared.publish(source) }
         }
+        // The icon's number follows replies as they come and are read, here or on another device.
+        .onChange(of: chats.map(\.badgedConversations), initial: true) { AppBadge.publish(chats) }
         // Back in front, as after switching airplane mode off in Control Center, a Hub not connected is tried at once.
         .onChange(of: phase) {
             guard phase == .active else { return }

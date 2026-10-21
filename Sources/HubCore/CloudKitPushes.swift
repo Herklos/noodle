@@ -1,5 +1,4 @@
 import CloudKit
-import CryptoKit
 import Foundation
 import HubLink
 import Security
@@ -40,10 +39,8 @@ public final class CloudKitPushes: HubPushPublisher {
     }
 
     /// The same for every write about one device and conversation, so each replaces the last.
-    /// Hashed, so the public name gives neither away.
     public static func recordID(topic: String, conversation: UUID) -> CKRecord.ID {
-        let digest = SHA256.hash(data: Data("\(topic)\n\(conversation.uuidString)".utf8))
-        return CKRecord.ID(recordName: digest.map { String(format: "%02x", $0) }.joined())
+        CKRecord.ID(recordName: LinkPush.recordName(topic: topic, conversation: conversation))
     }
 
     public static func record(topic: String, conversation: UUID, unread: Int) -> CKRecord {

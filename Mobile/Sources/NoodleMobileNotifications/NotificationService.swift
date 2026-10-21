@@ -14,6 +14,8 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         guard let route = PushTopic.route(userInfo: request.content.userInfo), let hubs = AppGroup.hubs else { return contentHandler(content) }
         // One stack per conversation in Notification Center.
         content.threadIdentifier = route.conversation.uuidString
+        // The icon counts the conversation too, with those already waiting on every Hub.
+        if let count = AppBadge.arrived(route, hubs: hubs) { content.badge = NSNumber(value: count) }
         lock.withLock { pending = (content, contentHandler) }
         Task { @MainActor in
             let reply = await ReplyNotification.content(for: route, hubs: hubs)

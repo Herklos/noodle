@@ -53,6 +53,33 @@ enum PushTopic {
               let fields = notification.recordFields else { return nil }
         return route(fields: fields)
     }
+
+    /// The Hub's word taken back, which CloudKit tells in silence, by the deleted record alone.
+    static func withdrawal(userInfo: [AnyHashable: Any]) -> PushWithdrawal? {
+        guard let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification,
+              notification.queryNotificationReason == .recordDeleted, let record = notification.recordID else { return nil }
+        return withdrawal(subscriptionID: notification.subscriptionID, recordName: record.recordName)
+    }
+
+    static func withdrawal(subscriptionID: String?, recordName: String) -> PushWithdrawal? {
+        guard let subscriptionID, subscriptionID.hasPrefix(withdrawalPrefix) else { return nil }
+        let topic = String(subscriptionID.dropFirst(withdrawalPrefix.count))
+        return topic.isEmpty ? nil : PushWithdrawal(topic: topic, recordName: recordName)
+    }
+
+    /// Starts the ID of the subscription that hears of a topic's word taken back; the topic follows.
+    static let withdrawalPrefix = "read-"
+}
+
+/// Word of a conversation's unread replies, taken back by the Hub once they were read. The record's
+/// name is all that is left of it, so it is matched against the conversations the phone knows.
+struct PushWithdrawal: Equatable, Sendable {
+    let topic: String
+    let recordName: String
+
+    func matches(_ route: NotificationRoute) -> Bool {
+        route.topic == topic && LinkPush.recordName(topic: topic, conversation: route.conversation) == recordName
+    }
 }
 
 /// What a notification of unread replies shows: the bot or group, and what was said last.
