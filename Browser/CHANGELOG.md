@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-21
+
 ### Fixed
 
 - Pages a bot is using keep drawing while the browser's window is closed. Sites that wait to draw, such as X's Edit profile dialog, no longer stay empty for bots until someone opens Noodle Browser.
