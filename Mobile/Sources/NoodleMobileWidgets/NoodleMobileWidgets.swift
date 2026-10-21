@@ -24,6 +24,8 @@ struct BotEntry: TimelineEntry {
     /// Nil when none is chosen, or the one chosen is gone.
     let bot: WidgetBot?
     let hasBots: Bool
+    /// The widget's Show Call Button.
+    var showsCallButton = true
 }
 
 /// The app writes the bots and reloads the widgets when they change, so there is nothing to schedule.
@@ -41,7 +43,8 @@ struct BotProvider: AppIntentTimelineProvider {
     private func entry(for configuration: BotWidgetIntent, preview: Bool) -> BotEntry {
         let shelf = Shelf.load()
         if shelf.bots.isEmpty, preview { return BotEntry(date: Date(), bot: Samples.bots[0], hasBots: true) }
-        return BotEntry(date: Date(), bot: configuration.bot.flatMap { shelf.bot($0.id) }, hasBots: !shelf.bots.isEmpty)
+        return BotEntry(date: Date(), bot: configuration.bot.flatMap { shelf.bot($0.id) }, hasBots: !shelf.bots.isEmpty,
+                        showsCallButton: configuration.showCallButton)
     }
 }
 
@@ -71,15 +74,17 @@ struct BotWidgetView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(bot.name)
                 } else {
-                    // With a call button the picture gives up the room it needs.
-                    VStack(spacing: bot.callable ? 6 : 8) {
-                        VStack(spacing: bot.callable ? 6 : 8) {
-                            BotPicture(bot: bot).frame(maxWidth: 76, maxHeight: 76)
-                            Text(bot.name).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                    // The picture takes what room is left; a call button sits in the corner beside the name.
+                    VStack(spacing: 6) {
+                        BotPicture(bot: bot).frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityHidden(true)
+                        if bot.showsCallButton(setting: entry.showsCallButton) {
+                            HStack(spacing: 6) {
+                                BotName(name: bot.name).frame(maxWidth: .infinity, alignment: .leading)
+                                CallLink(bot: bot)
+                            }
+                        } else {
+                            BotName(name: bot.name).multilineTextAlignment(.center)
                         }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(bot.name)
-                        if bot.callable { CallLink(bot: bot) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -224,29 +229,36 @@ private struct BotLink<Content: View>: View {
     }
 }
 
+/// The small widget's name, on up to two lines rather than cut short.
+private struct BotName: View {
+    let name: String
+
+    var body: some View {
+        Text(name).font(.headline).lineLimit(2).minimumScaleFactor(0.8)
+    }
+}
+
 /// Calls the bot, opening its chat, while a tap anywhere else opens the chat alone. Like `BotLink`, a clear link
-/// covers the button rather than wrapping it.
+/// covers the button rather than wrapping it, a little larger than the circle so it is easy to hit.
 private struct CallLink: View {
+    private static let size: CGFloat = 34
+    private static let target: CGFloat = 44
     @Environment(\.widgetRenderingMode) private var renderingMode
     let bot: WidgetBot
 
     var body: some View {
-        // Tinted, the system draws every opaque colour the same, so the label is told from its capsule by opacity.
+        // Tinted, the system draws every opaque colour the same, so the glyph is told from its circle by opacity.
         let fullColor = renderingMode == .fullColor
-        Label("Call", systemImage: "phone.fill")
-            .labelStyle(.titleAndIcon)
-            .font(.subheadline.weight(.semibold))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+        Image(systemName: "phone.fill")
+            .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(fullColor ? Color.white : Color.primary)
-            .padding(.horizontal, 14)
-            .frame(height: 30)
-            .background(fullColor ? Color.green : Color.primary.opacity(0.2), in: Capsule())
+            .frame(width: Self.size, height: Self.size)
+            .background(fullColor ? Color.green : Color.primary.opacity(0.2), in: Circle())
             .widgetAccentable()
             .accessibilityHidden(true)
             .overlay {
                 Link(destination: WidgetLink(bot, call: true).url) {
-                    Rectangle().fill(.clear).contentShape(Rectangle())
+                    Rectangle().fill(.clear).frame(width: Self.target, height: Self.target).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Call \(bot.name)")
