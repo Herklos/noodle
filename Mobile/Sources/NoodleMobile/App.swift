@@ -67,6 +67,7 @@ struct NoodleMobileApp: App {
                 Text("Hub key \(invitation.hubKey.fingerprint)")
             }
             .task { await hubs.stayConnected() }
+            .task { await CallPushes.shared.keepGrants(hubs) }
             // Again each time the app comes back, since notifications may have been turned off or on in Settings.
             .task(id: NotificationKey(hubs: hubs.hubs.map(CurrentHub.name), active: phase == .active)) {
                 guard phase == .active else { return }

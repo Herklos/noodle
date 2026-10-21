@@ -93,7 +93,7 @@ extension LinkChannel: CallChannel {}
     init(open: @escaping @MainActor (LinkCallStart) async throws -> any CallChannel,
          decline: @escaping @MainActor (UUID) async throws -> Void = { _ in },
          makeAudio: @escaping @MainActor () -> any CallAudio = { EngineCallAudio() },
-         system: (any SystemCalls)? = PhoneCallScreen(), now: @escaping () -> Date = Date.init) {
+         system: (any SystemCalls)? = PhoneCallLine(), now: @escaping () -> Date = Date.init) {
         self.open = open
         declineOnHub = decline
         self.makeAudio = makeAudio
@@ -264,12 +264,19 @@ final class SpokenAudio: @unchecked Sendable {
 
 /// Calls on the phone's own call screen through CallKit, so they keep going, and show, while the
 /// phone is locked, and its buttons and headsets' mute and end them.
-@MainActor final class PhoneCallScreen: NSObject, SystemCalls, @preconcurrency CXProviderDelegate {
-    var onEnd: ((UUID) -> Void)?
-    var onMute: ((UUID, Bool) -> Void)?
-    var onAnswer: ((UUID) -> Bool)?
+///
+/// One for the whole app, made at launch, since a VoIP push must report its call before the push's
+/// delegate returns. Each Hub's calls, and each call a push woke the app for, reach it through a
+/// `PhoneCallLine` of their own, which hears only of the calls it put on the screen.
+@MainActor final class PhoneCallScreen: NSObject, @preconcurrency CXProviderDelegate {
+    static let shared = PhoneCallScreen()
+
     private let provider: CXProvider?
     private let controller = CXCallController()
+    /// Whose each call on the screen is.
+    private var owners: [UUID: PhoneCallLine] = [:]
+    /// Calls a push reported for their line before that line asked to ring them.
+    private var pushed: Set<UUID> = []
     private var activation: (id: UUID, continuation: CheckedContinuation<Bool, Error>)?
     /// Calls this app ended itself, whose end action should not report back.
     private var ending: Set<UUID> = []
@@ -294,8 +301,12 @@ final class SpokenAudio: @unchecked Sendable {
         provider?.setDelegate(self, queue: .main)
     }
 
-    func begin(_ id: UUID, name: String) async throws -> Bool {
+    /// Whether this phone has a call screen for apps.
+    var isAvailable: Bool { provider != nil }
+
+    func begin(_ id: UUID, name: String, for line: PhoneCallLine) async throws -> Bool {
         guard provider != nil else { return false }
+        owners[id] = line
         let start = CXStartCallAction(call: id, handle: CXHandle(type: .generic, value: name))
         start.contactIdentifier = name
         // Should iOS not hand the call its audio, the app activates it itself rather than wait on.
@@ -315,19 +326,43 @@ final class SpokenAudio: @unchecked Sendable {
         }
     }
 
-    func ring(_ id: UUID, name: String) async -> Bool {
+    func ring(_ id: UUID, name: String, for line: PhoneCallLine) async -> Bool {
         guard let provider else { return false }
-        let update = CXCallUpdate()
-        update.remoteHandle = CXHandle(type: .generic, value: name)
-        update.localizedCallerName = name
-        update.hasVideo = false
-        update.supportsHolding = false
-        update.supportsGrouping = false
-        update.supportsUngrouping = false
-        update.supportsDTMF = false
+        // Already on the screen: reported by a push for this line, or for another line, as when a push woke the
+        // app and then its Hub's own line heard the call ring too.
+        if let owner = owners[id] {
+            if owner === line { pushed.remove(id) }
+            return true
+        }
+        owners[id] = line
         // iOS refuses calls while Do Not Disturb or Focus silences this app, and calls it does not take.
-        return await withCheckedContinuation { continuation in
-            provider.reportNewIncomingCall(with: id, update: update) { error in continuation.resume(returning: error == nil) }
+        let reported = await withCheckedContinuation { continuation in
+            provider.reportNewIncomingCall(with: id, update: Self.incoming(name)) { error in continuation.resume(returning: error == nil) }
+        }
+        if !reported, owners[id] === line { owners[id] = nil }
+        return reported
+    }
+
+    /// Whether a call is on the screen already, for this or another line.
+    func isShowing(_ id: UUID) -> Bool { owners[id] != nil }
+
+    /// Reports a call a VoIP push woke the app for, at once, as iOS requires before the push's delegate
+    /// returns. With a line, the call rings for that line, which then rings it as usual; without one it is a
+    /// call the app will not take, and it ends straight away. `reported` runs once iOS has it, saying whether
+    /// the call rings: iOS refuses calls while Do Not Disturb or Focus silences the app.
+    func reportPushed(_ id: UUID, name: String, for line: PhoneCallLine?, reported: @escaping @MainActor @Sendable (Bool) -> Void) {
+        guard let provider else { return reported(false) }
+        let takes = line != nil && owners[id] == nil
+        if takes {
+            owners[id] = line
+            pushed.insert(id)
+        }
+        provider.reportNewIncomingCall(with: id, update: Self.incoming(name)) { error in
+            Task { @MainActor [weak self] in
+                if takes, error != nil, let self, self.pushed.remove(id) != nil, self.owners[id] === line { self.owners[id] = nil }
+                if line == nil, error == nil { self?.provider?.reportCall(with: id, endedAt: nil, reason: .failed) }
+                reported(takes && error == nil)
+            }
         }
     }
 
@@ -346,19 +381,27 @@ final class SpokenAudio: @unchecked Sendable {
         }) ?? false
     }
 
-    func stopRinging(_ id: UUID, unanswered: Bool) {
+    func stopRinging(_ id: UUID, unanswered: Bool, for line: PhoneCallLine) {
+        guard owners[id] === line else { return }
+        owners[id] = nil
+        pushed.remove(id)
         provider?.reportCall(with: id, endedAt: nil, reason: unanswered ? .unanswered : .remoteEnded)
     }
 
-    func connected(_ id: UUID) { provider?.reportOutgoingCall(with: id, connectedAt: nil) }
+    func connected(_ id: UUID, for line: PhoneCallLine) {
+        guard owners[id] === line else { return }
+        provider?.reportOutgoingCall(with: id, connectedAt: nil)
+    }
 
-    func setMuted(_ id: UUID, _ muted: Bool) {
-        guard provider != nil else { return }
+    func setMuted(_ id: UUID, _ muted: Bool, for line: PhoneCallLine) {
+        guard provider != nil, owners[id] === line else { return }
         controller.request(CXTransaction(action: CXSetMutedCallAction(call: id, muted: muted))) { _ in }
     }
 
-    func end(_ id: UUID) {
-        guard provider != nil else { return }
+    func end(_ id: UUID, for line: PhoneCallLine) {
+        guard provider != nil, owners[id] === line else { return }
+        owners[id] = nil
+        pushed.remove(id)
         finishActivation(id, with: .failure(CancellationError()))
         ending.insert(id)
         controller.request(CXTransaction(action: CXEndCallAction(call: id))) { [weak self] error in
@@ -366,6 +409,18 @@ final class SpokenAudio: @unchecked Sendable {
             guard error != nil else { return }
             Task { @MainActor in _ = self?.ending.remove(id) }
         }
+    }
+
+    private static func incoming(_ name: String) -> CXCallUpdate {
+        let update = CXCallUpdate()
+        update.remoteHandle = CXHandle(type: .generic, value: name)
+        update.localizedCallerName = name
+        update.hasVideo = false
+        update.supportsHolding = false
+        update.supportsGrouping = false
+        update.supportsUngrouping = false
+        update.supportsDTMF = false
+        return update
     }
 
     private func finishActivation(_ id: UUID, with result: Result<Bool, Error>) {
@@ -376,6 +431,8 @@ final class SpokenAudio: @unchecked Sendable {
 
     func providerDidReset(_ provider: CXProvider) {
         if let id = activation?.id { finishActivation(id, with: .failure(CancellationError())) }
+        owners = [:]
+        pushed = []
     }
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
@@ -403,8 +460,9 @@ final class SpokenAudio: @unchecked Sendable {
             // Its audio is the answered call's from when iOS activates it next.
             audioActive = false
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP])
+            pushed.remove(action.callUUID)
             // A call answered or declined elsewhere, or missed, meanwhile is not joined.
-            guard onAnswer?(action.callUUID) == true else { return action.fail() }
+            guard owners[action.callUUID]?.onAnswer?(action.callUUID) == true else { return action.fail() }
             action.fulfill()
         } catch {
             action.fail()
@@ -413,13 +471,33 @@ final class SpokenAudio: @unchecked Sendable {
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         action.fulfill()
-        if ending.remove(action.callUUID) == nil { onEnd?(action.callUUID) }
+        let line = owners.removeValue(forKey: action.callUUID)
+        pushed.remove(action.callUUID)
+        if ending.remove(action.callUUID) == nil { line?.onEnd?(action.callUUID) }
     }
 
     func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
         action.fulfill()
-        onMute?(action.callUUID, action.isMuted)
+        owners[action.callUUID]?.onMute?(action.callUUID, action.isMuted)
     }
+}
+
+/// One Hub's calls on the app's call screen, or one call a push woke the app for.
+@MainActor final class PhoneCallLine: SystemCalls {
+    var onEnd: ((UUID) -> Void)?
+    var onMute: ((UUID, Bool) -> Void)?
+    var onAnswer: ((UUID) -> Bool)?
+    private let screen: PhoneCallScreen
+
+    init(screen: PhoneCallScreen = .shared) { self.screen = screen }
+
+    func begin(_ id: UUID, name: String) async throws -> Bool { try await screen.begin(id, name: name, for: self) }
+    func ring(_ id: UUID, name: String) async -> Bool { await screen.ring(id, name: name, for: self) }
+    func answered(_ id: UUID) async -> Bool { await screen.answered(id) }
+    func stopRinging(_ id: UUID, unanswered: Bool) { screen.stopRinging(id, unanswered: unanswered, for: self) }
+    func connected(_ id: UUID) { screen.connected(id, for: self) }
+    func setMuted(_ id: UUID, _ muted: Bool) { screen.setMuted(id, muted, for: self) }
+    func end(_ id: UUID) { screen.end(id, for: self) }
 }
 
 /// The microphone and the bot's voice through the phone's audio engine. The earpiece, or

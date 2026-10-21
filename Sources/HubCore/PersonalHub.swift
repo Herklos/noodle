@@ -58,7 +58,7 @@ import NoodleRuntime
         link = HubLinkService(hubName: name, directory: directory.appendingPathComponent("Link", isDirectory: true),
                               access: access, profiles: profiles, bots: bots, connections: connections, computers: computers,
                               browsers: browsers, port: port, router: router, localEndpoints: localEndpoints,
-                              pushes: CloudKitPushes.ifEntitled())
+                              pushes: CloudKitPushes.ifEntitled(), callPushes: NoodlePushTransport())
         // After what the Hub's bots and link already do on these, Noodle reads its files again.
         let edited: () -> Void = { [weak self] in self?.onToolsEdited?() }
         let connectionsChanged = connections.onAssignmentsChange, computersChanged = computers.onAssignmentsChange,

@@ -143,9 +143,12 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
     public var lastSeen: Date?
     /// Where the device hears of unread replies while away, if it asked to.
     public var pushTopic: String?
+    /// How to ring the device through Noodle Push while it is away, if it gave the Hub a grant. Missing in
+    /// files from before, which reads as none: the device sends one when it next connects.
+    public var callPush: HubCallPush?
 
     public init(id: UUID = UUID(), user: UUID, name: String, key: LinkPublicKey, paired: Date, lastSeen: Date? = nil,
-                pushTopic: String? = nil) {
+                pushTopic: String? = nil, callPush: HubCallPush? = nil) {
         self.id = id
         self.user = user
         self.name = name
@@ -153,6 +156,26 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
         self.paired = paired
         self.lastSeen = lastSeen
         self.pushTopic = pushTopic
+        self.callPush = callPush
+    }
+}
+
+/// A device's grant to ring it through Noodle Push, which names this Hub's key, and the key it gave the Hub
+/// to encrypt who is calling. Only Push can open the token inside the grant.
+public struct HubCallPush: Codable, Hashable, Sendable {
+    public var grant: CallGrant
+    public var callKey: Data
+
+    public init(grant: CallGrant, callKey: Data) {
+        self.grant = grant
+        self.callKey = callKey
+    }
+
+    public var expiresAt: Date { Date(timeIntervalSince1970: TimeInterval(grant.expiresAt)) }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(grant.signature)
+        hasher.combine(callKey)
     }
 }
 
@@ -475,6 +498,18 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
         save()
     }
 
+    public func setCallPush(_ push: HubCallPush?, for device: HubDevice) {
+        guard let index = devices.firstIndex(where: { $0.id == device.id }), devices[index].callPush != push else { return }
+        devices[index].callPush = push
+        save()
+    }
+
+    /// Forgets a grant Push refused, unless the device has sent another meanwhile.
+    public func dropCallPush(_ push: HubCallPush, for device: HubDevice) {
+        guard let current = devices.first(where: { $0.id == device.id }), current.callPush == push else { return }
+        setCallPush(nil, for: current)
+    }
+
     @discardableResult public func addPlan(named name: String) throws -> HubPlan {
         let plan = HubPlan(name: try ConversationName.validated(name))
         plans.append(plan)
@@ -567,6 +602,8 @@ public struct HubDevice: Identifiable, Codable, Hashable, Sendable {
                                                          connectionOwners: connectionOwners, computerOwners: computerOwners,
                                                          browserOwners: browserOwners)) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // Only the Hub reads it: it holds the grants devices gave to ring them and the keys for who is calling.
         try? AtomicFile.write(data, to: url)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

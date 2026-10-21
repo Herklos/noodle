@@ -1,6 +1,6 @@
 import Crypto
 import Foundation
-@testable import PushWire
+import PushWire
 import XCTest
 
 final class PushWireTests: XCTestCase {

@@ -110,7 +110,7 @@ import NoodleRuntime
                               directory: root.appendingPathComponent("Link", isDirectory: true),
                               access: access, profiles: harnessProfiles, bots: bots, connections: connections,
                               computers: computers, browsers: browsers, port: linkPort, router: router,
-                              pushes: CloudKitPushes.ifEntitled())
+                              pushes: CloudKitPushes.ifEntitled(), callPushes: NoodlePushTransport())
     }
 
     /// Removes a user with their devices and the bots they keep here.

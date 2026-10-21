@@ -163,6 +163,8 @@ import XCTest
         guard case .status(let status) = try await f.device.request(.status) else { return XCTFail("no status") }
         // The Mac is only its owner's, so there is nobody to share a bot with.
         XCTAssertFalse(status.canShareBots)
+        // Calls from the Mac's bots ring a phone that is away through Noodle Push, as a Hub's do.
+        XCTAssertTrue(status.ringsThroughPush)
         XCTAssertEqual(status.harnesses.map { [$0.providerName, $0.profileName ?? ""] },
                        [["Codex", ""], ["FX", ""], ["FX", "Work"]])
         XCTAssertEqual(status.harnesses.map(\.provider), ["codex", "fx", "fx"])
