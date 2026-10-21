@@ -143,22 +143,22 @@ import XCTest
         try await helper.value
     }
     func testLockingTheMacPausesCaptureAndKeepsTheConnection() async throws {
-        let input = Pipe(), output = Pipe(), log = RequestLog()
-        let frame = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1, bitsPerSample: 8,
-            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)?
-            .representation(using: .png, properties: [:]))
-        var streaming = false
-        let helper = openPeer(input, output, log: log) { request in
-            if request.operation == .stream { streaming = request.enabled == true }
-            var reply = Self.reply(request, displayID: streaming ? 99 : nil)
-            if streaming { reply.frame = true; reply.data = frame }
-            return reply
+        let desktop = try LocalMacTestDesktop(), log = RequestLog()
+        let helper = Task.detached {
+            var streaming = false
+            while let request = try desktop.read() {
+                log.append(request)
+                if request.operation == .stream { streaming = request.enabled == true }
+                try desktop.send(Self.reply(request, displayID: streaming ? 99 : nil))
+                if streaming { try desktop.sendFrame([0xff, 0x80, 0x10, 0xff]) }
+            }
         }
         var displays: Set<UInt32> = [2]
         let runtime = LocalMacComputer(displayIDs: { displays })
         var disconnects: [String] = []; runtime.onDisconnect = { disconnects.append($0) }
-        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
-        XCTAssertNotNil(runtime.image)
+        try await desktop.connect(runtime, protectedDisplays: [2])
+        try await waitUntil { runtime.image != nil }
+        XCTAssertEqual(LocalMacTestDesktop.color(runtime.image), [0xff, 0x80, 0x10, 0xff], "Pictures arrive unchanged.")
 
         displays = []
         await runtime.refreshStatus()
@@ -178,6 +178,30 @@ import XCTest
         XCTAssertTrue(disconnects.isEmpty)
         runtime.close()
         try await helper.value
+    }
+    func testInputIsSentWithoutWaitingForEachReply() async throws {
+        let desktop = try LocalMacTestDesktop(), held = expectation(description: "three keys arrive before any is answered")
+        let helper = Task.detached { () throws -> [UInt16] in
+            var inputs: [LocalMacRequest] = []
+            while let request = try desktop.read() {
+                guard request.operation == .input else { try desktop.send(Self.reply(request, displayID: 99)); continue }
+                inputs.append(request)
+                if inputs.count == 3 {
+                    held.fulfill()
+                    for input in inputs { try desktop.send(LocalMacReply(id: input.id)) }
+                }
+            }
+            return inputs.compactMap { $0.input?.key }
+        }
+        let runtime = LocalMacComputer(displayIDs: { [2] })
+        try await desktop.connect(runtime, protectedDisplays: [2])
+        for key in [1, 2, 3] as [UInt16] { var event = LocalMacInput(.keyDown); event.key = key; runtime.send(event) }
+        await fulfillment(of: [held], timeout: 10)
+        _ = try await runtime.call(.init(.status))
+        XCTAssertNil(runtime.error)
+        runtime.close()
+        let keys = try await helper.value
+        XCTAssertEqual(keys, [1, 2, 3], "Input keeps its order.")
     }
     func testMainDisplayCaptureStillDisconnectsWhileTheMacIsLocked() async throws {
         let input = Pipe(), output = Pipe()
@@ -491,5 +515,54 @@ import XCTest
         runtime.close()
         let closed = await helper.value
         XCTAssertEqual(Set(closed), Set(ids[0...16]).subtracting([building]))
+    }
+}
+
+/// The desktop helper's end of a real connection: one socket, with pictures sent through shared
+/// memory the way the helper sends them. Slots the app hands back are freed here.
+final class LocalMacTestDesktop: @unchecked Sendable {
+    let app: FileHandle, helper: FileHandle
+    private let frames = LocalMacFrameWriter()
+    private let lock = NSLock()
+    init() throws { (helper, app) = try LocalMacWire.socketPair() }
+    func connect(_ runtime: LocalMacComputer, protectedDisplays: Set<UInt32>) async throws {
+        try await runtime.connect(input: app, output: app, protectedDisplays: protectedDisplays)
+    }
+    /// The next request other than a slot handed back; nil once the app has closed.
+    func read() throws -> LocalMacRequest? {
+        while let data = try LocalMacWire.read(helper) {
+            let request = try LocalMacWire.decode(LocalMacRequest.self, from: data)
+            try request.validate()
+            guard request.operation == .frameRelease else { return request }
+            lock.withLock { frames.release(request.frame!) }
+        }
+        return nil
+    }
+    func send(_ reply: LocalMacReply) throws { try LocalMacWire.write(JSONEncoder().encode(reply), to: helper) }
+    /// A frame of one BGRA colour; window frames belong to their preview's stream.
+    func sendFrame(_ bgra: [UInt8], width: Int = 20, height: Int = 10, window: LocalMacWindowFrame? = nil) throws {
+        let written = try lock.withLock {
+            try frames.write(stream: window?.previewID, width: width, height: height) { memory, bytesPerRow in
+                for row in 0..<height { for column in 0..<width {
+                    (memory + row * bytesPerRow + column * 4).copyMemory(from: bgra, byteCount: 4)
+                } }
+            }
+        }
+        // Like the helper, drop the frame while both of the stream's slots are with the app.
+        guard let frame = written else { return }
+        if let (region, descriptor) = frame.region {
+            defer { Darwin.close(descriptor) }
+            var announcement = LocalMacReply(); announcement.region = region
+            try LocalMacWire.write(JSONEncoder().encode(announcement), to: helper, descriptor: descriptor)
+        }
+        var reply = LocalMacReply(); reply.frame = true; reply.sharedFrame = frame.frame; reply.windowFrame = window
+        try send(reply)
+    }
+    func close() { Darwin.shutdown(helper.fileDescriptor, SHUT_RDWR); try? helper.close() }
+    /// The colour of an image's first pixel, as BGRA.
+    static func color(_ image: NSImage?) -> [UInt8]? {
+        guard let picture = image?.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let data = picture.dataProvider?.data as Data? else { return nil }
+        return Array(data.prefix(4))
     }
 }

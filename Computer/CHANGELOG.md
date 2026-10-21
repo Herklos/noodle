@@ -8,6 +8,10 @@
 
 - Bots can list their own terminals on a computer with `terminals`: when each was opened and last used, whether a command is running in it and whether it has exited, so they can find and close terminals they lost track of. Apps outside Noodle get the same command in noodle-computer.
 
+### Changed
+
+- A Local Mac's desktop and windows update up to 60 times a second instead of 12, and mouse and keyboard input reaches them without waiting on each earlier event. They arrive through memory Noodle Computer shares with the Local Mac, not as compressed images, so the picture is exact, with no compression blur.
+
 ### Fixed
 
 - Copy in the Edit menu and ⌘C copy the text selected in a computer's terminal. Copy used to stay dimmed and nothing reached the clipboard. With nothing selected ⌘C does nothing, and ⌃C still interrupts the running command.

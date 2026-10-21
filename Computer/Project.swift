@@ -218,6 +218,9 @@ func localMac(_ name: String, product: Product, infoPlist: InfoPlist? = nil, res
         dependencies: [.package(product: "LocalMacCore")],
         settings: .settings(base: [
             "CODE_SIGNING_ALLOWED": "NO",
+            // embedHelpers signs only the executable; a separate debug dylib would keep an ad hoc
+            // signature that the signed helper refuses to load.
+            "ENABLE_DEBUG_DYLIB": "NO",
             "PRODUCT_NAME": .string(name),
             "PRODUCT_BUNDLE_IDENTIFIER": .string(product == .app ? "$(COMPUTER_APP_BUNDLE_ID).\(name == "LocalMacSetup" ? "localmacsetup" : "desktop")" : name),
         ])

@@ -8,6 +8,10 @@
 
 - Someone watching a browser live can sign in to the page they see with their device's own fields and saved passwords, once their Noodle or Noodle Hub offers it. Passwords they fill but don't submit are cleared from the page when they stop watching. A page a bot ran its own scripts on isn't offered for signing in until it's reloaded.
 
+### Changed
+
+- The Pause Agents button now sits before Mute in a browser's toolbar.
+
 ## [0.20.1] - 2026-10-20
 
 ### Fixed

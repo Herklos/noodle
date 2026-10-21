@@ -1,12 +1,11 @@
 import AppKit
-import CoreImage
 import CoreMedia
 import LocalMacCore
 import LocalMacPrivate
 import ScreenCaptureKit
 
 /// A second display-bound stream preserves child-window composition. Only its
-/// nontransparent content is encoded; the ordinary desktop stream stays intact.
+/// nontransparent content is sent; the ordinary desktop stream stays intact.
 @MainActor final class AccountWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     let session: LocalMacSession
     let desktop: AccountCapture
@@ -21,7 +20,6 @@ import ScreenCaptureKit
     private var includedWindowIDs: Set<UInt32> = []
     private var filterUpdateID: UUID?
     var onEnd: (() -> Void)?
-    private let context = CIContext(options: [.cacheIntermediates: false])
 
     init(session: LocalMacSession, desktop: AccountCapture, output: Output) {
         self.session = session; self.desktop = desktop; self.output = output
@@ -59,6 +57,7 @@ import ScreenCaptureKit
             configuration.width = max(2, Int(display.frame.width * scale))
             configuration.height = max(2, Int(display.frame.height * scale))
             configuration.pixelFormat = kCVPixelFormatType_32BGRA
+            configuration.colorSpaceName = CGColorSpace.sRGB
             // ScreenCaptureKit's default is clear. backgroundColor is an
             // assign/unowned CGColorRef: assigning a temporary here leaves a
             // dangling pointer that can crash the helper during startCapture.
@@ -67,7 +66,7 @@ import ScreenCaptureKit
             configuration.includeChildWindows = true
             configuration.showsCursor = false // The local pointer must not expand the crop.
             configuration.capturesAudio = false
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 12)
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             configuration.queueDepth = 3
             self.configuration = configuration
             displayBounds = display.frame
@@ -84,6 +83,7 @@ import ScreenCaptureKit
     }
     func stop(id: UUID? = nil) async {
         if let id, previewID != id { return }
+        if let previewID { output.endFrames(stream: previewID) }
         let previous = stream
         stream = nil; configuration = nil; previewID = nil; target = nil; geometries = []; displayBounds = .zero
         includedWindowIDs = []; filterUpdateID = nil
@@ -150,6 +150,7 @@ import ScreenCaptureKit
     }
     private func end(_ message: String) {
         guard let id = previewID else { return }
+        output.endFrames(stream: id)
         let previous = stream
         stream = nil; previewID = nil; target = nil; geometries = []
         includedWindowIDs = []; filterUpdateID = nil
@@ -167,10 +168,10 @@ import ScreenCaptureKit
               attachments.first?[.status] as? Int == SCFrameStatus.complete.rawValue,
               let pixel = buffer.imageBuffer, CVPixelBufferGetPixelFormatType(pixel) == kCVPixelFormatType_32BGRA else { return }
         let width = CVPixelBufferGetWidth(pixel), height = CVPixelBufferGetHeight(pixel)
-        CVPixelBufferLockBaseAddress(pixel, .readOnly)
-        guard let address = CVPixelBufferGetBaseAddress(pixel) else { CVPixelBufferUnlockBaseAddress(pixel, .readOnly); return }
-        let visible = NLMVisiblePixelBounds(address.assumingMemoryBound(to: UInt8.self), width, height, CVPixelBufferGetBytesPerRow(pixel))
-        CVPixelBufferUnlockBaseAddress(pixel, .readOnly)
+        CVPixelBufferLockBaseAddress(pixel, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pixel, .readOnly) }
+        guard let address = CVPixelBufferGetBaseAddress(pixel) else { return }
+        let sourceRow = CVPixelBufferGetBytesPerRow(pixel)
+        let visible = NLMVisiblePixelBounds(address.assumingMemoryBound(to: UInt8.self), width, height, sourceRow)
         guard !visible.isNull else { return }
         let crop = visible.insetBy(dx: -12, dy: -12).intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
         let bounds = CGRect(x: displayBounds.minX + crop.minX * displayBounds.width / CGFloat(width),
@@ -184,15 +185,14 @@ import ScreenCaptureKit
             geometries.append(geometry)
             if geometries.count > 64 { geometries.removeFirst(geometries.count - 64) }
         }
-        // CV buffers use a top-left origin; Core Image crops use bottom-left.
-        let image = CIImage(cvPixelBuffer: pixel)
-        let rectangle = CGRect(x: crop.minX, y: CGFloat(height) - crop.maxY, width: crop.width, height: crop.height)
-        let opaque = image.composited(over: CIImage(color: .black).cropped(to: image.extent))
-        guard let cg = context.createCGImage(opaque, from: rectangle),
-              let data = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return }
-        guard data.count <= 8 * 1_048_576 else { end("The window preview exceeds the image size limit."); return }
-        var reply = LocalMacReply(); reply.frame = true; reply.data = data; reply.windowFrame = geometry
-        output.send(reply)
+        let left = Int(crop.minX), top = Int(crop.minY), cropWidth = Int(crop.width), cropHeight = Int(crop.height)
+        do {
+            try output.sendFrame(stream: id, width: cropWidth, height: cropHeight, window: geometry) { memory, bytesPerRow in
+                for row in 0..<cropHeight {
+                    memcpy(memory + row * bytesPerRow, address + (top + row) * sourceRow + left * 4, cropWidth * 4)
+                }
+            }
+        } catch { end(error.localizedDescription) }
     }
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         let identifier = ObjectIdentifier(stream), message = error.localizedDescription

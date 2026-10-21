@@ -1,5 +1,4 @@
 import AppKit
-import CoreImage
 import CoreMedia
 import LocalMacCore
 import ScreenCaptureKit
@@ -18,8 +17,6 @@ import OSLog
     private var protectedIDs: [UInt32] = []
     private var stream: SCStream?
     private var starting: UUID?
-    private var lastImage: Data?
-    private let context = CIContext(options: [.cacheIntermediates: false])
     private let log = Logger(subsystem: "com.pdparchitect.noodle.computer.desktop", category: "capture")
 
     init(session: LocalMacSession, output: Output) { self.session = session; self.output = output }
@@ -50,7 +47,8 @@ import OSLog
             let config = SCStreamConfiguration()
             config.width = session.account.display.width; config.height = session.account.display.height
             config.scalesToFit = true; config.preservesAspectRatio = true
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 12)
+            config.pixelFormat = kCVPixelFormatType_32BGRA; config.colorSpaceName = CGColorSpace.sRGB
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             config.queueDepth = 3; config.capturesAudio = false; config.showsCursor = true
             let created = SCStream(filter: filter, configuration: config, delegate: self)
             try created.addStreamOutput(self, type: .screen, sampleHandlerQueue: .main)
@@ -61,7 +59,7 @@ import OSLog
             log.info("Capture started: desktop \(display.width) × \(display.height), output \(config.width) × \(config.height)")
         } catch {
             guard starting == attempt else { return }
-            stream = nil; lastImage = nil; displayID = nil; bounds = .zero
+            stream = nil; output.endFrames(stream: nil); displayID = nil; bounds = .zero
             self.error = error.localizedDescription
         }
     }
@@ -69,17 +67,17 @@ import OSLog
     func stop() async {
         starting = nil
         let previous = stream
-        stream = nil; lastImage = nil; displayID = nil; bounds = .zero; protectedIDs = []
+        stream = nil; output.endFrames(stream: nil); displayID = nil; bounds = .zero; protectedIDs = []
         if let previous { try? await previous.stopCapture() }
         error = nil; onChange?()
     }
 
     func screenshot() throws -> Data {
         try session.verifyCurrent()
-        guard stream != nil, let lastImage else {
+        guard stream != nil, let image = output.latestJPEG(stream: nil) else {
             throw LocalMacError(error ?? "Waiting for the first desktop frame.")
         }
-        return lastImage
+        return image
     }
 
     func verifiedDisplayID() throws -> UInt32 {
@@ -101,12 +99,16 @@ import OSLog
               (try? session.verifyCurrent()) != nil, let displayID,
               (try? LocalMacCapturePolicy.validate(displayID: displayID,
                   isBuiltin: CGDisplayIsBuiltin(displayID) != 0, protectedIDs: protectedIDs)) != nil,
-              let pixel = buffer.imageBuffer else { return }
-        let image = CIImage(cvPixelBuffer: pixel)
-        guard let cg = context.createCGImage(image, from: image.extent),
-              let data = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.78]) else { return }
-        lastImage = data
-        var reply = LocalMacReply(); reply.frame = true; reply.data = data; output.send(reply)
+              let pixel = buffer.imageBuffer, CVPixelBufferGetPixelFormatType(pixel) == kCVPixelFormatType_32BGRA else { return }
+        CVPixelBufferLockBaseAddress(pixel, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pixel, .readOnly) }
+        guard let source = CVPixelBufferGetBaseAddress(pixel) else { return }
+        let width = CVPixelBufferGetWidth(pixel), height = CVPixelBufferGetHeight(pixel)
+        let sourceRow = CVPixelBufferGetBytesPerRow(pixel)
+        do {
+            try output.sendFrame(stream: nil, width: width, height: height) { memory, bytesPerRow in
+                for row in 0..<height { memcpy(memory + row * bytesPerRow, source + row * sourceRow, width * 4) }
+            }
+        } catch { log.error("Frame not sent: \(error.localizedDescription, privacy: .public)") }
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -114,7 +116,7 @@ import OSLog
         let message = error.localizedDescription
         DispatchQueue.main.async { [weak self] in
             guard let self, let current = self.stream, ObjectIdentifier(current) == identifier else { return }
-            self.stream = nil; self.lastImage = nil; self.displayID = nil
+            self.stream = nil; self.output.endFrames(stream: nil); self.displayID = nil
             self.bounds = .zero; self.protectedIDs = []
             self.error = message; self.onChange?()
         }

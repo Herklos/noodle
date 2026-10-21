@@ -7,54 +7,37 @@ import XCTest
     private static let window = LocalMacWindow(id: 42, pid: 100, title: "Document", application: "Editor")
     private static let second = LocalMacWindow(id: 43, pid: 100, title: "Another Document", application: "Editor")
 
-    private func png(_ color: NSColor) throws -> Data {
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 20, pixelsHigh: 10,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        let rgb = try XCTUnwrap(color.usingColorSpace(.sRGB))
-        let pixels = try XCTUnwrap(bitmap.bitmapData)
-        for y in 0..<10 { for x in 0..<20 {
-            let offset = y * bitmap.bytesPerRow + x * 4
-            pixels[offset] = UInt8((rgb.redComponent * 255).rounded())
-            pixels[offset + 1] = UInt8((rgb.greenComponent * 255).rounded())
-            pixels[offset + 2] = UInt8((rgb.blueComponent * 255).rounded())
-            pixels[offset + 3] = 255
-        } }
-        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-    }
     func testMultiplePreviewsRouteFramesInputAndClosureIndependently() async throws {
-        let desktop = try png(.blue), focused = try png(.red), sibling = try png(.green)
-        let input = Pipe(), output = Pipe(), previewClosed = expectation(description: "preview stopped")
+        // BGRA
+        let desktop: [UInt8] = [255, 0, 0, 255], focused: [UInt8] = [0, 0, 255, 255], sibling: [UInt8] = [0, 255, 0, 255]
+        let connection = try LocalMacTestDesktop(), previewClosed = expectation(description: "preview stopped")
         let inputReceived = expectation(description: "input uses displayed geometry")
         let siblingInput = expectation(description: "sibling input survives another preview's failure")
         let window = Self.window, second = Self.second
         let helper = Task.detached { () throws -> [LocalMacRequest] in
-            defer { try? output.fileHandleForWriting.close(); try? input.fileHandleForReading.close() }
+            defer { connection.close() }
             var requests: [LocalMacRequest] = [], active: [UInt32: UUID] = [:]
-            func send(_ reply: LocalMacReply) throws { try LocalMacWire.write(JSONEncoder().encode(reply), to: output.fileHandleForWriting) }
-            while let data = try LocalMacWire.read(input.fileHandleForReading) {
-                let request = try LocalMacWire.decode(LocalMacRequest.self, from: data)
-                try request.validate(); requests.append(request)
+            func send(_ reply: LocalMacReply) throws { try connection.send(reply) }
+            while let request = try connection.read() {
+                requests.append(request)
                 var reply = LocalMacReply(id: request.id)
                 if request.operation == .status || request.operation == .stream {
                     var status = LocalMacStatus(screenCapture: true, accessibility: true, postEvents: true, display: .init())
                     status.displayID = 99; status.focusedWindow = window; reply.status = status
                 }
                 if request.operation == .windowList { reply.windows = [window, second] }
-                if request.operation == .stream {
-                    var frame = LocalMacReply(); frame.frame = true; frame.data = desktop
-                    try send(frame)
-                }
+                if request.operation == .stream { try connection.sendFrame(desktop) }
                 if request.operation == .windowPreview, request.enabled == true {
                     let target = request.window!, previous = active[target.id]
                     active[target.id] = request.previewID
-                    var frame = LocalMacReply(); frame.frame = true; frame.data = target.id == window.id ? focused : sibling
-                    frame.windowFrame = .init(previewID: request.previewID!, bounds: CGRect(x: 800, y: 300, width: 1000, height: 500), width: 2000, height: 1000)
-                    try send(frame)
-                    frame.windowFrame?.previewID = UUID(); frame.data = desktop
-                    try send(frame)
+                    var geometry = LocalMacWindowFrame(previewID: request.previewID!,
+                        bounds: CGRect(x: 800, y: 300, width: 1000, height: 500), width: 2000, height: 1000)
+                    try connection.sendFrame(target.id == window.id ? focused : sibling, window: geometry)
+                    geometry.previewID = UUID()
+                    try connection.sendFrame(desktop, window: geometry)
                     if let previous {
-                        frame.windowFrame?.previewID = previous
-                        try send(frame)
+                        geometry.previewID = previous
+                        try connection.sendFrame(desktop, window: geometry)
                         var ended = LocalMacReply(error: "Old stream ended"); ended.previewID = previous
                         try send(ended)
                     }
@@ -70,9 +53,7 @@ import XCTest
                 }
                 if request.operation == .windowPreview, request.enabled == false {
                     // Frames and end messages already on the wire cannot affect siblings.
-                    var frame = LocalMacReply(); frame.frame = true; frame.data = desktop
-                    frame.windowFrame = .init(previewID: request.previewID!, bounds: .zero, width: 20, height: 10)
-                    try send(frame)
+                    try connection.sendFrame(desktop, window: .init(previewID: request.previewID!, bounds: .zero, width: 20, height: 10))
                     var ended = LocalMacReply(error: "Old stream ended"); ended.previewID = request.previewID
                     try send(ended)
                     previewClosed.fulfill()
@@ -82,18 +63,18 @@ import XCTest
             return requests
         }
         let runtime = LocalMacComputer(displayIDs: { [2] }, presentsWindows: false)
-        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
+        try await connection.connect(runtime, protectedDisplays: [2])
         await runtime.openWindowPreview()
         let first = try XCTUnwrap(runtime.windowPreviews.values.first)
         await runtime.openWindowPreview(window: second)
         let other = try XCTUnwrap(runtime.windowPreviews.values.first { $0.window.id == second.id })
         XCTAssertEqual(runtime.windowPreviews.count, 2)
-        XCTAssertEqual(runtime.latestFrame, desktop)
+        XCTAssertEqual(LocalMacTestDesktop.color(runtime.image), desktop)
         XCTAssertNotEqual(first.image?.tiffRepresentation, other.image?.tiffRepresentation)
         let geometry = try XCTUnwrap(first.geometry)
         XCTAssertEqual(geometry.width, 2000)
-        XCTAssertEqual(first.image?.tiffRepresentation, NSImage(data: focused)?.tiffRepresentation)
-        XCTAssertEqual(other.image?.tiffRepresentation, NSImage(data: sibling)?.tiffRepresentation)
+        XCTAssertEqual(LocalMacTestDesktop.color(first.image), focused)
+        XCTAssertEqual(LocalMacTestDesktop.color(other.image), sibling)
         // Reopening, renaming, and Open All must reuse both identities.
         var renamed = window; renamed.title = "Renamed document"
         await runtime.openWindowPreview(window: renamed)
@@ -128,7 +109,7 @@ import XCTest
         XCTAssertNotEqual(reopened.id, first.id)
         XCTAssertNotNil(reopened.geometry); XCTAssertNil(reopened.error)
         XCTAssertEqual(reopened.image?.tiffRepresentation, first.image?.tiffRepresentation)
-        XCTAssertEqual(runtime.latestFrame, desktop)
+        XCTAssertEqual(LocalMacTestDesktop.color(runtime.image), desktop)
         runtime.close()
         XCTAssertTrue(runtime.windowPreviews.isEmpty)
         let requests = try await helper.value
@@ -185,10 +166,10 @@ import XCTest
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         let runtime = LocalMacComputer()
-        let desktop = NSImage(data: try png(.blue))
+        let desktop = NSImage(size: NSSize(width: 20, height: 10))
         runtime.image = desktop
         var first = LocalMacWindowPreview(window: Self.window)
-        first.image = NSImage(data: try png(.red))
+        first.image = NSImage(size: NSSize(width: 20, height: 10))
         first.geometry = .init(previewID: first.id, bounds: CGRect(x: 300, y: 200, width: 700, height: 400), width: 1400, height: 800)
         let second = LocalMacWindowPreview(window: Self.second)
         runtime.windowPreviews = [first.id: first, second.id: second]
