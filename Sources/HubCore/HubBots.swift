@@ -21,6 +21,9 @@ import NoodleVoicePeer
     /// Runs when someone a bot is shared with can no longer open their conversation with it: no
     /// longer shared, archived, deleted, or they left the Hub. What they still have open of it closes.
     public var onClosed: ((_ conversationID: UUID, _ user: UUID) -> Void)?
+    /// Runs when a call stops ringing here: answered on a device, declined, or left as missed; for whatever
+    /// else rings it: on the owner's own Mac, Noodle's panel.
+    public var onCallStopped: ((_ id: UUID) -> Void)?
 
     private let repository: WorkspaceRepository
     private let runtime: AgentRuntimeCoordinator
@@ -1157,14 +1160,23 @@ import NoodleVoicePeer
               access.owner(ofBot: request.agentID) == user.id else { throw LinkError("That call is no longer ringing.") }
         ringing[id] = nil
         onChange?(user.id, .callStopped(id: id))
+        onCallStopped?(id)
         _ = try? repository.endCall(agentID: request.agentID, id: id)
         return request
+    }
+
+    /// Stops ringing on every device a call that something else ended: on the owner's own Mac, Noodle,
+    /// where it was answered, declined or missed. That leaves its card; this leaves nothing.
+    public func stopRinging(_ id: UUID) {
+        guard let request = ringing.removeValue(forKey: id) else { return }
+        if let owner = access.owner(ofBot: request.agentID) { onChange?(owner, .callStopped(id: id)) }
     }
 
     /// Stops a call ringing and leaves it unanswered, once per call.
     private func endUnansweredCall(_ request: AgentCallRequest, _ outcome: UnansweredCall, at now: Date) {
         ringing[request.id] = nil
         if let owner = access.owner(ofBot: request.agentID) { onChange?(owner, .callStopped(id: request.id)) }
+        onCallStopped?(request.id)
         guard (try? repository.endCall(agentID: request.agentID, id: request.id)) != nil else { return }
         leaveUnanswered(request, outcome, at: now)
     }

@@ -30,6 +30,9 @@ import Observation
     /// A bot here's sharing on the Hubs this Mac joined, and sharing it on one, for the owner's phone.
     @ObservationIgnored var hubSharing: ((UUID) async throws -> [LinkHubSharing])?
     @ObservationIgnored var shareOnHub: ((UUID, String, [UUID]) async throws -> [LinkHubSharing])?
+    /// Runs when a call from a bot here stopped ringing on the owner's devices: answered or declined on
+    /// one, or not answered in time.
+    @ObservationIgnored var onCallStopped: ((_ id: UUID) -> Void)?
 
     @ObservationIgnored private let repository: WorkspaceRepository
     @ObservationIgnored private let runtime: AgentRuntimeCoordinator
@@ -87,9 +90,12 @@ import Observation
                 guard let share = self?.shareOnHub else { throw LinkError("Noodle is closing.") }
                 return try await share($0, $1, $2)
             }
+            hub.bots.onCallStopped = { [weak self] in self?.onCallStopped?($0) }
             self.hub = hub
             key = hub.link.key.x963.base64EncodedString()
             await hub.start()
+            // A call already ringing here rings on the owner's devices too.
+            hub.bots.ringPendingCalls()
             awake = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled],
                                                           reason: "Your devices can reach this Mac")
         } else if !on, let hub {
@@ -99,6 +105,13 @@ import Observation
             awake = nil
         }
     }
+
+    /// Rings a call a bot here placed on the owner's devices too, while it serves them. Whichever rings
+    /// it, here or there, the bot's pending call ends once, so its conversation gets one card at most.
+    func ringCall(of agentID: UUID, now: Date = Date()) { hub?.bots.ringCall(of: agentID, now: now) }
+
+    /// Stops a call ringing on the owner's devices once this Mac answered, declined or missed it.
+    func stopRinging(_ id: UUID) { hub?.bots.stopRinging(id) }
 
     nonisolated private static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

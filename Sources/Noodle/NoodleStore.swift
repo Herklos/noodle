@@ -315,6 +315,8 @@ final class NoodleStore {
         messenger.onCallRequested = { [weak self] id in Task { @MainActor in self?.ringCall(of: id) } }
         messenger.noodletHasPreview = { [applets] url in await applets.hasPreview(url) }
         thisMac.onBotsEdited = { [weak self] in self?.reload() }
+        // A call from a bot here was answered, declined or missed on the owner's phone.
+        thisMac.onCallStopped = { [weak self] in self?.stopRinging($0) }
         noodletAnnotations.present = { [weak self] capture in
             self?.noodletOverlay.present(capture) { note, content, source, raw in
                 try self?.saveConversationAnnotation(note, content: content, source: source, sourceData: raw)
