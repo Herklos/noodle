@@ -1,0 +1,5 @@
+# Only the Swift package goes into the image build.
+.build/
+.swiftpm/
+worker/
+*.md

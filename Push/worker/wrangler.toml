@@ -1,0 +1,56 @@
+#:schema node_modules/wrangler/config-schema.json
+# The noodle-push Worker: starts the Swift server's container and forwards every request to it.
+# Deployed by .github/workflows/push.yml from the push-production environment, which passes
+# APNS_KEY_P8, APNS_KEY_ID and PUSH_SEAL_KEY as Worker secrets (src/index.ts hands them on).
+name = "noodle-push"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The usenoodle.app zone is in the same account, so DNS and the certificate come with the route.
+routes = [
+  { pattern = "push.usenoodle.app", custom_domain = true }
+]
+
+# Not secret: the team that owns the .p8 key, and the Mobile app's VoIP topic.
+[vars]
+APNS_TEAM_ID = "S8VNVK39LH"
+APNS_TOPIC = "com.pdparchitect.noodle.mobile.voip"
+
+# Every 5 minutes, ping the container so one instance stays warm (sleepAfter is 15 minutes).
+[triggers]
+crons = ["*/5 * * * *"]
+
+[observability]
+enabled = true
+
+# Per-address limits at the edge (src/index.ts keys them by IPv4 address or IPv6 /64), before a request
+# reaches the container. They match PushLimits: 10 registrations and 30 rings a minute. The namespace
+# IDs are numbers this account picks; they only need to be unique within it.
+[[ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "1241"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RING_LIMITER"
+namespace_id = "1242"
+simple = { limit = 30, period = 60 }
+
+# Built from ../Dockerfile with Push/ as the context. Cloudflare runs linux/amd64 images.
+# lite is 1/16 vCPU and 256 MiB: enough for a few rings a minute; move to basic if measurements say so.
+[[containers]]
+class_name = "PushContainer"
+image = "../Dockerfile"
+image_build_context = ".."
+instance_type = "lite"
+max_instances = 1
+
+# Each container instance is backed by a Durable Object.
+[[durable_objects.bindings]]
+name = "PUSH_CONTAINER"
+class_name = "PushContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushContainer"]
