@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-21
+
 ### Added
 
 - Calls from your bots ring on the phone's call screen even while Noodle is closed or the phone is away from home, with the bot's name. Answer connects the call once the phone reaches your Hub; if it can't, a notification says you missed the call. Needs the Hub, or Noodle on the Mac, updated.
@@ -13,6 +15,7 @@
 ### Fixed
 
 - The first message you send after opening a conversation stays in view above the message field, instead of the conversation scrolling past its end to a blank screen until you scroll it back.
+- The app icon shows how many conversations have replies you haven't read, on all your Hubs, as Messages does. It counts replies that come while Noodle is closed, and goes down as you read them here or, while Noodle is still in the app switcher, on another device.
 
 ### What to Test
 
@@ -29,6 +32,8 @@
 - Choose a bot that cannot take calls: check there is no button whatever the setting. Use a tinted Home Screen and dark mode: check the button can still be read. With VoiceOver, check the bot's name and "Call" with its name are read separately.
 - Open a long conversation for the first time since launching Noodle, tap the message field and send a message: check your message shows just above the field, with no blank screen. Send another, and check it does the same.
 - Repeat in a conversation you have already opened, with the keyboard already up, and in a short conversation.
+- Leave Noodle and have two bots reply: check the app icon shows 2, and that a third reply from one of them keeps it at 2. Open one conversation and check the icon shows 1 once you are back on the Home Screen.
+- With Noodle in the background, not closed from the app switcher, read a conversation in Noodle on your Mac: check the icon's number goes down and its notification leaves Notification Center.
 
 ## [0.41.0] - 2026-10-20
 
@@ -37,11 +42,6 @@
 - Hub admins can suspend and restore regular users from their user details, keeping their plan, data and paired devices.
 - Your bots on a Noodle Hub can call you when something needs you now. While Noodle is open, the call rings on the phone's call screen with the bot's name; Answer starts the call and Decline turns it down. A call you decline or miss shows as a card in the bot's conversation, with why it called. Needs the Hub updated.
 - Sign in to a page in a browser you watch live with your iPhone's own fields: tap the key, pick your login from Passwords or type it, and tap Fill. Codes from Messages are offered too. Turn on Submit to send the form as well. Needs a Hub and Noodle Browser that offer it.
-
-### Fixed
-
-- The app icon shows how many conversations have replies you haven't read, on all your Hubs, as Messages does. It counts replies that come while Noodle is closed, and goes down as you read them here or, while Noodle is still in the app switcher, on another device.
-
 
 ### What to Test
 
@@ -53,8 +53,6 @@
 - On a page asking for a code sent by text message, tap the key: check the code from Messages is offered above the keyboard and fills the page's boxes.
 - Fill a password without signing in and close the live view: open it again and check the password field is empty.
 - On a page with no sign-in fields, tap the key: check it says none were found. With a Hub or Noodle Browser that cannot sign in, check the key does not show or the message names what to update.
-- Leave Noodle and have two bots reply: check the app icon shows 2, and that a third reply from one of them keeps it at 2. Open one conversation and check the icon shows 1 once you are back on the Home Screen.
-- With Noodle in the background, not closed from the app switcher, read a conversation in Noodle on your Mac: check the icon's number goes down and its notification leaves Notification Center.
 
 ## [0.40.0] - 2026-10-20
 
@@ -66,7 +64,6 @@
 - Paste a copied file into the message field to attach it, instead of its text. Long pasted text, over 12 lines or 1,200 characters, is attached as a text file, as on the Mac.
 - The small Bot widget has a Call button for a bot that takes voice calls. Tap it to open the chat and call the bot straight away; tap anywhere else to open the chat as before.
 
-
 ### Changed
 
 - Tap a voice message to read its transcript, with its waveform to play it and tap or drag through it. The sentence being played is marked, roughly, since it follows the time rather than the words, and tapping a sentence plays from there. Copy copies the transcript. The play button still plays and pauses, and Show Transcript, when you touch and hold the message, opens the same.
@@ -74,7 +71,6 @@
 ### Fixed
 
 - Deleting a tool, computer or browser in a bot's settings asks first. It says which of your bots lose it, and that a computer moves to the Trash on the Hub or that a browser's sign-ins and history are erased for good.
-
 
 ### What to Test
 
@@ -111,7 +107,6 @@
 - Comment on files and messages, as on the Mac. In a file's preview, tap Mark Up and drag a box around what you mean, then write or dictate your comment. Pick lines of a patch by their numbers, or select text in a text file, and choose Comment…. Long-press a message or a file in the conversation and choose Comment… to comment on all of it. Comments wait above the message field until you send your next message, which takes them to the bot. Tap one to change it. Needs a Hub that keeps comments.
 - Comments from your Mac or another device show as cards with the part marked or the text quoted.
 
-
 ### What to Test
 
 - Open a picture, a PDF and a text file from a conversation and tap Mark Up: check "Drag to mark an area" shows and goes once you drag, and lifting your finger opens the comment sheet with the area you marked outlined in orange. Write a comment and tap Save.
@@ -129,7 +124,6 @@
 
 - A .patch or .diff file in a conversation shows its commits and the files that changed most on its card, as on the Mac. Tap it to read the patch: a walkthrough of its commits, its files by folder with a filter, and each file's changes with line numbers. Tick files off as Viewed; this phone remembers them.
 
-
 ### What to Test
 
 - Ask a bot to send a patch of a change made with `git format-patch`: check its card shows the commits, the files that changed most with the lines added and removed, and the totals.
@@ -144,7 +138,6 @@
 
 - Home Screen widgets for your bots. Bot shows the one you choose, with its picture and name, also on the Lock Screen. Bots shows the bots of All or of a space you choose. Tap a bot to open your chat with it.
 
-
 ### Changed
 
 - Tapping a notification opens its conversation even when another space is shown.
@@ -155,7 +148,6 @@
 - Groups suggested in the share sheet show their bots whole inside the round picture, instead of with their edges cut off.
 - Noodle reconnects to your Hub within seconds after you switch between Wi-Fi and mobile data, turn off airplane mode or come back to the app, instead of sometimes staying unable to connect for a long time. A slow or patchy connection no longer keeps new messages from arriving while older conversations load, and a connection that goes silent is noticed and replaced.
 - When your Hub can't be reached, a bar above your chats says so and keeps retrying, with Try Again to retry at once. Not Connected has Try Again too.
-
 
 ### What to Test
 
@@ -178,7 +170,6 @@
 - In a group, tapping a bot's picture beside its messages shows its profile from the bottom of the screen, with Reply, Message, Call and Edit, as on the Mac.
 - Settings › Sort Conversations, as on the Mac: newest first, unread first, or unread bots and groups in an Unread section at the top. Pinned ones stay in their circles.
 
-
 ### Changed
 
 - The bot editor has a Description field and a Backstory section, as on the Mac. Its picture opens the picture editor without a row arrow.
@@ -189,7 +180,6 @@
 
 - The screen stays on while you dictate a voice message and it is transcribed, instead of dimming and locking.
 - Sending a message or voice message keeps the conversation at its end, instead of leaving a gap below it or scrolling past it to a blank screen.
-
 
 ### What to Test
 
@@ -215,12 +205,10 @@
 - Noodle is in the share sheet: send a screenshot, photo, video, file, link or text from any app to a bot or group, with a message.
 - The bots and groups you talk to most recently show at the top of the share sheet, as in Messages, ready to send to in one tap.
 
-
 ### Changed
 
 - Inline code in messages is a little smaller and dimmer, so it sits more quietly in the text.
 - Reply notifications show the bot's picture, and a group's notification names the group and the bot that replied.
-
 
 ### What to Test
 
@@ -237,20 +225,17 @@
 
 - Settings > Long Messages can split long replies into a bubble per paragraph, or into short chunks that keep a lead-in with its list.
 
-
 ### What to Test
 
 - Switch Long Messages between Together, Paragraphs and Chunks; check a long reply breaks up as described, reactions sit on its first bubble and Copy copies the whole message.
 
 ## [0.33.0] - 2026-10-15
 
-
 ### Changed
 
 - The background picker offers 40 gradients in place of four, from pastels to neutrals, as a grid of round swatches. Gradients are no longer dimmed, so they show their true colours.
 - The starter team made on your first Hub wear drawn faces that suit their names, in place of icons.
 - Bot Picture shows a Picture or Symbol switch, with only that choice's options beneath it, in place of Use Symbol Instead. Switching to Symbol and back keeps the picture, and Create Image reads Edit Image when there is a picture to start from. Editing a picture no longer adds the bot's name and description to your prompt.
-
 
 ### What to Test
 
@@ -266,13 +251,11 @@
 
 - Pictures and videos in conversations can be saved to Photos from the share menu, not only to Files.
 
-
 ### Changed
 
 - Calls show on the iPhone's call screen, keep going when the phone is locked, and can be muted or ended from the Lock Screen and from headphones.
 - A call's audio goes over your Hub connection, and the Hub connects to the bot's voice. This needs the Hub update released alongside.
 - A new bot introduces itself as soon as it is ready, without waiting for you to write. The starter team introduces themselves in their group instead of answering a greeting sent in your name. This needs the Hub update released alongside.
-
 
 ### What to Test
 
@@ -292,7 +275,6 @@
 
 - Organize in a bot's settings asks an idle bot on your Hub to tidy its own files, as on the Mac. The bot sends a short note on what changed.
 
-
 ### Changed
 
 - Pictures in conversations show at once when scrolled back into view, and shared noodlet, browser and computer cards keep their last picture after the app restarts.
@@ -300,7 +282,6 @@
 - Pictures, videos and PDFs in conversations show from small previews your Hub makes; the whole file downloads only when you open, share or use it as a background. This needs the Hub update released alongside.
 - A web page linked in several conversations is previewed once.
 - When a noodlet you played before has a large update, the version you have starts at once and the new one downloads meanwhile, with its progress shown at the top. For a small update, Play Previous Version sits below the download progress instead of over it. This needs the Hub update released alongside.
-
 
 ### What to Test
 
@@ -317,7 +298,6 @@
 - Wrapped text in message tables no longer overlaps adjacent rows.
 - Table header backgrounds no longer overlap the first row after reducing the text size.
 
-
 ### What to Test
 
 - Open a table with long cells and check that each row has enough space for its text, including at larger text sizes.
@@ -328,7 +308,6 @@
 ### Added
 
 - While a changed noodlet downloads again, Play Previous Version plays the one already on the phone; the new one keeps downloading, says when it is ready, and opens next time.
-
 
 ### What to Test
 
@@ -346,7 +325,6 @@
 
 - Settings > Downloaded Noodlets lists the noodlets kept on the phone with their sizes, to delete one or all of them and free up space. A deleted noodlet downloads again the next time it opens.
 
-
 ### Changed
 
 - Noodlet games can put Shift, Control and Alt on controller buttons, and let a button press a key the stick also uses, such as gas on a trigger while the stick steers.
@@ -356,7 +334,6 @@
 
 - A noodlet downloading from the Hub keeps the phone awake, and if the connection drops, as when the phone is locked, it carries on from where it stopped instead of failing.
 - Sound in noodlets that play it through an audio worklet, as many web games do, now plays instead of failing to start.
-
 
 ### What to Test
 
@@ -373,11 +350,9 @@
 - Noodlets can be games exported for the web by engines such as Godot, Unity and Emscripten, including ones that run on several threads on iOS 27 and later.
 - While a noodlet comes from your Hub, its screen says what is happening: Preparing on Hub, then how much has downloaded, Unpacking and Starting, and fades into the noodlet once it has drawn.
 
-
 ### Changed
 
 - A noodlet can download up to 1 GiB from the web in one request, up from 16 MiB.
-
 
 ### What to Test
 
@@ -386,7 +361,6 @@
 - Open a large noodlet for the first time, or after it changed, and check the screen shows its download progress.
 
 ## [0.27.0] - 2026-10-09
-
 
 ### Changed
 
@@ -397,13 +371,11 @@
 - Changes made just as the app connects to a Noodle Hub, such as a conversation pinned on another device, are no longer missed.
 - Games that read game controllers directly work on a TV: the controllers no longer stop when the game moves from the phone to the TV.
 
-
 ### What to Test
 
 - With a game controller connected, open a game that supports controllers and show it on a TV: the controller plays the game there, sticks and all, and a second controller adds a second player. Press View: the menu opens and the game doesn't react. Bring the game back to the phone: the controllers keep working, one player per controller.
 
 ## [0.26.0] - 2026-10-08
-
 
 ### Changed
 
@@ -414,7 +386,6 @@
 ### Fixed
 
 - While a full-screen game loads, Done and the buttons beside it stay in the top corners instead of starting in the middle and jumping out.
-
 
 ### What to Test
 
@@ -433,8 +404,6 @@
 - Chat effects: confetti or fireworks a bot sends play when you open its conversation, within a day, on whichever of your devices shows it first.
 - Play: tap … and choose Play to turn the phone into a games console. It shows every noodlet your bots shared, on all your Hubs, with games first. With a TV connected by Screen Mirroring or a cable, the console shows on the TV and the phone becomes its controller; a game controller steers it too.
 - Joining your first Hub welcomes you with a team of three bots, as Noodle does on the Mac: a personal assistant, a developer and a researcher, with their own group. They use what your plan on the Hub lends, so there is nothing to set up, and Continue says hello to them in their group.
-
-
 
 ### What to Test
 
@@ -460,7 +429,6 @@
 
 - Make your own spaces with any bots and groups from all your Hubs. Tap the title and choose New Space, or touch and hold a conversation and choose Spaces, which also adds it. Each space keeps its own pins, and bots and groups made in a space join it. Your spaces are the same on your iPhone, iPad and Mac through iCloud.
 
-
 ### What to Test
 
 - Tap the title, choose New Space and name it: the empty space shows. Touch and hold bots from two different Hubs, choose Spaces and tick the space: both show there, and nowhere else changes. Pin one in the space: it is pinned there only, not in All or in its Hub's space.
@@ -475,11 +443,9 @@
 - Tap the title to choose All, or one joined Hub's space with only its bots and groups. Pins in a Hub's space are kept on the Hub, so they are the same on all your devices; pins in All stay on this phone.
 - In a Hub's space, New Bot and New Group start on that Hub, so they show there. You can still choose another Hub.
 
-
 ### Changed
 
 - The bots and groups of every Hub you joined share one list. Hubs no longer switches between them: tap a Hub there for its details.
-
 
 ### What to Test
 
@@ -502,7 +468,6 @@
 - Calls keep their microphone and sound when opening or closing a noodlet, playing a voice message, or leaving a conversation.
 - The call timer and connected chime wait for the phone's voice connection and playback to be ready. A playback failure ends the call with an error instead of leaving it silently connected.
 
-
 ### What to Test
 
 - Ask a bot for a table, for example "compare three phones in a table". The table shows as a card with its column names and row count, between the text around it. Tap the card: the whole table opens in a sheet. Tap a column header to sort it, again to reverse, a third time for the original order. Copy as CSV and Share CSV are in the sheet's menu.
@@ -518,7 +483,6 @@
 ### Added
 
 - You can call your Codex bots on the Hub, and Codex bots shared with you: tap the phone in a conversation's top bar and talk things through. The bot answers aloud and works on what you ask. Calls start on the earpiece, where the bot sounds clearest; Speaker switches to the loudspeaker. A bar at the top shows the call's time with Speaker, Mute and End, and the conversation stays open, so you can type and share files while you talk; the call hears about them. What is said shows in the conversation as short transcript blocks; tap one to read all of it. Each bot's voice is chosen under Voice in its editor, with a sample of each to hear.
-
 
 ### What to Test
 
@@ -538,7 +502,6 @@
 
 - Your picture on a Hub can be changed: tap it in that Hub's details, under Hubs. Take a photo, choose one or create an image, or pick a symbol or your initials on a colour. Everyone on the Hub sees it, and Sharing in a bot's editor and an admin's Users list show each person's picture.
 
-
 ### Changed
 
 - Sharing in a bot's editor shows everyone on the Hub as pictures to tap, with a line saying who can talk to the bot. The Sharing row says how many people the bot is shared with.
@@ -546,7 +509,6 @@
 ### Fixed
 
 - Noodlets a bot shares show their own names in the conversation, under Shared and in the game menu, instead of all being called Noodlet.
-
 
 ### What to Test
 
@@ -563,11 +525,9 @@
 - Admins of a Hub can manage its users from the phone: Users in that Hub's details, under Hubs, lists everyone. Add someone with +, and tap a person to change their plan and whether they can pair devices, rename them, invite or remove their devices, or remove them. Admins are listed but changed only on the Hub.
 - Games can show a thumbstick on the screen instead of a d-pad: its knob follows your thumb, and it steers in eight directions like the d-pad.
 
-
 ### Changed
 
 - Leave Hub also removes the phone from the Hub's devices. The Hub is gone from the phone at once; if it cannot be reached, the phone tells it the next time it can.
-
 
 ### What to Test
 
@@ -584,7 +544,6 @@
 - While a game plays on the TV and a game controller covers all its buttons, the phone shows the connected controllers and their batteries instead of a blank screen.
 - In a noodlet, the controller's View button (Create on PlayStation, − on Switch) shows the conversation's other noodlets, on the TV while it plays there: move with the d-pad or stick, press A to switch to one, or choose Close Game. B or View again goes back to the game.
 
-
 ### Changed
 
 - Profiles under ••• in the chat list is now Hubs, as it lists the Hubs you joined.
@@ -595,7 +554,6 @@
 - Games make sound in Silent Mode, as videos do. They were silent with Silent Mode on, on the phone and on the TV.
 - Games play on the TV on iOS 27: with Screen Mirroring on, Show on TV said no TV was connected and the TV kept mirroring the phone. Until a game is open, the TV now mirrors the phone as usual. Needs iOS 27.
 - Noodlets run on the phone have sound: a game played with the on-screen controls was silent, as was any noodlet with the ring switch set to silent. Music playing in another app carries on alongside.
-
 
 ### What to Test
 
@@ -617,7 +575,6 @@
 
 - Play games on a TV: with Screen Mirroring on, or a TV connected by cable, a noodlet with game controls plays full screen on the TV and your phone becomes its controller. Show on TV and Show on iPhone move it between the two.
 
-
 ### What to Test
 
 - Turn on Screen Mirroring to an Apple TV or AirPlay TV: the TV shows the Noodle wordmark instead of a copy of the phone.
@@ -630,11 +587,9 @@
 
 ## [0.16.0] - 2026-10-03
 
-
 ### Changed
 
 - A conversation's background is kept on the Hub, so it is the same on your phone and your Macs, and a background video chosen on a Mac plays here too. Backgrounds chosen on this phone before are gone. Needs the matching Noodle Hub, or Noodle on a Mac serving as a Hub.
-
 
 ### What to Test
 
@@ -647,7 +602,6 @@
 
 - Archive a bot or group by touching and holding it in the list: it keeps everything but stops running and leaves the list, for all your devices. Bring it back from Archived in the Hub's profile, under Profiles. Needs the matching Noodle Hub, or Noodle on a Mac serving as a Hub.
 
-
 ### What to Test
 
 - Touch and hold a bot, choose Archive Bot: it leaves the list. In a group with it, its picture leaves the group's and it is no longer offered after @.
@@ -658,14 +612,12 @@
 
 ## [0.14.0] - 2026-10-02
 
-
 ### Changed
 
 - … in a conversation opens a Shared sheet with titles and previews for choosing a computer, browser tab or noodlet.
 - Create Image in a bot's picture starts from an avatar portrait with the bot's name and description, instead of an empty Image Playground.
 - Create Image in a bot's picture opens on Illustration and no longer suggests people from Photos, as on the Mac.
 - Create Image for a background opens on Illustration, starts from the photo in use, no longer suggests people from Photos and makes an image the shape of the screen instead of a square, as on the Mac.
-
 
 ### What to Test
 
@@ -680,7 +632,6 @@
 - A conversation could open short of its end or past it, even when you had left it at the end.
 
 ## [0.13.0] - 2026-10-01
-
 
 ### What to Test
 
@@ -702,7 +653,6 @@
 - Help Me Connect, when pairing cannot reach the Hub, tries each way to it, home Wi-Fi, Tailscale and the internet, shows which answer, and suggests what to try, such as joining the Hub's Wi-Fi, allowing Local Network or opening Tailscale.
 - … in a conversation lists the computers, browsers and noodlets shared there, for opening again without scrolling back, as Shared does on the Mac.
 
-
 ### Changed
 
 - A new computer or browser is named for its bot, such as Chloe’s Computer.
@@ -719,7 +669,6 @@
 - The message field sat higher than Search in the list of bots.
 
 ## [0.12.0] - 2026-10-01
-
 
 ### What to Test
 
@@ -745,7 +694,6 @@
 
 ## [0.11.0] - 2026-09-30
 
-
 ### What to Test
 
 - Open a conversation where a bot sent a web link: a card with the page's picture and title shows under the message. Quit and reopen Noodle, or turn on Airplane Mode: the card is still there.
@@ -760,7 +708,6 @@
 - Touch and hold, then move, to drag in a computer or browser live view, as with a mouse.
 - Pinch to zoom into a live view, and move two fingers to look around it. The picture sharpens once you let go.
 
-
 ### Changed
 
 - Link cards look as on the Mac, and are kept on this iPhone for a week, instead of being fetched again each time Noodle opens. After a week they are fetched again, and deleting a conversation removes its cards.
@@ -772,7 +719,6 @@
 - A message field left with only blank lines no longer comes back taller than the plus beside it, without its placeholder.
 
 ## [0.10.0] - 2026-09-30
-
 
 ### Changed
 
@@ -786,7 +732,6 @@
 
 ## [0.9.0] - 2026-09-29
 
-
 ### What to Test
 
 - Type a message of several lines, or press return a few times: the field grows over the conversation, and the conversation and its scroll bar stay where they are.
@@ -795,7 +740,6 @@
 - Quit and reopen Noodle with a message that did not go through: it is still there, still marked.
 - Make a new group, or open a group's info: each bot in Members shows its description under its name.
 - Pull the list of conversations down until it clicks, and keep holding: the word stays in the gap above the list and does not jump over the pinned bots, also after you let go.
-
 
 ### Changed
 
@@ -811,7 +755,6 @@
 
 ## [0.8.0] - 2026-09-29
 
-
 ### What to Test
 
 - Ask a bot to make a simple game with arrow keys and a jump button, then open the game from its message: a d-pad and buttons show over it instead of the keyboard, and holding one keeps moving. Needs Noodle Applet, the Mac or Hub on the next update.
@@ -823,7 +766,6 @@
 ### Added
 
 - Games your bots make show a controller over the live view instead of the keyboard, and game controllers play them too.
-
 
 ### Changed
 
@@ -837,7 +779,6 @@
 
 ## [0.7.0] - 2026-09-29
 
-
 ### What to Test
 
 - Pin a bot, then ask it to set its status with Messenger (for example, "set your status to Reviewing PR 42"): the status shows in a bubble over its circle. Needs the Mac or Hub on the next update.
@@ -848,7 +789,6 @@
 - Pinned bots show a bubble over their circle with the start of an unread reply, or else the status the bot set.
 
 ## [0.6.0] - 2026-09-29
-
 
 ### What to Test
 
@@ -882,7 +822,6 @@
 - Attachments, in Settings, lays out a message's files side by side, one below another or overlapping, as on the Mac.
 - Groups: see, create, edit and delete conversations with several of your bots, as on the Mac.
 
-
 ### Changed
 
 - Harness lists a profile under its harness's name, and shows the chosen one on a single line.
@@ -899,14 +838,12 @@
 
 ## [0.5.0] - 2026-09-28
 
-
 ### What to Test
 
 - Open a conversation: its latest message sits just above the message field, with no gap under it, and the conversation does not sit shifted to the side before you first scroll.
 - The app icon on the Home Screen is Apple's system blue, matching the Mac apps.
 - Swipe right on a bot and tap Pin: it moves to a circle above the list, as in Messages. Tap the circle to open the chat; touch and hold it to unpin.
 - Touch and hold a message: as in Messages, the conversation blurs, the message lifts, reactions float above it and Copy below. Tap a reaction to add or take it back, or tap outside to close. Try messages near the top and bottom of the screen, and a long one.
-
 
 ### Changed
 
@@ -918,7 +855,6 @@
 - A conversation no longer opens scrolled past its end and slightly to the side.
 
 ## [0.4.0] - 2026-09-28
-
 
 ### What to Test
 
@@ -942,7 +878,6 @@
 
 ## [0.3.2] - 2026-09-27
 
-
 ### What to Test
 
 - Tap a notification of a new reply: the app opens that conversation.
@@ -953,7 +888,6 @@
 
 ## [0.3.1] - 2026-09-27
 
-
 ### What to Test
 
 - Leave the app and have a bot reply: a notification arrives with the bot's name and its reply.
@@ -963,7 +897,6 @@
 - Setting up notifications waits until the phone is registered for push, which CloudKit needs before it notifies it; before, CloudKit refused them.
 
 ## [0.3.0] - 2026-09-27
-
 
 ### What to Test
 
@@ -979,7 +912,6 @@
 
 - Notifications of new replies while the app is closed or in the background, with the bot's name and what it said. This needs a Hub from this release on.
 
-
 ### Changed
 
 - Opening a picture or file from a message lets you swipe through the message's other files.
@@ -993,14 +925,12 @@
 
 ## [0.2.2] - 2026-09-27
 
-
 ### What to Test
 
 - Tap the plus by the message field and send a photo, a file or a camera shot from the panel.
 - Record and send a voice message.
 - Open a conversation with many pictures: it should not jump while they load.
 - Send a message, and scroll up while a bot replies: you stay where you are.
-
 
 ### Changed
 
@@ -1014,13 +944,11 @@
 
 ## [0.2.1] - 2026-09-26
 
-
 ### What to Test
 
 - Join a Hub whose bots have photo pictures: chats show at once and the pictures follow.
 - Rename a bot that has a picture; the picture stays.
 - Open the app to see the swirl write Noodle before Pair.
-
 
 ### Changed
 
@@ -1031,7 +959,6 @@
 - Connect to a Hub whose bot list or live views are large, such as bots with photo pictures, instead of stopping at “The message is too large.” Chats show at once and bot pictures follow, each fetched once and kept; editing a bot no longer sends its picture back.
 
 ## [0.2.0] - 2026-09-26
-
 
 ### What to Test
 
@@ -1062,7 +989,6 @@
 
 - The join sheet no longer repeats its heading.
 - The unread dot in the list of bots sits evenly between the screen edge and the bot's picture instead of against it.
-
 
 ### Changed
 

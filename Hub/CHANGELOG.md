@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-21
+
 ### Added
 
 - A bot's call rings its owner's iPhone even while Noodle is closed on it or it is away from home, on the phone's call screen with the bot's name, once Noodle on the iPhone is updated. Answering it from there still needs the phone to reach the Hub.
