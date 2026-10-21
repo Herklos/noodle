@@ -103,6 +103,21 @@ jobs:
       - uses: actions/checkout@v6
         with:
           lfs: true
+      # Third-party packages (MLX's C++, BoringSSL) are most of the build. A cache saved by main's last
+      # full run brings them back built; Noodle's own targets rebuild, as checkout makes them newer.
+      - id: toolchain
+        run: echo "id=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - id: build-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            .build
+            !.build/**/*.xctest
+            !.build/**/codecov
+            !.build/coverage
+            !.build/Sandbox CLI Tests.app
+          key: noodle-build-${{ runner.os }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: noodle-build-${{ runner.os }}-${{ steps.toolchain.outputs.id }}-
       - name: Build sandbox CLI fixtures without signing credentials
         run: zsh Tests/build-sandbox-cli-fixture.sh
       - name: Test Noodle and Computer integration
@@ -110,6 +125,18 @@ jobs:
         env:
           NOODLE_TEST_CLI_APPLICATION: ${{ github.workspace }}/.build/Sandbox CLI Tests.app
         run: swift test --disable-sandbox --enable-code-coverage
+      # Only main saves, so pull requests never evict the cache they all restore.
+      - name: Save the package build for later runs
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.build-cache.outputs.cache-hit != 'true' && steps.tests.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .build
+            !.build/**/*.xctest
+            !.build/**/codecov
+            !.build/coverage
+            !.build/Sandbox CLI Tests.app
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
       - name: Summarize Noodle coverage
         if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
         run: |
@@ -308,10 +335,24 @@ jobs:
       - uses: actions/checkout@v6
         with:
           lfs: true
+      - id: toolchain
+        run: echo "id=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - id: build-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .build/hub
+          key: hub-build-${{ runner.os }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.resolved', 'Package.swift', 'Hub/Package.swift', 'Hub/Package.resolved') }}
+          restore-keys: hub-build-${{ runner.os }}-${{ steps.toolchain.outputs.id }}-
+      # HubCore's tests are the root package's, which test-noodle runs whenever they can be affected.
       - name: Build Hub
+        id: build
         run: swift build --disable-sandbox --package-path Hub --scratch-path .build/hub
-      - name: Test Hub
-        run: swift test --disable-sandbox --filter HubCoreTests --scratch-path .build/hub-core
+      - name: Save the Hub build for later runs
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.build-cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: .build/hub
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
 
   test-mobile:
     needs: [versions]

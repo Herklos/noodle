@@ -30,8 +30,8 @@ SUITES = {
     "applet-rendering": (["Applet"], ["scripts/install-tuist.sh"]),
     "bridge": (["Computer/Bridge"], []),
     "browser": (["Browser"], []),
-    # The Hub's own package, and HubCoreTests in the root package.
-    "hub": (["Hub", ""], []),
+    # The Hub builds on the root package, so whatever can affect the root package builds it too.
+    "hub": (["Hub"], []),
     "mobile": (["Mobile"], ["scripts/mobile.sh", "scripts/install-tuist.sh", "scripts/build-priority.sh"]),
 }
 EVERYTHING = ["checks", *SUITES]

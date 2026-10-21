@@ -590,8 +590,12 @@ class ScopeHistoryTests(unittest.TestCase):
             self.git('config', key, value)
         (self.root / 'scripts').mkdir()
         (self.root / 'scripts/ci-scope.py').write_text((ROOT / 'scripts/ci-scope.py').read_text())
+        # Loading the script writes its bytecode beside it, unless the interpreter keeps a cache elsewhere
+        # as macOS's python3 does; CI's does not, and a commit picking it up is a change to scripts/.
+        (self.root / '.gitignore').write_text('__pycache__/\n')
         self.base = self.commit('Base', 'README')
         self.scope = ci_scope(self.root)
+        self.assertEqual(self.git('status', '--porcelain'), '')
         self.answers = {}
         self.scope.gh = self.answer
 
@@ -795,6 +799,9 @@ class PathScopeHistoryTests(ScopeHistoryTests):
                                ('Mobile/Project.swift', 'Project')]:
             (self.root / manifest).parent.mkdir(parents=True, exist_ok=True)
             (self.root / manifest).write_text(f'import {kind}Description\n')
+        # The Hub builds on the root package.
+        (self.root / 'Hub').mkdir()
+        (self.root / 'Hub/Package.swift').write_text('import PackageDescription\n.package(path: "..")\n')
         self.base = self.commit('Manifests', 'Mobile/Sources/.keep')
 
     # The inherited tests that expect every suite need a history this cannot place.
@@ -841,6 +848,60 @@ class PathScopeHistoryTests(ScopeHistoryTests):
         self.git('mv', 'Browser/Sources/Shared.swift', 'Mobile/Sources/Shared.swift')
         self.git('commit', '-q', '-m', 'Move')
         self.assertEqual(self.push(self.git('rev-parse', 'HEAD'), before), ['checks', 'browser', 'mobile'])
+
+class TestSpeedTests(unittest.TestCase):
+    """What keeps the slowest suites short without testing less."""
+    @classmethod
+    def setUpClass(cls):
+        cls.jobs = workflow('release.yml')['jobs']
+
+    def runs(self, job):
+        return '\n'.join(step.get('run', '') for step in self.jobs[job]['steps'])
+
+    def test_hub_core_tests_run_once_with_the_root_package(self):
+        # test-hub used to rebuild the whole root package for HubCoreTests, which test-noodle runs anyway.
+        self.assertIn('name: "HubCoreTests"', (ROOT / 'Package.swift').read_text())
+        tests = next(step for step in self.jobs['test-noodle']['steps'] if step.get('id') == 'tests')
+        self.assertEqual(tests['run'], 'swift test --disable-sandbox --enable-code-coverage')
+        self.assertNotIn('swift test', self.runs('test-hub'))
+        self.assertIn('swift build --disable-sandbox --package-path Hub --scratch-path .build/hub', self.runs('test-hub'))
+        # Whatever can change HubCore's tests also runs test-noodle, and a Hub release requires it.
+        scope = ci_scope()
+        for path in ['Sources/HubCore/HubBots.swift', 'Tests/HubCoreTests/HubBotsTests.swift']:
+            self.assertIn('noodle', scope.affected([path]), path)
+
+    def test_build_caches_restore_everywhere_but_only_main_saves_them(self):
+        for job, built in [('test-noodle', 'tests'), ('test-hub', 'build')]:
+            steps = self.jobs[job]['steps']
+            restore = next(i for i, step in enumerate(steps) if step.get('uses') == 'actions/cache/restore@v5')
+            save = next(i for i, step in enumerate(steps) if step.get('uses') == 'actions/cache/save@v5')
+            build = next(i for i, step in enumerate(steps) if step.get('id') == built)
+            self.assertLess(restore, build)
+            self.assertLess(build, save)
+            self.assertNotIn('if', steps[restore])
+            self.assertEqual(steps[restore]['id'], 'build-cache')
+            key = steps[restore]['with']['key']
+            # A new toolchain or dependency set never reuses another's build products as an exact hit.
+            self.assertIn('${{ steps.toolchain.outputs.id }}', key)
+            self.assertIn("hashFiles('Package.resolved', 'Package.swift'", key)
+            self.assertTrue(key.startswith(steps[restore]['with']['restore-keys']))
+            self.assertEqual(steps[save]['with']['path'], steps[restore]['with']['path'])
+            self.assertEqual(steps[save]['with']['key'], '${{ steps.build-cache.outputs.cache-primary-key }}')
+            for event, ref, hit, outcome, saves in [
+                ('push', 'refs/heads/main', 'false', 'success', True),
+                ('workflow_dispatch', 'refs/heads/main', '', 'success', True),
+                ('push', 'refs/heads/main', 'true', 'success', False),
+                ('push', 'refs/heads/main', 'false', 'failure', False),
+                ('pull_request', 'refs/pull/7/merge', 'false', 'success', False),
+                ('workflow_dispatch', 'refs/heads/feature', 'false', 'success', False),
+            ]:
+                values = {'github.event_name': event, 'github.ref': ref,
+                          'steps.build-cache.outputs.cache-hit': hit, f'steps.{built}.outcome': outcome}
+                self.assertEqual(condition(steps[save]['if'], values), saves, (job, event, ref, hit, outcome))
+        # The fixture app is signed afresh each run; the linked test bundle and coverage are rebuilt anyway.
+        cached = next(step for step in self.jobs['test-noodle']['steps'] if step.get('id') == 'build-cache')['with']['path']
+        for excluded in ['!.build/Sandbox CLI Tests.app', '!.build/**/*.xctest', '!.build/coverage']:
+            self.assertIn(excluded, cached.splitlines())
 
 
 if __name__ == '__main__':
