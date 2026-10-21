@@ -399,7 +399,7 @@ import Observation
         return response
     }
 
-    private func identity() throws -> LinkIdentity {
+    func identity() throws -> LinkIdentity {
         try LinkIdentity.loadOrCreate(at: directory.appendingPathComponent(Self.keyName))
     }
 

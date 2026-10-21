@@ -12,6 +12,7 @@ RUN swift sdk install "$SDK_URL" --checksum "$SDK_CHECKSUM"
 WORKDIR /src
 # The test targets come along because the manifest names them; only NoodlePush is built.
 COPY Package.swift Package.resolved ./
+COPY Wire ./Wire
 COPY Sources ./Sources
 COPY Tests ./Tests
 # --force-resolved-versions builds exactly what Package.resolved pins, and fails instead of resolving anew.

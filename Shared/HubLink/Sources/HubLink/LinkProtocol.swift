@@ -159,6 +159,9 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     case pin(LinkPin)
     /// Where this device hears of unread replies while it is away from the Hub, or nil to stop.
     case pushTopic(LinkPushTopic)
+    /// Lets the Hub ring this device through Noodle Push while it is away or Noodle is closed, or with no
+    /// grant stops it. Answered with `done`. Only a Hub whose status says `ringsThroughPush` knows it.
+    case callPush(LinkCallPush)
     /// This user's tool connections on the Hub.
     case connections
     /// Adds a connection, or changes one of this user's. It reaches no bot until assigned.
@@ -1082,11 +1085,17 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     /// Whether the Hub finds and fills the sign-in fields of a browser someone watches live, with
     /// `signInForm` and `fillSignIn`, so a device may offer to sign in.
     public var signsInToBrowsers: Bool
+    /// Whether the Hub rings this device through Noodle Push while it is away, once it has a grant from `callPush`.
+    public var ringsThroughPush: Bool
+    /// When the grant the Hub keeps for this device runs out. Nil while it keeps none, as before the first or
+    /// after Push said the phone must register again; the device sends a new one then, or once this nears.
+    public var callPushExpiresAt: Date?
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
                 canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
-                keepsAnnotations: Bool = false, signsInToBrowsers: Bool = false) {
+                keepsAnnotations: Bool = false, signsInToBrowsers: Bool = false, ringsThroughPush: Bool = false,
+                callPushExpiresAt: Date? = nil) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1101,11 +1110,13 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.imageModel = imageModel
         self.keepsAnnotations = keepsAnnotations
         self.signsInToBrowsers = signsInToBrowsers
+        self.ringsThroughPush = ringsThroughPush
+        self.callPushExpiresAt = callPushExpiresAt
     }
 
     private enum CodingKeys: String, CodingKey {
         case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
-             keepsAnnotations, signsInToBrowsers
+             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -1124,6 +1135,8 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel)
         keepsAnnotations = try c.decode(.keepsAnnotations, or: false)
         signsInToBrowsers = try c.decode(.signsInToBrowsers, or: false)
+        ringsThroughPush = try c.decode(.ringsThroughPush, or: false)
+        callPushExpiresAt = try c.decodeIfPresent(Date.self, forKey: .callPushExpiresAt)
     }
 }
 
