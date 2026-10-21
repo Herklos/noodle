@@ -2017,6 +2017,61 @@ private actor RecordedSubscriptions: PushSubscriptions {
         for (step, past) in steps { #expect(abs(past) < 1, "\(step): \(past) points past the end") }
     }
 
+    /// The first message sent after opening a conversation, with the keyboard up, ends just above the
+    /// composer, as later ones do, rather than leaving the screen blank until it is scrolled.
+    /// Long replies make the rows the conversation has not laid out yet a poor guess of their height.
+    @Test(arguments: [false, true]) func theFirstMessageSentWithTheKeyboardUpEndsAboveTheComposer(longReplies: Bool) async throws {
+        let hub = FakeHub()
+        for index in 1..<40 {
+            if longReplies, index.isMultiple(of: 3) {
+                let points = (1...(2 + index % 14)).map { "• Point \($0) of reply \(index), which runs long enough to wrap over more than one line." }
+                await hub.botSays("Reply \(index):\n\n" + points.joined(separator: "\n"))
+            } else {
+                await hub.botSays(String(repeating: "Message \(index) says something. ", count: 1 + index % 4))
+            }
+        }
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let scene = try #require(UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: NavigationStack { ChatView(chats: chats, threadID: scout.id) })
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .seconds(1))
+        let conversation = try #require(Self.view(UIScrollView.self, in: window) { !($0 is UITextView) && $0.contentSize.height > window.bounds.height })
+        let field = try #require(Self.view(PastingTextView.self, in: window) { _ in true })
+        func pastEnd() -> CGFloat {
+            conversation.contentOffset.y - (conversation.contentSize.height + conversation.adjustedContentInset.bottom - conversation.bounds.height)
+        }
+        func state() -> String {
+            "offset \(conversation.contentOffset.y), content \(conversation.contentSize.height), " +
+                "inset \(conversation.adjustedContentInset.bottom), height \(conversation.bounds.height)"
+        }
+        var steps: [(String, CGFloat, String)] = [("opened", pastEnd(), state())]
+
+        // The simulator shows no keyboard, so its room is made as a phone's keyboard makes it: the safe
+        // area's bottom rises, animated, with the notice the composer moves on.
+        field.becomeFirstResponder()
+        NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+        UIView.animate(withDuration: 0.35) {
+            host.additionalSafeAreaInsets.bottom = 300
+            host.view.layoutIfNeeded()
+        }
+        try await Task.sleep(for: .seconds(1))
+        steps.append(("keyboard up", pastEnd(), state()))
+        for send in ["first", "second"] {
+            try await chats.send("Hi there, the \(send) time", to: scout)
+            try await Task.sleep(for: .seconds(1))
+            steps.append(("\(send) sent", pastEnd(), state()))
+        }
+
+        for (step, past, state) in steps { #expect(abs(past) < 1, "\(step): \(past) points past the end (\(state))") }
+    }
+
     /// The message field sits as low as the bots list's search field, and the conversation still ends
     /// 16 points above it.
     @Test func theComposerSitsAsLowAsSearch() async throws {
