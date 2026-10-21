@@ -23,10 +23,10 @@ on:
 permissions:
   contents: read
 
-# Serialize the whole pipeline, including promotion of all update channels.
+# Serialize the whole pipeline on main, including promotion of all update channels. A new push to a pull request cancels its older run.
 concurrency:
   group: versions-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   workflow-lint:
