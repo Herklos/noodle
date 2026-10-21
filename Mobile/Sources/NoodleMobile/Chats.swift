@@ -1864,6 +1864,8 @@ struct ConversationScrolling: ViewModifier {
     @State private var scrolling = false
     /// Whether the conversation sits beyond its end, with nothing showing above the composer.
     @State private var pastEnd = false
+    /// Whether it is on its way back from beyond the end.
+    @State private var returning = false
 
     func body(content: Content) -> some View {
         content
@@ -1882,7 +1884,13 @@ struct ConversationScrolling: ViewModifier {
                                              bottomInset: geometry.contentInsets.bottom)
             } action: { _, past in
                 pastEnd = past
-                if past, !scrolling { backToEnd() }
+                if past, !scrolling {
+                    backToEnd()
+                } else if !past, returning {
+                    // Back at the last row, which sits just short of the end: the bottom edge is a new place now.
+                    returning = false
+                    if #available(iOS 27, *) { position.scrollTo(edge: .bottom) }
+                }
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 ConversationScroll.isAtBottom(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
@@ -1908,10 +1916,12 @@ struct ConversationScrolling: ViewModifier {
             }
     }
 
-    /// By then the last row is laid out, so its bottom is the end.
+    /// By then the last row is laid out. Going to it always moves the conversation, where the bottom edge
+    /// may be the place it holds already, having stopped past it.
     private func backToEnd() {
         guard let latest else { return }
         atBottom = true
+        returning = true
         position.scrollTo(id: latest.id, anchor: .bottom)
     }
 }
