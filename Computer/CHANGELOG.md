@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-20
+
 ### Added
 
 - Bots can list their own terminals on a computer with `terminals`: when each was opened and last used, whether a command is running in it and whether it has exited, so they can find and close terminals they lost track of. Apps outside Noodle get the same command in noodle-computer.

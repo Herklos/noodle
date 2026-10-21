@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-20
+
 ### Added
 
 - Hub admins can suspend and restore regular users from their user details, keeping their plan, data and paired devices.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-20
+
 ### Added
 
 - Someone watching a browser live can sign in to the page they see with their device's own fields and saved passwords, once their Noodle or Noodle Hub offers it. Passwords they fill but don't submit are cleared from the page when they stop watching. A page a bot ran its own scripts on isn't offered for signing in until it's reloaded.
