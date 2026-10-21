@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#131519" media="(prefers-color-scheme: dark)" />
+  <meta name="description" content="How Noodle handles your data." />
+  <title>Privacy policy - Noodle</title>
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Noodle" />
+  <meta property="og:url" content="https://usenoodle.app/privacy/" />
+  <meta property="og:title" content="Privacy policy - Noodle" />
+  <meta property="og:description" content="How Noodle handles your data." />
+  <meta property="og:image" content="https://usenoodle.app/assets/social-card.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" href="../assets/favicon.png" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .legal { padding: 64px 0 96px; }
+    .legal .wrap { max-width: 720px; }
+    .legal h1 { font-size: 48px; line-height: 1.08; font-weight: 600; letter-spacing: -0.003em; }
+    .legal .updated { margin-top: 12px; font-size: 14px; color: var(--gray); }
+    .legal h2 { margin-top: 44px; font-size: 24px; line-height: 1.17; font-weight: 600; }
+    .legal h3 { margin-top: 28px; font-size: 19px; font-weight: 600; }
+    .legal p, .legal li { margin-top: 12px; }
+    .legal ul { padding-left: 1.2em; list-style: disc; }
+    .legal p, .legal li { text-wrap: pretty; }
+    .legal a { color: var(--blue); }
+    .legal a:hover { text-decoration: underline; }
+    .legal mark.tk { background: #fff3b0; color: #6b4e00; border-radius: 4px; padding: 0 3px; }
+    .legal code { font: 0.9em ui-monospace, "SF Mono", Menlo, monospace; background: color-mix(in srgb, var(--ink) 7%, transparent); border-radius: 4px; padding: 1px 4px; }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="nav">
+    <div class="wrap nav-in">
+      <a class="logo" href="../" aria-label="Noodle home"><img src="../assets/symbol-noodle.svg" alt="Noodle" width="22" height="22" /></a>
+      <nav aria-label="Primary">
+        <a href="../#groups">Groups</a>
+        <a href="../#mobile">Mobile</a>
+        <a href="../computer/">Computer</a>
+        <a href="../browser/">Browser</a>
+        <a href="../applet/">Applet</a>
+        <a href="../#hub">Hub</a>
+        <a href="../#privacy">Privacy</a>
+        <a href="https://github.com/pdparchitect/noodle/blob/main/docs/README.md">Docs</a>
+      </nav>
+      <a class="nav-dl" href="../#download">Download</a>
+    </div>
+  </header>
+  <main id="main" class="legal">
+    <div class="wrap">
+      <h1>Privacy</h1>
+      <p class="updated">Last updated: 21 October 2026</p>
+      <p>Noodle is a free family of apps for running AI agents on your Mac, iPhone and iPad, made by the Noodle project. Noodle's source code is publicly available under the Apache 2.0 licence: <a href="https://github.com/pdparchitect/noodle">https://github.com/pdparchitect/noodle</a></p>
+      <h2>The short version</h2>
+      <ul>
+        <li>Running agents does not send your conversations, files, Google data or sign-ins to Noodle's developers. Apart from the technical data listed below, they only see what you choose to send them, such as TestFlight feedback or an email.</li>
+        <li>There are no Noodle accounts and no ads. Noodle's own code does not send analytics or crash reports. Noodle Mobile is a beta on Apple's TestFlight, and Apple shares some data with the developers while you test it (see below).</li>
+        <li>Your agents send what they work on to the AI provider you chose. That provider's terms and your account settings decide how it is used.</li>
+        <li>A few services the developers use see limited technical data, such as IP addresses. They are listed below.</li>
+      </ul>
+      <h2>What Noodle keeps, and where</h2>
+      <p><strong>On your Mac.</strong> Noodle stores your conversations, agent workspaces and settings on your Mac.</p>
+      <p><strong>On a Hub.</strong> Noodle Hub runs agents for a group, such as a family or a team. A Hub keeps its conversations, agent files, memory and tool sign-ins on the Mac that runs it. If you join someone else's Hub, that data is on their Mac, not yours.</p>
+      <p><strong>On your iPhone and iPad.</strong> Noodle Mobile connects to Hubs. It keeps your Hub pairings, widget data and some cached content on your device.</p>
+      <p><strong>In your iCloud.</strong> Spaces you create, with their names, members and pins, sync between your Mac and iPhone through your own private iCloud, encrypted. Noodle's developers cannot read them.</p>
+      <p><strong>Sign-ins.</strong> Sign-ins for tools you connect, such as Google, are kept in the macOS Keychain of the Mac or Hub that uses them. They are not synced to iCloud and are never written to an agent's files. Each restricted agent gets its own copy of your AI provider sign-in in its workspace, so it can work.</p>
+      <p><strong>Voice.</strong> Voice messages are transcribed on your device, on your Mac or iPhone. The agent then receives the audio and the transcript. Voice calls are different: your voice is sent to OpenAI through the agent's sign-in.</p>
+      <h2>What your agents can reach</h2>
+      <p>A new agent is restricted. It can use its own workspace, the folders you share with it, its conversations, and the tools, computers and browsers you assign to it. It cannot read your other files, other agents' files, Noodle's own storage or your Keychain, though it may see that some files exist. It can reach the internet. These file restrictions apply to the agent itself; assigned tools, computers and browsers can act with their own permissions.</p>
+      <p>A Local Mac computer is a separate macOS user account on your Mac. It can reach what macOS lets that account reach. It is not a virtual machine.</p>
+      <p>If you make an agent unrestricted, it runs as you and can reach your files and signed-in services.</p>
+      <p>Within the access you give, agents use their tools without asking you each time.</p>
+      <h2>Your AI provider</h2>
+      <p>Noodle does not sell a model. Each agent uses an account you already have, such as Claude, ChatGPT or Gemini, or a model that runs on your Mac.</p>
+      <p>Everything an agent works on is sent to that provider: your prompts, the files it reads, and what its tools return. That includes Google data, if the agent uses a Google connection.</p>
+      <p>Whether the provider trains AI models on this depends on your account type and settings. Many consumer accounts may use your conversations for training unless you turn it off, and some do not let you turn it off. API and business accounts usually do not by default. Models that run on your Mac send nothing. Noodle cannot control this, so check your provider's settings.</p>
+      <h2>Google user data</h2>
+      <p>Noodle can connect to Gmail, Google Calendar, Google Docs and Google Drive. You choose whether to connect each one, from the Noodle Mac app. Each connection asks only for its own permissions:</p>
+      <ul>
+        <li><strong>Gmail</strong> (<code>gmail.modify</code>): search and read email, create and list drafts, and add or remove labels. Noodle's Gmail connection offers no send or delete action today.</li>
+        <li><strong>Google Calendar</strong> (<code>calendar.calendarlist.readonly</code>, <code>calendar.events</code>): see your calendars and events, suggest times, create, change and delete events, and respond to invitations.</li>
+        <li><strong>Google Docs</strong> (<code>documents</code>): read and edit your documents.</li>
+        <li><strong>Google Drive</strong> (<code>drive.readonly</code>, <code>drive.file</code>): search, read and download any file in your Drive, and create and copy files. It offers no delete action.</li>
+      </ul>
+      <p>These actions come from Google's own connection servers. Noodle passes them on to the agents you assign.</p>
+      <p><strong>How it is used.</strong> Noodle uses Google data only to provide the features you turn on: the agents you assign a connection to use it for the tasks you give them, including recurring ones. Noodle's developers do not use it for advertising, do not sell it, and do not use it to train AI models.</p>
+      <p><strong>Where it goes.</strong> Google data goes from Google to the Noodle app on your Mac, or to your Hub. From there it goes to the agent that asked for it, and to that agent's AI provider (see above). It does not reach any server run by Noodle's developers.</p>
+      <p><strong>How long it is kept.</strong> Noodle has no separate Google-data cache. Content an agent has used stays where the agent put it, such as in conversations, its workspace, files it saved or the agent tool's session files, until you delete it.</p>
+      <p><strong>How to remove it.</strong> Removing a connection, revoking access, and deleting copies are three separate steps.</p>
+      <ul>
+        <li><em>Remove the connection.</em> In Noodle, go to Settings › Tools, select the connection and choose Remove Connection. Agents lose access at once, and the stored sign-in is deleted from the Keychain.</li>
+        <li><em>Revoke access at Google.</em> Removing a connection does not cancel Noodle's access on Google's side. To do that, open your Google Account's list of apps with access (<a href="https://myaccount.google.com/connections">https://myaccount.google.com/connections</a>), choose Noodle, then select Remove all access. This ends access for all of that Google account's Noodle Google connections.</li>
+        <li><em>Delete copies.</em> Neither step deletes Google data an agent already used. It can still be in conversations, agent workspaces, agent tool session files, a Hub or your backups. Delete those to remove it. Copies sent to your AI provider follow that provider's deletion rules.</li>
+      </ul>
+      <p><strong>Limited Use.</strong> Noodle's use of information received from Google APIs will adhere to the Google API Services User Data Policy (<a href="https://developers.google.com/terms/api-services-user-data-policy">https://developers.google.com/terms/api-services-user-data-policy</a>), including the Limited Use requirements.</p>
+      <h2>Services the developers use</h2>
+      <p>Noodle has no servers that receive your content. These services the developers use see some technical data:</p>
+      <ul>
+        <li><strong>GitHub</strong> hosts this website, the app downloads and the update feed. It sees the IP address and browser or app information of each request, such as website visits, downloads and daily update checks, under GitHub's privacy statement.</li>
+        <li><strong>Apple iCloud (CloudKit)</strong> delivers new-message notifications to Noodle Mobile. It holds a random device code, a conversation ID and an unread count. It holds no message content.</li>
+        <li><strong>Cloudflare</strong> provides DNS for usenoodle.app and carries website visits, so it sees visitors' IP addresses and browser information.</li>
+        <li><strong>Apple TestFlight.</strong> Noodle Mobile is a beta on TestFlight. While you test it, Apple collects crash logs and usage information and shares them with Noodle's developers; this cannot be turned off. Feedback you send through TestFlight also reaches them. If you joined through the public link, they do not see your name or email address. On the Mac, Apple's settings control whether you share diagnostics with Apple.</li>
+      </ul>
+      <p>When you ask, Noodle downloads agent tools and models from their publishers. It also checks those publishers regularly for new versions of the agent tools it installed, and installs them automatically unless you turn this off in Settings. The publishers see these requests.</p>
+      <h2>Changes</h2>
+      <p>If this policy changes, we will update this page and the date at the top. Earlier versions stay in the public history of the website's code.</p>
+      <h2>Contact</h2>
+      <p>Questions about privacy: <a href="mailto:pdp@gnucitizen.org">pdp@gnucitizen.org</a></p>
+    </div>
+  </main>
+  <footer class="foot">
+    <div class="wrap foot-in">
+      <p>Noodle is free and open source under the Apache 2.0 licence.</p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/pdparchitect/noodle">GitHub</a>
+        <a href="https://github.com/pdparchitect/noodle/blob/main/docs/README.md">Documentation</a>
+        <a href="https://github.com/pdparchitect/noodle/blob/main/docs/security.md">Security</a>
+        <a href="https://github.com/pdparchitect/noodle/releases">Releases</a>
+        <a href="../privacy/">Privacy policy</a>
+        <a href="../terms/">Terms of service</a>
+      </nav>
+    </div>
+  </footer>
+  <script src="../app.js"></script>
+</body>
+</html>
