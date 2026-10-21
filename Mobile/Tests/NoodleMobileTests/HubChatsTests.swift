@@ -2076,6 +2076,35 @@ private actor RecordedSubscriptions: PushSubscriptions {
         for (step, past, state) in steps { #expect(abs(past) < 1, "\(step): \(past) points past the end (\(state))") }
     }
 
+    /// A scroll that stops beyond the end leaves nothing above the composer, as a phone showed after the
+    /// first message sent with the keyboard up. The conversation goes back to its end by itself rather
+    /// than staying blank until it is scrolled by hand.
+    @Test func aConversationLeftPastItsEndGoesBackToIt() async throws {
+        let hub = FakeHub()
+        for index in 1..<40 { await hub.botSays(String(repeating: "Message \(index) says something. ", count: 1 + index % 4)) }
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let scene = try #require(UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: NavigationStack { ChatView(chats: chats, threadID: scout.id) })
+        window.isHidden = false
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .seconds(1))
+        let conversation = try #require(Self.view(UIScrollView.self, in: window) { !($0 is UITextView) && $0.contentSize.height > window.bounds.height })
+        func end() -> CGFloat { conversation.contentSize.height + conversation.adjustedContentInset.bottom - conversation.bounds.height }
+        try await chats.send("Hi there", to: scout)
+        try await Task.sleep(for: .seconds(1))
+
+        // Set from code, as SwiftUI sets it, a scroll view's offset is not held to its content.
+        conversation.setContentOffset(CGPoint(x: conversation.contentOffset.x, y: end() + conversation.bounds.height), animated: false)
+        try await Task.sleep(for: .seconds(1))
+
+        #expect(abs(conversation.contentOffset.y - end()) < 1, "\(conversation.contentOffset.y - end()) points past the end")
+    }
+
     /// The message field sits as low as the bots list's search field, and the conversation still ends
     /// 16 points above it.
     @Test func theComposerSitsAsLowAsSearch() async throws {
