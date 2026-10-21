@@ -47,7 +47,7 @@ extension BrowserSmokeTest {
         }
         let focus = BrowserFocusProbe()
         defer { focus.stop() }
-        let windows = NSApp.windows.filter(\.isVisible).count
+        let windows = NSApp.windows.filter { $0.isVisible && $0.alphaValue > 0 }.count
         func ready(_ tab: BrowserTab, path: String = "/webmcp") async throws {
             let previous = (try? await tab.evaluate("return performance.timeOrigin;")) as? Double ?? 0
             tab.navigate(URL(string: base + path)!)
@@ -146,7 +146,7 @@ extension BrowserSmokeTest {
         let empty = try await perform(.webMCPList, tab: tab)
         try require(empty["status"] as? String == "empty", "Empty tool list confused with integration failure")
         try focus.verify()
-        try require(NSApp.windows.filter(\.isVisible).count == windows, "WebMCP opened a window")
+        try require(NSApp.windows.filter { $0.isVisible && $0.alphaValue > 0 }.count == windows, "WebMCP opened a window")
         print("PASS WebMCP document-start registration, CLI/eval parity, authenticated profile isolation, schema validation, async results/errors, registration replacement, frames, response policy, pause, timeout cancellation, navigation and quiet operation")
     }
 }
