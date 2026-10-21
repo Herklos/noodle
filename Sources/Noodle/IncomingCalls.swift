@@ -4,7 +4,8 @@ import SwiftUI
 
 /// Calls bots place with `messenger --call`. They ring in a panel until the person answers or
 /// declines, or until they expire; only answering connects to the bot's voice. A bot on this Mac
-/// rings here; a Hub holds its own bots' calls and rings them on every device of their owner.
+/// rings here, and on the owner's devices while this Mac serves them as a Hub; a Hub holds its own
+/// bots' calls and rings them on every device of their owner.
 extension NoodleStore {
     /// Rings the call a bot on this Mac placed, or leaves it as missed when it can no longer ring.
     func ringCall(of agentID: UUID, now: Date = Date()) {
@@ -17,6 +18,7 @@ extension NoodleStore {
             return endUnansweredCall(request, .missed, at: now)
         }
         ring(request)
+        thisMac.ringCall(of: agentID, now: now)
     }
 
     /// Rings a call a bot on a Hub placed, with the bot and conversation here. The Hub says when it stops.
@@ -109,6 +111,8 @@ extension NoodleStore {
     }
 
     private func takeRingingCall(_ id: UUID) -> AgentCallRequest? {
+        // Answered, declined or missed here, or ended before it rang here: the owner's devices stop too.
+        thisMac.stopRinging(id)
         guard let index = ringingCalls.firstIndex(where: { $0.id == id }) else { return nil }
         let request = ringingCalls.remove(at: index)
         if connectsServices { IncomingCallPanel.shared.update(self) }

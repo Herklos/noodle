@@ -1094,6 +1094,51 @@ import XCTest
         channel.cancel()
     }
 
+    /// What else rings a call, Noodle on the owner's own Mac, hears when it stops here, and stops it ringing
+    /// on every device when it ended there, which leaves no second card.
+    func testACallEndedElsewhereStopsRingingAndOneEndedHereSaysSo() async throws {
+        let (f, kai, processes) = try await callingFixture()
+        var stopped: [UUID] = []
+        f.hub.bots.onCallStopped = { stopped.append($0) }
+        let events = try await f.device.subscribe()
+        _ = try await f.device.request(.status)
+
+        let elsewhere = try f.hub.repository.requestCall(agentID: kai.id, reason: "Answered on the Mac")
+        f.hub.bots.ringCall(of: kai.id)
+        _ = try f.hub.repository.endCall(agentID: kai.id, id: elsewhere.id)
+        f.hub.bots.stopRinging(elsewhere.id)
+        f.hub.bots.stopRinging(elsewhere.id)
+        let elsewhereID = elsewhere.id
+        try await expect("the call stopping", in: events) { $0 == .callStopped(id: elsewhereID) }
+        XCTAssertTrue(f.hub.bots.ringingCalls(for: f.ada.id).isEmpty)
+        f.hub.bots.expireCalls(at: elsewhere.expiresAt)
+        XCTAssertEqual(stopped, [], "It stopped elsewhere, which already knows")
+        XCTAssertTrue(callCards(f, kai).isEmpty)
+
+        // A day apart, so the daily limit lets each call through.
+        let day: TimeInterval = 24 * 60 * 60 + 60
+        var later = Date().addingTimeInterval(day)
+        let declined = try f.hub.repository.requestCall(agentID: kai.id, reason: "Need a decision", now: later)
+        f.hub.bots.ringCall(of: kai.id, now: later)
+        _ = try await f.device.request(.declineCall(id: declined.id))
+        XCTAssertEqual(stopped, [declined.id])
+
+        later = later.addingTimeInterval(day)
+        let missed = try f.hub.repository.requestCall(agentID: kai.id, reason: "The disk is full", now: later)
+        f.hub.bots.ringCall(of: kai.id, now: later)
+        f.hub.bots.expireCalls(at: missed.expiresAt)
+        XCTAssertEqual(stopped, [declined.id, missed.id])
+
+        later = later.addingTimeInterval(day)
+        let answered = try f.hub.repository.requestCall(agentID: kai.id, reason: "The build is broken", now: later)
+        f.hub.bots.ringCall(of: kai.id, now: later)
+        let channel = try await f.device.channel(.startCall(LinkCallStart(conversationID: kai.conversationID, answering: answered.id)))
+        await waitUntil { processes().last?.callRequests.count == 1 }
+        XCTAssertEqual(stopped, [declined.id, missed.id, answered.id])
+        XCTAssertEqual(callCards(f, kai).map(\.unanswered), [.declined, .missed])
+        channel.cancel()
+    }
+
     /// Anyone on the Hub can be picked to share with; nobody picks themselves.
     func testOwnersSeeWhoElseIsOnTheHub() async throws {
         let f = try await fixture()
