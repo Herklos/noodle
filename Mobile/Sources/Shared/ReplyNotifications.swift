@@ -48,9 +48,13 @@ enum PushTopic {
         return NotificationRoute(topic: topic, conversation: conversation)
     }
 
+    /// A notification from a Hub through CloudKit, or one the app posted itself with the same fields, as
+    /// for a call it could not answer.
     static func route(userInfo: [AnyHashable: Any]) -> NotificationRoute? {
         guard let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification,
-              let fields = notification.recordFields else { return nil }
+              let fields = notification.recordFields else {
+            return route(fields: Dictionary(uniqueKeysWithValues: userInfo.compactMap { key, value in (key as? String).map { ($0, value) } }))
+        }
         return route(fields: fields)
     }
 

@@ -186,6 +186,8 @@ extension AppBadge {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Before anything else: a VoIP push that launched the app must reach the call screen at once.
+        CallPushes.shared.start()
         return true
     }
 
