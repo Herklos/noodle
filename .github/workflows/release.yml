@@ -38,7 +38,14 @@ jobs:
 
   versions:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To recognize a push that merges a pull request which already passed CI.
+      pull-requests: read
+      checks: read
     outputs:
+      # The suites this run tests: "checks" and NAME for each test-NAME job. A release runs every one.
+      suites: ${{ steps.scope.outputs.suites }}
       noodle: ${{ steps.versions.outputs.noodle }}
       computer: ${{ steps.versions.outputs.computer }}
       applet: ${{ steps.versions.outputs.applet }}
@@ -54,6 +61,13 @@ jobs:
           fetch-depth: 0
       - id: versions
         run: python3 scripts/release-versions.py plan
+      - id: scope
+        name: Choose the test suites this change needs
+        env:
+          RELEASE: ${{ steps.versions.outputs.any }}
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci-scope.py
       - name: Require public distribution
         if: github.event_name != 'pull_request' && steps.versions.outputs.any == 'true'
         env:
@@ -62,6 +76,7 @@ jobs:
 
   checks:
     needs: [workflow-lint, versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'checks')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -76,8 +91,12 @@ jobs:
       - name: Verify app icons match their symbols
         run: zsh scripts/verify-icons.sh
 
+  # Each test job runs only when the versions job chose its suite (scripts/ci-scope.py): always, except on a
+  # push that merges a pull request which already passed them. A release runs every suite. A skipped suite
+  # passes "CI passed" but never the tag gate.
   test-noodle:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'noodle')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -109,6 +128,7 @@ jobs:
 
   test-shared:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'shared')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -136,6 +156,7 @@ jobs:
 
   test-noodle-macos27:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'noodle-macos27')
     # The image releases use: macOS 27 with Xcode 27, so the Apple harness is compiled in and runs.
     runs-on: xcode-27
     timeout-minutes: 30
@@ -165,6 +186,7 @@ jobs:
 
   test-computer:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'computer')
     # Windows computers use macOS 27's custom Virtio devices, which only Xcode 27's SDK has.
     runs-on: xcode-27
     timeout-minutes: 30
@@ -181,6 +203,7 @@ jobs:
 
   test-applet:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'applet')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -191,10 +214,11 @@ jobs:
         run: swift test --disable-sandbox --package-path Applet --scratch-path .build/applet
 
   # Live views and animation only show in a team-signed app, so the release's rendering check also
-  # runs on every change to Applet or the shared code it uses, not only when its version changes.
+  # runs on pushes that change Applet or the shared code it uses, not only when its version changes;
+  # a merged pull request that already passed CI does not take a Mac for it unless something is released.
   test-applet-rendering:
     needs: [versions]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && contains(fromJSON(needs.versions.outputs.suites), 'applet-rendering')
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -255,6 +279,7 @@ jobs:
 
   test-bridge:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'bridge')
     runs-on: macos-26
     timeout-minutes: 10
     steps:
@@ -264,6 +289,7 @@ jobs:
 
   test-browser:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'browser')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -275,6 +301,7 @@ jobs:
 
   test-hub:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'hub')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -288,6 +315,7 @@ jobs:
 
   test-mobile:
     needs: [versions]
+    if: contains(fromJSON(needs.versions.outputs.suites), 'mobile')
     # The phone app uses iOS 27 APIs, which only Xcode 27's SDK has.
     runs-on: xcode-27
     timeout-minutes: 30

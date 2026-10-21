@@ -2,6 +2,7 @@
 import itertools
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -145,12 +146,12 @@ class WorkflowTests(unittest.TestCase):
             self.assertFalse(condition(mobile['if'], {**values, 'needs.tag.result': result}))
         self.assertFalse(condition(mobile['if'], {**values, 'needs.versions.outputs.mobile': 'false'}))
 
-    def test_all_suites_run_independently_of_version_changes(self):
-        # Every workflow trigger runs the tests. Release selection still gates
-        # preparation/publication, but must never suppress ordinary main CI.
+    def test_suites_run_independently_of_version_changes(self):
+        # Only scripts/ci-scope.py's suites decide whether a suite runs; it runs them all for a release. Release
+        # selection still gates preparation/publication, but never suppresses a suite.
         for product in ['noodle', 'shared', 'computer', 'applet', 'browser', 'hub', 'mobile', 'bridge']:
             job = self.jobs['test-' + product]
-            self.assertNotIn('if', job)
+            self.assertEqual(job['if'], f"contains(fromJSON(needs.versions.outputs.suites), '{product}')")
             self.assertEqual(job['needs'], ['versions'])
             # The phone app uses iOS 27 APIs and Windows computers use macOS 27's custom Virtio
             # devices, which only the Xcode 27 image's SDK has.
@@ -179,7 +180,8 @@ class WorkflowTests(unittest.TestCase):
     def test_apple27_harness_always_runs_on_the_release_image(self):
         job = self.jobs['test-noodle-macos27']
         self.assertEqual(job['runs-on'], 'xcode-27')
-        self.assertNotIn('if', job)
+        # Like every suite it runs for every release and is skipped only where scripts/ci-scope.py says.
+        self.assertEqual(job['if'], "contains(fromJSON(needs.versions.outputs.suites), 'noodle-macos27')")
         tests = next(step for step in job['steps'] if "--filter 'AppleLocalModelsTests" in step.get('run', ''))
         for step in job['steps']:
             self.assertNotIn('if', step)
@@ -506,6 +508,197 @@ class WorkflowTests(unittest.TestCase):
             self.assertRegex(base, r'@sha256:[0-9a-f]{64}$')
         self.assertIn(flow['jobs']['test-linux']['container'], bases, 'CI tests on the toolchain the image builds with')
         self.assertIn('--force-resolved-versions', dockerfile)
+
+def ci_scope(root=ROOT):
+    spec = importlib.util.spec_from_file_location('ci_scope', root / 'scripts/ci-scope.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def suite_gate(text, suites):
+    # The one expression the suite gates use, after any plain conditions in front of it.
+    match = re.fullmatch(r"(?:(.*) && )?contains\(fromJSON\(needs\.versions\.outputs\.suites\), '([\w-]+)'\)", text)
+    return match[2] in suites, match[1]
+
+
+class ScopeGateTests(unittest.TestCase):
+    """How the versions job's suites decide which test jobs take a runner."""
+    @classmethod
+    def setUpClass(cls):
+        cls.scope = ci_scope()
+        cls.jobs = workflow('release.yml')['jobs']
+
+    def test_every_test_job_and_the_checks_run_only_for_their_own_suite(self):
+        gated = sorted(name for name in self.jobs if name.startswith('test-')) + ['checks']
+        self.assertEqual(sorted(self.scope.EVERYTHING), sorted(name.removeprefix('test-') for name in gated))
+        for name in gated:
+            suite = name.removeprefix('test-')
+            self.assertEqual(suite_gate(self.jobs[name]['if'], [suite])[0], True, name)
+            self.assertEqual(suite_gate(self.jobs[name]['if'], [s for s in self.scope.EVERYTHING if s != suite])[0], False)
+            # A suite that does not run is skipped, which "CI passed" accepts and the tag gate never does.
+            self.assertIn(name, self.jobs['tag']['needs'])
+            if name != 'test-applet-rendering':
+                self.assertIn(name, self.jobs['ci-passed']['needs'])
+        self.assertEqual(suite_gate(self.jobs['test-applet-rendering']['if'], [])[1],
+                         "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'")
+        versions = self.jobs['versions']
+        self.assertEqual(versions['outputs']['suites'], '${{ steps.scope.outputs.suites }}')
+        ids = [step.get('id') for step in versions['steps']]
+        self.assertLess(ids.index('versions'), ids.index('scope'))
+        scope = versions['steps'][ids.index('scope')]
+        self.assertEqual(scope['run'], 'python3 scripts/ci-scope.py')
+        self.assertEqual(scope['env']['RELEASE'], '${{ steps.versions.outputs.any }}')
+        self.assertEqual(scope['env']['BEFORE'], '${{ github.event.before }}')
+        self.assertEqual(versions['permissions'], {'contents': 'read', 'pull-requests': 'read', 'checks': 'read'})
+
+    def test_ci_passed_reports_success_when_no_suite_runs(self):
+        # Merged pull requests and release pull requests skip every suite and still pass the required check.
+        job = self.jobs['ci-passed']
+        self.assertEqual(job['if'], 'always()')
+        self.assertEqual([step['if'] for step in job['steps']],
+                         ["contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')"])
+        self.assertEqual(job['needs'][:2], ['workflow-lint', 'versions'])
+        self.assertTrue(set(job['needs'][2:]) <= {'checks'} | {n for n in self.jobs if n.startswith('test-')})
+
+    def test_a_release_cannot_be_tagged_with_a_skipped_suite(self):
+        # If the suites were ever wrong for a release, its skipped tests would block the tag, never pass it.
+        base = WorkflowTests.base(self)
+        for name in [name for name in self.jobs if name.startswith('test-')] + ['checks']:
+            self.assertFalse(condition(self.jobs['tag']['if'], {**base, f'needs.{name}.result': 'skipped'}), name)
+
+    def test_releases_pull_requests_and_manual_runs_test_every_suite(self):
+        nowhere = Path('/nonexistent')
+        for event in ['push', 'pull_request', 'workflow_dispatch']:
+            for release in ['true', 'false']:
+                suites, _ = self.scope.scope({'GITHUB_EVENT_NAME': event, 'RELEASE': release, 'BEFORE': 'f' * 40}, nowhere)
+                self.assertEqual(suites, self.scope.EVERYTHING, (event, release))
+
+
+def run(*args, cwd):
+    return subprocess.run(args, cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+
+
+class ScopeHistoryTests(unittest.TestCase):
+    """Pushes to main in a scratch repository, with GitHub's answers faked."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.git('init', '-q', '-b', 'main')
+        for key, value in [('user.name', 'Scope test'), ('user.email', 'test@example.invalid')]:
+            self.git('config', key, value)
+        (self.root / 'scripts').mkdir()
+        (self.root / 'scripts/ci-scope.py').write_text((ROOT / 'scripts/ci-scope.py').read_text())
+        self.base = self.commit('Base', 'README')
+        self.scope = ci_scope(self.root)
+        self.answers = {}
+        self.scope.gh = self.answer
+
+    def answer(self, path):
+        for key, value in self.answers.items():
+            if key in path:
+                if isinstance(value, Exception):
+                    raise value
+                return value
+        raise subprocess.CalledProcessError(1, ['gh', 'api', path])
+
+    def git(self, *args):
+        return run('git', *args, cwd=self.root)
+
+    def commit(self, message, path):
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text(message)
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', message)
+        return self.git('rev-parse', 'HEAD')
+
+    def pull_request(self, branch='feature'):
+        self.git('checkout', '-q', '-b', branch, self.base)
+        head = self.commit('Feature', f'Mobile/{branch}.swift')
+        self.git('checkout', '-q', 'main')
+        return head
+
+    def merge(self, head, squash=False):
+        if squash:
+            self.git('merge', '-q', '--squash', head)
+            return self.commit('Squashed', 'Mobile/squashed.swift')
+        self.git('merge', '-q', '--no-ff', '-m', 'Merge pull request #7', head)
+        return self.git('rev-parse', 'HEAD')
+
+    def green(self, sha, head, conclusion='success', slug='github-actions', status='completed', base='main'):
+        self.answers = {
+            f'commits/{sha}/pulls': [{'number': 7, 'merged_at': '2026-10-21T10:00:00Z', 'merge_commit_sha': sha,
+                                      'base': {'ref': base}, 'head': {'sha': head}}],
+            f'commits/{head}/check-runs': {'check_runs': [
+                {'status': 'completed', 'conclusion': 'failure', 'started_at': '2026-10-21T08:00:00Z',
+                 'app': {'slug': 'github-actions'}},
+                {'status': status, 'conclusion': conclusion, 'started_at': '2026-10-21T09:00:00Z', 'app': {'slug': slug}}]},
+        }
+
+    def push(self, sha, before, release='false'):
+        return self.scope.scope({'GITHUB_EVENT_NAME': 'push', 'GITHUB_SHA': sha, 'BEFORE': before,
+                                 'GITHUB_REPOSITORY': 'pdparchitect/noodle', 'RELEASE': release}, self.root)[0]
+
+    def test_push_that_merges_a_green_pull_request_runs_nothing_unless_it_releases(self):
+        for squash in [False, True]:
+            with self.subTest(squash=squash):
+                # Main may have moved on since the pull request's run: the next release runs everything.
+                before = self.commit(f'Elsewhere {squash}', f'Browser/{squash}.swift')
+                head = self.pull_request(branch=f'feature-{squash}')
+                sha = self.merge(head, squash)
+                self.green(sha, head)
+                self.assertEqual(self.push(sha, before), [])
+                self.assertEqual(self.push(sha, before, release='true'), self.scope.EVERYTHING)
+
+    def test_every_other_push_runs_every_suite(self):
+        head = self.pull_request()
+        sha = self.merge(head)
+        for answers in [
+            lambda: self.green(sha, head, conclusion='failure'),
+            lambda: self.green(sha, head, conclusion=None, status='in_progress'),
+            lambda: self.green(sha, head, slug='someone-else'),
+            lambda: self.green(sha, head, base='release'),
+            lambda: self.green('0' * 40, head),
+            lambda: self.answers.clear(),
+            lambda: self.answers.update({'pulls': OSError('gh is missing')}),
+        ]:
+            answers()
+            self.assertEqual(self.push(sha, self.base), self.scope.EVERYTHING)
+        self.green(sha, head)
+        self.assertEqual(self.push(sha, self.base), [])
+        # Unknown or rewritten history, or more than the pull request's own commit, runs everything.
+        for before in ['0' * 40, 'f' * 40, '', head]:
+            self.assertEqual(self.push(sha, before), self.scope.EVERYTHING, before)
+        direct = self.commit('Direct', 'Sources/direct.swift')
+        self.green(direct, head)
+        self.assertEqual(self.push(direct, self.base), self.scope.EVERYTHING)
+    def pull_request_run(self, *paths, release='true'):
+        # GitHub tests a pull request as a merge of its branch into main.
+        branch = f'pull-{len(self.git("branch").splitlines())}'
+        self.git('checkout', '-q', '-b', branch, 'main')
+        for path in paths:
+            self.commit(f'Change {path}', path)
+        self.git('checkout', '-q', '--detach', 'main')
+        self.git('merge', '-q', '--no-ff', '-m', 'Test merge', branch)
+        try:
+            return self.scope.scope({'GITHUB_EVENT_NAME': 'pull_request', 'RELEASE': release}, self.root)[0]
+        finally:
+            self.git('checkout', '-q', 'main')
+
+    def test_release_pull_request_runs_nothing_and_its_release_run_everything(self):
+        release = ['VERSION', 'CHANGELOG.md', 'Mobile/VERSION', 'Mobile/CHANGELOG.md', 'Computer/Images/VERSION']
+        self.assertEqual(self.pull_request_run(*release), [])
+        self.assertEqual(self.pull_request_run('Hub/VERSION', 'Hub/CHANGELOG.md', release='false'), [])
+        for other in ['Sources/NoodleCore/Bot.swift', 'scripts/release-versions.py', 'Mobile/VERSION.txt',
+                      'Mobile/Sources/VERSION.swift', 'CHANGELOG.md.orig']:
+            self.assertEqual(self.pull_request_run(*release, other), self.scope.EVERYTHING, other)
+        self.assertEqual(self.pull_request_run('Sources/NoodleCore/Bot.swift', release='false'), self.scope.EVERYTHING)
+        # Merged, it is a release, whose run tests everything before publishing even though the pull request passed.
+        head = self.pull_request(branch='release')
+        sha = self.merge(head)
+        self.green(sha, head)
+        self.assertEqual(self.push(sha, self.base, release='true'), self.scope.EVERYTHING)
 
 
 if __name__ == '__main__':
