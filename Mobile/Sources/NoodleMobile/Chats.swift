@@ -1842,11 +1842,13 @@ enum ConversationScroll {
         contentOffset + viewportHeight - bottomInset >= contentHeight - 2
     }
 
-    /// Whether the conversation has gone beyond its end, leaving empty room above the composer. A
-    /// conversation shorter than the screen ends where it starts.
+    /// Whether the conversation has gone so far beyond its end that little or none of it shows above the
+    /// composer. A row's worth past, as for a moment while a new row is measured, is not. A conversation
+    /// shorter than the screen ends where it starts.
     static func isPastEnd(contentOffset: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat, topInset: CGFloat,
                           bottomInset: CGFloat) -> Bool {
-        contentOffset > max(contentHeight + bottomInset - viewportHeight, -topInset) + 2
+        let end = max(contentHeight + bottomInset - viewportHeight, -topInset)
+        return contentOffset - end > (viewportHeight - topInset - bottomInset) / 3
     }
 }
 
