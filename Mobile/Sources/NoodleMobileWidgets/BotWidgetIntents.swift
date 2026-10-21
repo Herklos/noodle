@@ -81,6 +81,24 @@ struct BotWidgetIntent: WidgetConfigurationIntent {
     @Parameter(title: "Bot")
     var bot: BotEntity?
 
+    /// Only bots that take calls have the button. A summary's condition can test only whether a bot is chosen, not
+    /// what the bot can do, so the switch shows for every chosen bot.
+    @Parameter(title: "Show Call Button", default: true)
+    var showCallButton: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        When(\.$bot, .hasAnyValue) {
+            Summary {
+                \.$bot
+                \.$showCallButton
+            }
+        } otherwise: {
+            Summary {
+                \.$bot
+            }
+        }
+    }
+
     init() {}
 }
 

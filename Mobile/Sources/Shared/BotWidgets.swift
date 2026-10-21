@@ -33,6 +33,10 @@ extension WidgetBot {
                   image: try container.decodeIfPresent(Data.self, forKey: .image),
                   callable: try container.decodeIfPresent(Bool.self, forKey: .callable) ?? false)
     }
+
+    /// Whether its Bot widget shows the call button: only while it takes calls, and the widget's Show Call Button,
+    /// on until the person turns it off, is on.
+    func showsCallButton(setting: Bool = true) -> Bool { callable && setting }
 }
 
 /// A space a widget can show: a Hub's own or one the person made, with its bots in the list's order.

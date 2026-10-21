@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The small Bot widget's Call button is a round green button with a phone in the bottom-right corner, which leaves the bot's picture and name more room. Turn off Show Call Button in the widget's settings to leave it out.
+
+### What to Test
+
+- Add the small Bot widget for a bot that takes voice calls: check a green round phone button sits in the bottom-right corner, clear of the picture and the name, and the picture is larger than before. Tap it, also with Noodle closed: check the chat opens and the call starts. Tap anywhere else: check only the chat opens.
+- Choose a bot with a long name: check the name shows on up to two lines next to the button instead of being cut short.
+- Touch and hold the widget, choose Edit Widget and turn off Show Call Button: check the button goes and the name is centred under the picture. Turn it back on and check the button returns. Check widgets added before this update still show the button.
+- Choose a bot that cannot take calls: check there is no button whatever the setting. Use a tinted Home Screen and dark mode: check the button can still be read. With VoiceOver, check the bot's name and "Call" with its name are read separately.
+
 ## [0.41.0] - 2026-10-20
 
 ### Added
