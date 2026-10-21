@@ -460,6 +460,53 @@ class WorkflowTests(unittest.TestCase):
         published = next(i for i, step in enumerate(steps) if 'suite-release.py publish' in step.get('run', ''))
         self.assertLess(retained, published)
 
+    def test_push_deploys_from_main_only_after_its_tests(self):
+        flow = workflow('push.yml')
+        triggers = flow.get('on', flow.get('true'))
+        self.assertEqual(triggers['push']['branches'], ['main'])
+        self.assertIn('workflow_dispatch', triggers)
+        for event in ['push', 'pull_request']:
+            patterns = triggers[event]['paths']
+            for path in ['Push/Package.swift', 'Push/Sources/PushCore/PushService.swift', 'Push/Dockerfile',
+                         'Push/worker/wrangler.toml', 'Push/worker/src/index.ts', '.github/workflows/push.yml']:
+                self.assertTrue(matches_paths([path], patterns), f'{event}: {path}')
+            self.assertFalse(matches_paths(['Push/CHANGELOG.md', 'Sources/HubCore/HubBots.swift'], patterns), event)
+        jobs = flow['jobs']
+        deploy = jobs['deploy']
+        self.assertEqual(deploy['environment'], 'push-production')
+        self.assertEqual(deploy['needs'], ['test-linux', 'worker', 'image'])
+        for event, ref, deploys in [('push', 'refs/heads/main', True), ('workflow_dispatch', 'refs/heads/main', True),
+                                    ('pull_request', 'refs/heads/main', False), ('workflow_dispatch', 'refs/heads/feature', False)]:
+            self.assertEqual(condition(deploy['if'], {'github.event_name': event, 'github.ref': ref}), deploys, (event, ref))
+        # Only the deploy job sees secrets, and it hands the app's to wrangler in a file, not on a command line.
+        for name, job in jobs.items():
+            if name != 'deploy':
+                self.assertNotIn('secrets.', json.dumps(job), name)
+        step = next(step for step in deploy['steps'] if 'wrangler deploy' in step.get('run', ''))
+        self.assertIn('npx wrangler deploy --secrets-file "$secrets"', step['run'])
+        self.assertIn('umask 077', step['run'])
+        self.assertEqual(sorted(step['env']), ['APNS_KEY_ID', 'APNS_KEY_P8', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'PUSH_SEAL_KEY'])
+        self.assertIn('swift test --disable-sandbox --package-path Push ', json.dumps(self.jobs['test-shared']))
+
+    def test_push_pins_what_it_runs_and_reads_only(self):
+        flow = workflow('push.yml')
+        self.assertEqual(flow['permissions'], {'contents': 'read'})
+        for name, job in flow['jobs'].items():
+            self.assertNotIn('permissions', job, name)
+            for step in job['steps']:
+                if 'uses' in step:
+                    self.assertRegex(step['uses'], r'^[\w.-]+/[\w.-]+@[0-9a-f]{40}$', name)
+                if step.get('uses', '').startswith('actions/checkout@'):
+                    self.assertIs(step['with']['persist-credentials'], False, name)
+        self.assertRegex(flow['jobs']['test-linux']['container'], r'^swift:6\.4\.1-noble@sha256:[0-9a-f]{64}$')
+        dockerfile = (ROOT / 'Push' / 'Dockerfile').read_text()
+        bases = re.findall(r'^FROM (?:--platform=\S+ )?(\S+)', dockerfile, re.MULTILINE)
+        self.assertEqual(len(bases), 2)
+        for base in bases:
+            self.assertRegex(base, r'@sha256:[0-9a-f]{64}$')
+        self.assertIn(flow['jobs']['test-linux']['container'], bases, 'CI tests on the toolchain the image builds with')
+        self.assertIn('--force-resolved-versions', dockerfile)
+
 
 if __name__ == '__main__':
     unittest.main()
