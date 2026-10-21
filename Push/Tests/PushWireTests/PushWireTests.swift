@@ -64,9 +64,9 @@ final class PushWireTests: XCTestCase {
         XCTAssertEqual(Set((ringJSON["grant"] as? [String: Any] ?? [:]).keys), ["sealed", "deviceKey", "hubKey", "exp", "sig"])
         XCTAssertEqual(try JSONDecoder().decode(PushRingRequest.self, from: JSONEncoder().encode(ring)), ring)
 
-        let payload = PushCallPayload(callID: UUID(), expiresAt: 5, blob: Data([3]))
+        let payload = PushCallPayload(callID: UUID(), expiresAt: 5, hub: Data([4]), blob: Data([3]))
         let payloadJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as? [String: Any])
-        XCTAssertEqual(Set(payloadJSON.keys), ["callID", "exp", "blob"])
+        XCTAssertEqual(Set(payloadJSON.keys), ["callID", "exp", "hub", "blob"])
     }
 
     // Vectors for the Mobile and Hub implementations: these bytes and signatures must not change.
@@ -106,6 +106,25 @@ final class PushWireTests: XCTestCase {
         let ring = PushRingRequest(grant: grant, callID: vectorCall, secondsLeft: 30, timestamp: 1_800_000_000,
                                    blob: Data([0xEE]), signature: try XCTUnwrap(Data(base64Encoded: Self.vectorRingSignature)))
         XCTAssertTrue(ring.hasValidSignature)
+    }
+
+    // The vector Hub's key and its hash were derived with openssl from the scalar 0x22 × 32, not CryptoKit.
+    private static let vectorHubKey = "04d65a93977caa3d1b081852ff57a79e465f1660577304baead505dd3a48589cf3"
+        + "50185e895372df6221ea3a137557e473fddb6755f05bd507c3c533fce9c91285"
+    private static let vectorHubHash = "6fc66a90486171ca69b512be185d66a763a68ff2d34cda639e78cff9e98caeab"
+    private static let vectorPayload = #"{"blob":"7g==","callID":"6F9619FF-8B86-D011-B42D-00C04FC964FF","exp":1800000045,"#
+        + #""hub":"b8ZqkEhhccpptRK+GF1mp2Omj/LTTNpjnnjP+emMrqs="}"#
+
+    func testThePayloadVectorNamesTheHubByItsKeysHash() throws {
+        XCTAssertEqual(hex(vectorHub.publicKey.x963Representation), Self.vectorHubKey)
+        let hubHash = PushCallPayload.hubHash(for: vectorHub.publicKey.x963Representation)
+        XCTAssertEqual(hex(hubHash), Self.vectorHubHash)
+
+        let payload = PushCallPayload(callID: vectorCall, expiresAt: 1_800_000_045, hub: hubHash, blob: Data([0xEE]))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        XCTAssertEqual(String(decoding: try encoder.encode(payload), as: UTF8.self), Self.vectorPayload)
+        XCTAssertEqual(try JSONDecoder().decode(PushCallPayload.self, from: Data(Self.vectorPayload.utf8)), payload)
     }
 
     private static let vectorGrantSignature = "RdnIsnTTRBZu1LmdeE0bXQBxZtvonpSXAwmU+5eWkbJHAfnK5RR1cuW/fb2kMxNmpkmrb28kqsxJtMP4uP1dmg=="

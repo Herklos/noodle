@@ -34,7 +34,8 @@ struct NoodlePush {
         }
         router.post("v1/ring") { request, context -> Response in
             let body = try await request.body.collect(upTo: 16_384)
-            return response(await service.ring(Data(body.readableBytesView)))
+            let address = request.headers[HTTPField.Name("X-Noodle-Client-IP")!] ?? "unknown"
+            return response(await service.ring(Data(body.readableBytesView), address: address))
         }
 
         let app = Application(router: router, configuration: .init(address: .hostname("0.0.0.0", port: configuration.port)),

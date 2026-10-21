@@ -10,18 +10,31 @@ public struct PushConfigurationError: Error, CustomStringConvertible, Equatable 
 public struct PushLimits: Sendable {
     /// How far a request's `ts` may be from Push's clock, either way.
     public var clockSkew: Int64 = 60
-    /// The longest grant Push accepts, whatever the phone signed. The phone asks for about 14 days.
-    public var longestGrant: Int64 = 31 * 86_400
+    /// The longest grant Push accepts, whatever the phone signed. The phone asks for about 14 days and
+    /// renews on every connect; the extra day covers clock differences.
+    public var longestGrant: Int64 = 15 * 86_400
+    /// The oldest sealed token Push still rings; older ones get `registrationExpired`, so a token taken
+    /// once cannot ring forever, and the phone registers again.
+    public var oldestRegistration: Int64 = 90 * 86_400
     /// The longest a call may still ring.
     public var longestRing = 300
     public var largestBlob = 2_048
     public var largestToken = 200
+    /// Rings per minute from one address (an IPv4 address or an IPv6 /64), checked before any parsing
+    /// or cryptography. The Worker applies the same limit at Cloudflare's edge first.
+    public var ringsPerAddressPerMinute = 30.0
     /// Rings per minute for one Hub key, across all its devices.
     public var ringsPerHubPerMinute = 10.0
-    /// Rings per minute to one phone, from all its Hubs.
+    /// Rings per minute to one phone (its token and environment, however many keys registered it), from
+    /// all its Hubs.
     public var ringsPerDevicePerMinute = 3.0
-    /// Registrations per minute from one address.
+    /// Rings per minute from one Hub to one phone, below the phone's own limit, so one Hub cannot use up
+    /// a phone's rings for the others.
+    public var ringsPerHubPerDevicePerMinute = 2.0
+    /// Registrations per minute from one address (an IPv4 address or an IPv6 /64).
     public var registrationsPerAddressPerMinute = 10.0
+    /// The most keys each rate limit and the call memory track; the least recently used go first.
+    public var trackedKeys = 10_000
     /// How long a call ID is remembered per device; longer than the window `clockSkew` allows.
     public var callMemory: TimeInterval = 300
     /// How long Push waits for APNs before telling the Hub it failed. The Hub gives up after 10 s.

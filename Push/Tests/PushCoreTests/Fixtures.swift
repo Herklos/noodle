@@ -53,6 +53,8 @@ struct Fixture {
     let phone = P256.Signing.PrivateKey()
     let hub = P256.Signing.PrivateKey()
     let token = Data((0..<32).map { UInt8(255 - $0) })
+    /// The Hub's address as the Worker forwards it.
+    let address = "198.51.100.23"
     let sender = RecordingSender()
     let logs = LogRecorder()
     let service: PushService
@@ -64,11 +66,11 @@ struct Fixture {
     var seconds: Int64 { Int64(now.timeIntervalSince1970) }
 
     func sealed(token: Data? = nil, environment: PushAPNsEnvironment = .production,
-                for key: P256.Signing.PrivateKey? = nil) throws -> Data {
+                for key: P256.Signing.PrivateKey? = nil, issuedAt: Int64? = nil) throws -> Data {
         let deviceKey = (key ?? phone).publicKey.x963Representation
         return try TokenSealer(key: sealKey).seal(SealedDestination(
             token: token ?? self.token, environment: environment,
-            deviceKeyHash: Data(SHA256.hash(data: deviceKey)), issuedAt: seconds))
+            deviceKeyHash: Data(SHA256.hash(data: deviceKey)), issuedAt: issuedAt ?? seconds))
     }
 
     func grant(sealed: Data? = nil, hub: P256.Signing.PrivateKey? = nil, expiresIn: Int64 = 14 * 86_400,

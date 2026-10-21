@@ -73,6 +73,43 @@ final class SealingTests: XCTestCase {
         XCTAssertTrue(limiter.allow("hub", now: start.addingTimeInterval(21)))
     }
 
+    func testALimiterForgetsTheLeastRecentlyUsedKeyWhenFull() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var limiter = RateLimiter(perMinute: 1, maxKeys: 2)
+        XCTAssertTrue(limiter.allow("a", now: start))
+        XCTAssertTrue(limiter.allow("b", now: start))
+        XCTAssertFalse(limiter.allow("a", now: start), "a is empty, and now used more recently than b")
+        XCTAssertTrue(limiter.allow("c", now: start))
+        XCTAssertEqual(limiter.count, 2)
+        XCTAssertFalse(limiter.allow("a", now: start), "a was kept")
+        XCTAssertTrue(limiter.allow("b", now: start), "b was forgotten, so it starts full again")
+    }
+
+    func testALimiterStaysBoundedUnderAFloodOfKeys() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var limiter = RateLimiter(perMinute: 3, maxKeys: 100)
+        for index in 0..<10_000 {
+            _ = limiter.allow("flood-\(index)", now: start)
+            _ = limiter.allow("steady", now: start)
+        }
+        XCTAssertEqual(limiter.count, 100)
+        XCTAssertLessThanOrEqual(limiter.tracked, 2 * 100 + 16, "The recency queue is compacted, not left to grow")
+        XCTAssertFalse(limiter.allow("steady", now: start), "A key in use is never the one forgotten")
+    }
+
+    func testCallMemoryStaysBoundedAndForgetsExpiredCallsFirst() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var memory = CallMemory(lifetime: 300, maxKeys: 100)
+        for index in 0..<10_000 {
+            _ = memory.remember("call-\(index)", now: start.addingTimeInterval(Double(index) / 100))
+        }
+        XCTAssertEqual(memory.count, 100)
+        XCTAssertLessThanOrEqual(memory.tracked, 2 * 100 + 16)
+        XCTAssertFalse(memory.remember("call-9999", now: start.addingTimeInterval(100)), "Recent calls are kept")
+        _ = memory.remember("late", now: start.addingTimeInterval(1_000))
+        XCTAssertEqual(memory.count, 1, "Expired calls go as time passes")
+    }
+
     func testCallMemoryRemembersUntilItsLifetimeEnds() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var memory = CallMemory(lifetime: 300)

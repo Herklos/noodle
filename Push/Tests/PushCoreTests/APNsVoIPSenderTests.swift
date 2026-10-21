@@ -39,7 +39,8 @@ final class MockAPNsClient: APNSClientProtocol, @unchecked Sendable {
 final class APNsVoIPSenderTests: XCTestCase {
     private let push = VoIPPush(token: Data([0x0A, 0xFF, 0x00, 0x7B]), environment: .production,
                                 payload: PushCallPayload(callID: UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!,
-                                                         expiresAt: 1_800_000_045, blob: Data([1, 2, 3])))
+                                                         expiresAt: 1_800_000_045, hub: Data(repeating: 0xAB, count: 32),
+                                                         blob: Data([1, 2, 3])))
 
     func testThePushIsAVoIPRingThatAPNsNeverStores() async throws {
         let production = MockAPNsClient(), sandbox = MockAPNsClient()
@@ -55,7 +56,8 @@ final class APNsVoIPSenderTests: XCTestCase {
         XCTAssertEqual(sent.body["callID"] as? String, "6F9619FF-8B86-D011-B42D-00C04FC964FF")
         XCTAssertEqual(sent.body["exp"] as? Int, 1_800_000_045)
         XCTAssertEqual(sent.body["blob"] as? String, "AQID")
-        XCTAssertEqual(Set(sent.body.keys), ["callID", "exp", "blob"], "Nothing readable rides along")
+        XCTAssertEqual(sent.body["hub"] as? String, Data(repeating: 0xAB, count: 32).base64EncodedString())
+        XCTAssertEqual(Set(sent.body.keys), ["callID", "exp", "hub", "blob"], "Nothing readable rides along")
 
         var sandboxPush = push
         sandboxPush.environment = .sandbox

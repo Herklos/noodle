@@ -13,7 +13,8 @@ import Foundation
 // 2. The phone gives each paired Hub a `CallGrant` over HubLink: the sealed token, the Hub's key and an
 //    expiry, signed by the phone.
 // 3. To ring, the Hub posts a `PushRingRequest` to `/v1/ring` carrying that grant, signed by the Hub,
-//    and gets back a `PushRingResult`. The phone receives a `PushCallPayload` in the VoIP push.
+//    and gets back a `PushRingResult`. The phone receives a `PushCallPayload` in the VoIP push, which
+//    names the ringing Hub by its key's hash.
 
 /// Which APNs host a token belongs to. The phone's build decides: debug builds get sandbox tokens.
 public enum PushAPNsEnvironment: String, Codable, Sendable, CaseIterable {
@@ -176,9 +177,12 @@ public struct PushRingResult: Codable, Sendable, Equatable {
         case unregistered
         /// The grant expired: keep ringing in-app and wait for the phone to renew it.
         case grantExpired
+        /// The sealed token is older than Push accepts (90 days): drop the grant, keep ringing in-app, and
+        /// ask the phone to register again and send a new grant on its next connect.
+        case registrationExpired
         /// The request or grant is malformed or its signatures do not hold. Retrying will not help.
         case rejected
-        /// Too many rings for this Hub or this device.
+        /// Too many rings from this address, for this Hub or to this device.
         case rateLimited
         /// APNs could not be reached or refused for a reason of its own. Worth one retry.
         case failed
@@ -202,17 +206,26 @@ public struct PushCallPayload: Codable, Sendable, Equatable {
     public var callID: UUID
     /// Seconds since 1970 when the call stops ringing.
     public var expiresAt: Int64
+    /// `hubHash(for:)` of the key that signed the ring. The phone reports the call at once, then ends it
+    /// if no Hub it is paired with has this hash.
+    public var hub: Data
     /// `PushRingRequest.blob`, untouched.
     public var blob: Data
 
     enum CodingKeys: String, CodingKey {
-        case callID, expiresAt = "exp", blob
+        case callID, expiresAt = "exp", hub, blob
     }
 
-    public init(callID: UUID, expiresAt: Int64, blob: Data) {
+    public init(callID: UUID, expiresAt: Int64, hub: Data, blob: Data) {
         self.callID = callID
         self.expiresAt = expiresAt
+        self.hub = hub
         self.blob = blob
+    }
+
+    /// SHA-256 of a Hub's `LinkIdentity` public key (x9.63), all 32 bytes.
+    public static func hubHash(for hubKey: Data) -> Data {
+        Data(SHA256.hash(data: hubKey))
     }
 }
 

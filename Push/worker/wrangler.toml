@@ -24,6 +24,19 @@ crons = ["*/5 * * * *"]
 [observability]
 enabled = true
 
+# Per-address limits at the edge (src/index.ts keys them by IPv4 address or IPv6 /64), before a request
+# reaches the container. They match PushLimits: 10 registrations and 30 rings a minute. The namespace
+# IDs are numbers this account picks; they only need to be unique within it.
+[[ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "1241"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RING_LIMITER"
+namespace_id = "1242"
+simple = { limit = 30, period = 60 }
+
 # Built from ../Dockerfile with Push/ as the context. Cloudflare runs linux/amd64 images.
 # lite is 1/16 vCPU and 256 MiB: enough for a few rings a minute; move to basic if measurements say so.
 [[containers]]
