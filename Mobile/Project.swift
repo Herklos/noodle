@@ -53,7 +53,8 @@ let project = Project(
                 "NSLocalNetworkUsageDescription": "Noodle connects to your Noodle Hub on this network.",
                 "NSMicrophoneUsageDescription": "Record voice messages you choose to send and comments you dictate, transcribed on this device, talk with bots on calls you start, and let noodlets you open listen when they ask.",
                 // A call keeps going with the screen locked or another app in front; CallKit refuses calls without voip.
-                "UIBackgroundModes": ["audio", "voip"],
+                // Replies read on another device reach the app in silence, to take them off its icon.
+                "UIBackgroundModes": ["audio", "voip", "remote-notification"],
                 // Shared with the notification and share extensions, which reach the Hubs kept there, and the widgets.
                 "NoodleAppGroup": "group.$(MOBILE_APP_BUNDLE_ID)",
                 // Conversations told to iOS, which the share sheet suggests and reply notifications show as messages.

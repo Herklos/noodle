@@ -15,12 +15,13 @@ protocol PushSubscriptions: Sendable {
 /// has Apple show it as a notification, one per conversation, which the app may change before it shows.
 struct CloudKitSubscriptions: PushSubscriptions {
     func subscribe(topic: String) async throws {
-        let results = try await database.modifySubscriptions(saving: [Self.subscription(topic: topic)], deleting: [])
+        let results = try await database.modifySubscriptions(saving: [Self.subscription(topic: topic), Self.withdrawals(topic: topic)],
+                                                             deleting: [])
         for result in results.saveResults.values { _ = try result.get() }
     }
 
     func unsubscribe(topic: String) async throws {
-        let results = try await database.modifySubscriptions(saving: [], deleting: [Self.subscriptionID(topic)])
+        let results = try await database.modifySubscriptions(saving: [], deleting: [Self.subscriptionID(topic), Self.withdrawalsID(topic)])
         for result in results.deleteResults.values {
             do { try result.get() } catch let error as CKError where error.code == .unknownItem {}
         }
@@ -42,6 +43,22 @@ struct CloudKitSubscriptions: PushSubscriptions {
         // A newer count replaces the conversation's notification rather than adding another.
         info.collapseIDKey = LinkPush.conversationField
         info.shouldSendMutableContent = true
+        subscription.notificationInfo = info
+        return subscription
+    }
+
+    static func withdrawalsID(_ topic: String) -> CKSubscription.ID { "\(PushTopic.withdrawalPrefix)\(topic)" }
+
+    /// Hears in silence when the Hub takes its word back, once the replies were read on any device,
+    /// so the app can take the conversation off its icon's number and its notification away. iOS
+    /// passes it on only while the app was not closed from the app switcher.
+    static func withdrawals(topic: String) -> CKQuerySubscription {
+        let subscription = CKQuerySubscription(recordType: LinkPush.recordType,
+                                               predicate: NSPredicate(format: "%K == %@", LinkPush.topicField, topic),
+                                               subscriptionID: withdrawalsID(topic),
+                                               options: [.firesOnRecordDeletion])
+        let info = CKSubscription.NotificationInfo()
+        info.shouldSendContentAvailable = true
         subscription.notificationInfo = info
         return subscription
     }
@@ -111,10 +128,27 @@ struct CloudKitSubscriptions: PushSubscriptions {
 
     /// A conversation read here needs no notification any more.
     static func clearDelivered(conversation: UUID) async {
+        await clearDelivered { $0.conversation == conversation }
+    }
+
+    static func clearDelivered(where read: (NotificationRoute) -> Bool) async {
         let center = UNUserNotificationCenter.current()
         let delivered = await center.deliveredNotifications()
-        let read = delivered.filter { PushTopic.route(userInfo: $0.request.content.userInfo)?.conversation == conversation }
-        center.removeDeliveredNotifications(withIdentifiers: read.map(\.request.identifier))
+        let cleared = delivered.filter { PushTopic.route(userInfo: $0.request.content.userInfo).map(read) ?? false }
+        center.removeDeliveredNotifications(withIdentifiers: cleared.map(\.request.identifier))
+    }
+}
+
+extension AppBadge {
+    /// What the app knows of each Hub it is connected to, then the icon's number. A Hub not
+    /// connected keeps what was last known, with what the notification extension added since.
+    @MainActor static func publish(_ hubs: [HubChats]) {
+        guard let folder = hubs.first?.pairing.directory.deletingLastPathComponent() else { return }
+        for hub in hubs {
+            if let unread = hub.badgedConversations { setUnread(unread, in: hub.pairing.directory) }
+        }
+        let total = count(hubs: folder)
+        Task { await show(total) }
     }
 }
 
@@ -164,5 +198,16 @@ struct CloudKitSubscriptions: PushSubscriptions {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         opening = PushTopic.route(userInfo: response.notification.request.content.userInfo)
+    }
+
+    /// Replies read on another device, as the Hub takes its word back: off the icon's number and
+    /// out of Notification Center.
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        guard let withdrawal = PushTopic.withdrawal(userInfo: userInfo), let hubs = AppGroup.hubs else { return .noData }
+        let changed = AppBadge.withdrawn(withdrawal, hubs: hubs)
+        if changed { await AppBadge.show(AppBadge.count(hubs: hubs)) }
+        await HubNotifications.clearDelivered(where: withdrawal.matches)
+        return changed ? .newData : .noData
     }
 }

@@ -38,7 +38,10 @@ struct NoodleMobileApp: App {
             .onChange(of: hubs.hubs.count) { before, after in
                 if before == 0, after == 1 { welcoming = hubs.hubs.first }
                 // With the last Hub left the list is gone, and with it what the widgets show.
-                if after == 0 { BotWidgetPublisher.shared.publish(.init()) }
+                if after == 0 {
+                    BotWidgetPublisher.shared.publish(.init())
+                    Task { await AppBadge.show(0) }
+                }
             }
             // A bot tapped in a widget opens like a tapped notification, and its call button calls the bot as well.
             // Any other link is an invitation, opened from Messages, Mail or a QR code in the Camera app.

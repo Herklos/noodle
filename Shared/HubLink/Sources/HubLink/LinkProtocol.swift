@@ -1438,6 +1438,14 @@ public enum LinkPush {
     public static let topicField = "topic"
     public static let conversationField = "conversation"
     public static let unreadField = "unread"
+
+    /// The record's name for one device and conversation: the same for every write, so each
+    /// replaces the last, and hashed, so the public name gives neither away. A device works out
+    /// from it which conversation a deleted record was about.
+    public static func recordName(topic: String, conversation: UUID) -> String {
+        let digest = SHA256.hash(data: Data("\(topic)\n\(conversation.uuidString)".utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 /// How far a device has read a conversation: up to and including a message. It names the message
