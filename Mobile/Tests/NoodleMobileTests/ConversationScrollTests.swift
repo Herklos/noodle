@@ -27,6 +27,19 @@ import Testing
         #expect(ConversationScroll.isAtBottom(contentOffset: -50, contentHeight: 200, viewportHeight: 600, bottomInset: 100))
     }
 
+    @Test func pastTheEndAllowsForTheComposerAndShortConversations() {
+        // 1000 of content in a 600 viewport, 100 of it under the composer: the end shows at offset 500.
+        #expect(!ConversationScroll.isPastEnd(contentOffset: 500, contentHeight: 1000, viewportHeight: 600, topInset: 50, bottomInset: 100))
+        #expect(!ConversationScroll.isPastEnd(contentOffset: 400, contentHeight: 1000, viewportHeight: 600, topInset: 50, bottomInset: 100))
+        // A row's worth past, as while a new row is measured, still shows most of the conversation.
+        #expect(!ConversationScroll.isPastEnd(contentOffset: 560, contentHeight: 1000, viewportHeight: 600, topInset: 50, bottomInset: 100))
+        // The keyboard's room taken twice leaves only empty space above the composer.
+        #expect(ConversationScroll.isPastEnd(contentOffset: 800, contentHeight: 1000, viewportHeight: 600, topInset: 50, bottomInset: 100))
+        // A conversation shorter than the screen ends at its start, below the bar.
+        #expect(!ConversationScroll.isPastEnd(contentOffset: -50, contentHeight: 200, viewportHeight: 600, topInset: 50, bottomInset: 100))
+        #expect(ConversationScroll.isPastEnd(contentOffset: 200, contentHeight: 200, viewportHeight: 600, topInset: 50, bottomInset: 100))
+    }
+
     /// Opened, a conversation shows its end just above the composer, not past it, and does not sit
     /// shifted sideways until it is first scrolled.
     @MainActor @Test func aConversationOpensAtItsEnd() async throws {

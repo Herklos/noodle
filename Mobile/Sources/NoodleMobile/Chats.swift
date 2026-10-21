@@ -1841,6 +1841,15 @@ enum ConversationScroll {
     static func isAtBottom(contentOffset: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat, bottomInset: CGFloat) -> Bool {
         contentOffset + viewportHeight - bottomInset >= contentHeight - 2
     }
+
+    /// Whether the conversation has gone so far beyond its end that little or none of it shows above the
+    /// composer. A row's worth past, as for a moment while a new row is measured, is not. A conversation
+    /// shorter than the screen ends where it starts.
+    static func isPastEnd(contentOffset: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat, topInset: CGFloat,
+                          bottomInset: CGFloat) -> Bool {
+        let end = max(contentHeight + bottomInset - viewportHeight, -topInset)
+        return contentOffset - end > (viewportHeight - topInset - bottomInset) / 3
+    }
 }
 
 /// A conversation's scroll view: it opens at the end, and keeps to the end as it grows while the end shows.
@@ -1855,13 +1864,36 @@ struct ConversationScrolling: ViewModifier {
     /// Whether the person is scrolling. Only they move it off the end: rows measured as they come
     /// into view change the conversation's height for a moment, which must not.
     @State private var scrolling = false
+    /// Whether the conversation sits beyond its end, with nothing showing above the composer.
+    @State private var pastEnd = false
+    /// Whether it is on its way back from beyond the end.
+    @State private var returning = false
 
     func body(content: Content) -> some View {
         content
             .scrollPosition($position, anchor: .top)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
-            .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
+            .onScrollPhaseChange { _, phase in
+                scrolling = phase != .idle
+                if phase == .idle, pastEnd { backToEnd() }
+            }
+            // A scroll worked out before the conversation's height and the keyboard's room settle can stop
+            // beyond the end, which stays blank until scrolled by hand: it goes back to the end instead.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                ConversationScroll.isPastEnd(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
+                                             viewportHeight: geometry.containerSize.height, topInset: geometry.contentInsets.top,
+                                             bottomInset: geometry.contentInsets.bottom)
+            } action: { _, past in
+                pastEnd = past
+                if past, !scrolling {
+                    backToEnd()
+                } else if !past, returning {
+                    // Back at the last row, which sits just short of the end: the bottom edge is a new place now.
+                    returning = false
+                    if #available(iOS 27, *) { position.scrollTo(edge: .bottom) }
+                }
+            }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 ConversationScroll.isAtBottom(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
                                               viewportHeight: geometry.containerSize.height, bottomInset: geometry.contentInsets.bottom)
@@ -1884,6 +1916,15 @@ struct ConversationScrolling: ViewModifier {
                     withAnimation { position.scrollTo(id: latest.id, anchor: anchor) }
                 }
             }
+    }
+
+    /// By then the last row is laid out. Going to it always moves the conversation, where the bottom edge
+    /// may be the place it holds already, having stopped past it.
+    private func backToEnd() {
+        guard let latest else { return }
+        atBottom = true
+        returning = true
+        position.scrollTo(id: latest.id, anchor: .bottom)
     }
 }
 
