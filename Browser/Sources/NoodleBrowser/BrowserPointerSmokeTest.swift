@@ -83,7 +83,7 @@ import BrowserBridge
         tab.navigate(URL(string: base + "/pointer")!)
         try await BrowserSmokeTest.eventually("navigation resets pointer") { !tab.pointer.state.visible }
         try focus.verify()
-        try BrowserSmokeTest.require(!tab.surface.isVisible, "Pointer opened a window")
+        try BrowserSmokeTest.require(!tab.surface.isVisible || tab.surface.alphaValue == 0, "Pointer opened a window")
         // Observational only: a human can independently move their own mouse while the fixture runs.
         print("POINTER_DESKTOP_POSITION", desktopPointer, NSEvent.mouseLocation)
         print("PASS virtual pointer: native CSS hover/leave, trusted events, revealed menu, single/double clicks, same-origin frame targeting, cross-origin coordinates, screenshot marker, pause/reset/navigation and background focus")

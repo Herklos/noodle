@@ -18,6 +18,9 @@ import WebKit
     /// How many pages run at once in each browser. Every running page costs memory and processor
     /// time, so the least recently used ones stop, keeping their tab, and load again when used.
     static let runningPageLimit = 8
+    /// How long a tab a bot used keeps drawing out of sight after the bot's last call, long enough
+    /// for a bot to think between steps.
+    var agentAttention = Duration.seconds(300)
     /// From this many tabs, opening another asks the bot to close the ones it no longer needs,
     /// well before the 100-tab limit.
     static let manyTabs = 30
@@ -195,11 +198,14 @@ import WebKit
             if clearingSignIn[browserID] == 0 { clearingSignIn[browserID] = nil }
         }
     }
-    /// Only the tab a person is watching draws as if seen.
-    private func showWatchedTab(_ browserID: UUID, watched: Bool? = nil) {
+    /// While a person watches, only the tab they see draws as if seen; bots are kept off meanwhile.
+    func showWatchedTab(_ browserID: UUID, watched: Bool? = nil) {
         let watched = watched ?? isWatched(browserID)
         let selected = try? library.profile(browserID).selectedTabID
-        for tab in tabs.values where tab.browserID == browserID { tab.watched = watched && tab.id == selected }
+        for tab in tabs.values where tab.browserID == browserID {
+            tab.watched = watched && tab.id == selected
+            if watched { tab.endAttention() }
+        }
     }
     func selectTab(browserID: UUID, tabID: UUID) throws {
         var profile = try library.profile(browserID)
@@ -429,6 +435,7 @@ import WebKit
         }
         if request.operation == .open {
             let tab = try makeTab(browserID: id)
+            tab.attend(for: agentAttention)
             if let url = request.url { tab.navigate(try BrowserRequest.navigationURL(url)) }
             response.tabID = tab.id; response.tabs = [tab.info]
             let count = try library.profile(id).tabs.count
@@ -445,6 +452,7 @@ import WebKit
         let tab = try tab(browserID: id, tabID: request.tabID!)
         response.tabID = tab.id
         touch(browserID: id, tabID: tab.id)
+        if request.operation != .close { tab.attend(for: agentAttention) }
         if ![.inspect, .screenshot, .present].contains(request.operation) { tab.beginAgentInteraction() }
         switch request.operation {
         case .navigate: tab.navigate(try BrowserRequest.navigationURL(request.url!))

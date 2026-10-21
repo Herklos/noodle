@@ -155,20 +155,39 @@ import WebKit
         web.removeFromSuperview()
         showUnseen()
     }
-    /// While a person watches from another device the page must draw as if seen, which WebKit only
-    /// does for a window on screen. A tab not in a browser window has its own panel put there,
-    /// transparent, at the back and taking no clicks.
+    /// While a person watches from another device, or a bot works in it, the page must draw as if
+    /// seen, which WebKit only does for a window on screen: out of sight, a page gets no animation
+    /// frames, and sites that wait for one before showing anything stay empty. A tab not in a
+    /// browser window has its own panel put there, transparent, at the back and taking no clicks.
     var watched = false {
         didSet { if watched != oldValue { showUnseen() } }
     }
+    /// A bot used the tab lately, so the page draws as if the bot were looking at it.
+    private(set) var attended = false {
+        didSet { if attended != oldValue { showUnseen() } }
+    }
+    private var attention: Task<Void, Never>?
+    /// A bot used the tab: it draws as if seen until `span` passes without the bot using it again.
+    /// Then it rests, as any tab out of sight does, so tabs bots left behind cost nothing.
+    func attend(for span: Duration) {
+        guard !stopped else { return }
+        attention?.cancel()
+        attended = true
+        attention = Task { [weak self] in
+            try? await Task.sleep(for: span)
+            guard !Task.isCancelled else { return }
+            self?.attended = false
+        }
+    }
+    func endAttention() { attention?.cancel(); attention = nil; attended = false }
     private func showUnseen() {
-        let unseen = watched && !stopped && web.window === surface
+        let unseen = (watched || attended) && !stopped && web.window === surface
         guard unseen != (surface.alphaValue == 0) else { return }
         surface.alphaValue = unseen ? 0 : 1
         surface.ignoresMouseEvents = unseen
         // A transparent window at the back counts as occluded, which WebKit reports to the page as hidden.
         setOcclusionDetection(!unseen)
-        if unseen { surface.showForLiveView() } else { surface.orderOut(nil) }
+        if unseen { surface.showUnseen() } else { surface.orderOut(nil) }
     }
     private func setOcclusionDetection(_ enabled: Bool) {
         let selector = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
@@ -184,6 +203,7 @@ import WebKit
         resetPointer()
         stopped = true
         faviconTask?.cancel()
+        attention?.cancel(); attention = nil
         if let inputMonitor { NSEvent.removeMonitor(inputMonitor); self.inputMonitor = nil }
         let pending = operations.values; operations.removeAll(); pending.forEach { $0() }
         finishUpload(.failure(BrowserError("Tab closed during upload.")))
@@ -268,7 +288,12 @@ import WebKit
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         // WebKit requires this exact configuration to preserve window.opener and
         // OAuth popup relationships. The popup remains in the same profile.
-        do { return try runtime?.makeTab(browserID: browserID, configuration: configuration).web }
+        do {
+            let popup = try runtime?.makeTab(browserID: browserID, configuration: configuration)
+            // A sign-in window that a bot's page opens is the bot's to finish.
+            if attended, let popup, let runtime { popup.attend(for: runtime.agentAttention) }
+            return popup?.web
+        }
         catch { runtime?.failure = error.localizedDescription; return nil }
     }
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) { decisionHandler(.deny) }
@@ -357,9 +382,20 @@ import WebKit
     /// Runs in `frame` itself, the main frame when nil, whether or not it is still registered.
     private func evaluate(_ source: String, arguments: [String: Any], in frame: WKFrameInfo?, world: WKContentWorld?,
                           limit: Duration = .seconds(20)) async throws -> Any? {
-        try await bounded(limit: limit) { finish in
-            self.web.callAsyncJavaScript(source, arguments: arguments, in: frame, in: world ?? .page, completionHandler: finish)
-        }
+        do {
+            return try await bounded(limit: limit) { finish in
+                self.web.callAsyncJavaScript(source, arguments: arguments, in: frame, in: world ?? .page, completionHandler: finish)
+            }
+        } catch { throw Self.scriptError(error) }
+    }
+    /// A script's exception in the page's own words, such as "Element not found", where WebKit says
+    /// only "A JavaScript exception occurred". Any other error is left as it is.
+    nonisolated static func scriptError(_ error: Error) -> Error {
+        let error = error as NSError
+        guard error.domain == WKError.errorDomain, error.code == WKError.javaScriptExceptionOccurred.rawValue,
+              let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String, !message.isEmpty else { return error }
+        // A plain Error puts "Error: " before its message; a TypeError and the like keep their name.
+        return BrowserError(message.hasPrefix("Error: ") ? String(message.dropFirst(7)) : message)
     }
     func inspect(frame: String?) async throws -> String {
         let url = BrowserResources.bundle.url(forResource: "Resources", withExtension: nil)!.appendingPathComponent("Inspect.js")
@@ -689,14 +725,14 @@ struct BrowserPageFailure: Equatable {
 }
 
 /// A tab's own window, holding its page while no browser window shows it. It goes on screen only
-/// for a live view, transparent and at the back. Something else once left one on screen, opaque,
+/// for a live view or while a bot uses the tab, transparent and at the back. Something else once left one on screen, opaque,
 /// showing a bot's page on the desktop, and was never found, so every other request is refused
 /// and logged with whoever made it.
 final class BrowserSurfacePanel: NSPanel {
     private static let log = Logger(subsystem: "com.pdparchitect.noodle.browser", category: "surface")
     private var showing = false
 
-    func showForLiveView() {
+    func showUnseen() {
         showing = true; defer { showing = false }
         orderBack(nil)
     }

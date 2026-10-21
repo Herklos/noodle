@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Pages a bot is using keep drawing while the browser's window is closed. Sites that wait to draw, such as X's Edit profile dialog, no longer stay empty for bots until someone opens Noodle Browser.
+- When a bot's click or script fails on a page, the bot is told why, such as "Element not found", instead of "A JavaScript exception occurred".
+
 ## [0.21.0] - 2026-10-20
 
 ### Added
