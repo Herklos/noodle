@@ -1,4 +1,5 @@
 import AppKit
+import BrowserBridge
 import BrowserCore
 @testable import NoodleBrowser
 import XCTest
@@ -46,6 +47,98 @@ final class BrowserWebViewTests: XCTestCase {
         tab.watched = false
         XCTAssertFalse(tab.surface.isVisible)
         XCTAssertEqual(tab.surface.alphaValue, 1)
+    }
+
+    /// A tab a bot uses keeps drawing and getting animation frames with no browser window open,
+    /// as if seen, without showing on this Mac. Sites that wait for a frame before showing
+    /// anything, such as X's profile editor, otherwise stay empty for bots.
+    @MainActor func testATabABotUsesKeepsDrawingWithNoWindowOpen() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let opened = try await runtime.perform(.init(.open, browserID: browser))
+        let tabID = try XCTUnwrap(opened.tabID)
+        var start = BrowserRequest(.eval, browserID: browser, tabID: tabID)
+        start.text = "window.ticks = 0; (function tick() { ticks++; requestAnimationFrame(tick); })(); return true;"
+        _ = try await runtime.perform(start)
+        let tab = try runtime.tab(browserID: browser, tabID: tabID)
+        var ticks = 0
+        for _ in 0..<100 where ticks < 20 {
+            try await Task.sleep(for: .milliseconds(100))
+            ticks = try await tab.evaluate("return ticks;") as? Int ?? 0
+        }
+        XCTAssertGreaterThanOrEqual(ticks, 20, "animation frames stalled in a tab nobody has open")
+        let visibility = try await tab.evaluate("return document.visibilityState;") as? String
+        XCTAssertEqual(visibility, "visible")
+        XCTAssertTrue(tab.web.window === tab.surface)
+        XCTAssertTrue(!tab.surface.isVisible || (tab.surface.alphaValue == 0 && tab.surface.ignoresMouseEvents),
+                      "the tab's page showed on this Mac")
+    }
+
+    /// A tab rests again once the bot stops using it, so tabs bots left behind cost nothing; and
+    /// while a person watches the browser live, only the tab they see draws.
+    @MainActor func testATabRestsWhenTheBotStopsUsingItOrAPersonWatches() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        runtime.agentAttention = .milliseconds(300)
+        let browser = try library.create(name: "Work").id
+        let opened = try await runtime.perform(.init(.open, browserID: browser))
+        let tabID = try XCTUnwrap(opened.tabID)
+        let tab = try runtime.tab(browserID: browser, tabID: tabID)
+        // WebKit tells the page whether it is seen a moment after its window comes or goes.
+        func becomes(_ state: String) async throws -> Bool {
+            for _ in 0..<100 {
+                if try await tab.evaluate("return document.visibilityState;") as? String == state { return true }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            return false
+        }
+        XCTAssertTrue(tab.attended)
+        for _ in 0..<100 where tab.attended { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(tab.attended, "the tab kept drawing after the bot stopped using it")
+        XCTAssertFalse(tab.surface.isVisible)
+        let rested = try await becomes("hidden")
+        XCTAssertTrue(rested, "the page still counts as seen after the bot stopped using it")
+
+        runtime.agentAttention = .seconds(300)
+        var use = BrowserRequest(.eval, browserID: browser, tabID: tabID); use.text = "return true;"
+        _ = try await runtime.perform(use)
+        XCTAssertTrue(tab.attended)
+        let drawing = try await becomes("visible")
+        XCTAssertTrue(drawing, "a tab the bot used again stayed out of sight")
+        let seen = try runtime.makeTab(browserID: browser)
+        runtime.showWatchedTab(browser, watched: true)
+        XCTAssertFalse(tab.attended, "a bot's tab kept drawing while a person watched another")
+        XCTAssertFalse(tab.surface.isVisible)
+        XCTAssertTrue(seen.watched)
+        let hiddenWhileWatched = try await becomes("hidden")
+        XCTAssertTrue(hiddenWhileWatched, "a bot's page still counts as seen while a person watches another")
+    }
+
+    /// A bot's script or click that fails in the page says why, in the page's words, instead of
+    /// WebKit's "A JavaScript exception occurred".
+    @MainActor func testFailedPageScriptsSayWhy() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let opened = try await runtime.perform(.init(.open, browserID: browser))
+        let tabID = try XCTUnwrap(opened.tabID)
+        func failure(_ request: BrowserRequest) async -> String? {
+            do { _ = try await runtime.perform(request); return nil } catch { return error.localizedDescription }
+        }
+        var click = BrowserRequest(.click, browserID: browser, tabID: tabID); click.target = "#missing"
+        let clicked = await failure(click)
+        XCTAssertEqual(clicked, "Element not found")
+        var eval = BrowserRequest(.eval, browserID: browser, tabID: tabID)
+        eval.text = "const editor = null;\nreturn editor.fields;"
+        let evaluated = await failure(eval)
+        XCTAssertTrue(evaluated?.hasPrefix("TypeError: null is not an object") == true, evaluated ?? "no error")
     }
 
     /// A page that cannot load, or whose process stopped, gives way to an error page that says

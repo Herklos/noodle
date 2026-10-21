@@ -370,7 +370,7 @@ import SwiftUI
             guard tab.web.frame.width > size.width else { return false }
             return try await tab.evaluate("return innerWidth===width;", arguments: ["width": tab.web.frame.width]) as? Bool == true
         }
-        try require(!window.isVisible && runtime.tabs.values.allSatisfy { !$0.surface.isVisible }
+        try require(!window.isVisible && runtime.tabs.values.allSatisfy { !$0.surface.isVisible || $0.surface.alphaValue == 0 }
             && !NSApp.windows.contains { $0.isVisible && $0.identifier?.rawValue == "library" },
             "Hidden tab-switch fixture opened a browser window")
         print("PASS repeated tab switching: same document, unsaved input, scroll position and viewport; no switch resize events; hidden screenshots and actual window resizing work; no visible browser windows")
