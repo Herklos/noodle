@@ -5,7 +5,7 @@
 # Noodle
 
 **Personal AI agents for your Mac, iPhone and iPad.**<br>
-Free and open source. Runs on the AI subscriptions you already have.
+Free and open source. Runs on the AI inference/subscriptions you already have.
 
 <a href="https://github.com/pdparchitect/noodle/releases/latest/download/Noodle-arm64.dmg"><img alt="Download Noodle for Mac" src="https://img.shields.io/badge/Download%20for%20Mac-1f2328?style=for-the-badge&logo=apple&logoColor=white" height="44"></a>
 
