@@ -567,7 +567,7 @@ class ScopeGateTests(unittest.TestCase):
         for name in [name for name in self.jobs if name.startswith('test-')] + ['checks']:
             self.assertFalse(condition(self.jobs['tag']['if'], {**base, f'needs.{name}.result': 'skipped'}), name)
 
-    def test_releases_pull_requests_and_manual_runs_test_every_suite(self):
+    def test_releases_manual_runs_and_unknown_pull_requests_test_every_suite(self):
         nowhere = Path('/nonexistent')
         for event in ['push', 'pull_request', 'workflow_dispatch']:
             for release in ['true', 'false']:
@@ -668,8 +668,10 @@ class ScopeHistoryTests(unittest.TestCase):
         self.green(sha, head)
         self.assertEqual(self.push(sha, self.base), [])
         # Unknown or rewritten history, or more than the pull request's own commit, runs everything.
-        for before in ['0' * 40, 'f' * 40, '', head]:
+        for before in ['0' * 40, 'f' * 40, '']:
             self.assertEqual(self.push(sha, before), self.scope.EVERYTHING, before)
+        # Not the pull request's own commit alone, so it runs what it changes since then: here nothing.
+        self.assertEqual(self.push(sha, head), ['checks'])
         direct = self.commit('Direct', 'Sources/direct.swift')
         self.green(direct, head)
         self.assertEqual(self.push(direct, self.base), self.scope.EVERYTHING)
@@ -690,15 +692,155 @@ class ScopeHistoryTests(unittest.TestCase):
         release = ['VERSION', 'CHANGELOG.md', 'Mobile/VERSION', 'Mobile/CHANGELOG.md', 'Computer/Images/VERSION']
         self.assertEqual(self.pull_request_run(*release), [])
         self.assertEqual(self.pull_request_run('Hub/VERSION', 'Hub/CHANGELOG.md', release='false'), [])
-        for other in ['Sources/NoodleCore/Bot.swift', 'scripts/release-versions.py', 'Mobile/VERSION.txt',
+        # This fixture has no manifests, so none of these can be placed and each runs every suite.
+        for other in ['.github/workflows/release.yml', 'scripts/release-versions.py', 'Mobile/VERSION.txt',
                       'Mobile/Sources/VERSION.swift', 'CHANGELOG.md.orig']:
             self.assertEqual(self.pull_request_run(*release, other), self.scope.EVERYTHING, other)
-        self.assertEqual(self.pull_request_run('Sources/NoodleCore/Bot.swift', release='false'), self.scope.EVERYTHING)
+        self.assertEqual(self.pull_request_run('Mobile/Chat.swift', release='false'), self.scope.EVERYTHING)
         # Merged, it is a release, whose run tests everything before publishing even though the pull request passed.
         head = self.pull_request(branch='release')
         sha = self.merge(head)
         self.green(sha, head)
         self.assertEqual(self.push(sha, self.base, release='true'), self.scope.EVERYTHING)
+
+class PathScopeTests(unittest.TestCase):
+    """Which suites a change runs: scripts/ci-scope.py against the real manifests and workflow."""
+    @classmethod
+    def setUpClass(cls):
+        cls.scope = ci_scope()
+        cls.nodes = cls.scope.graph()
+        cls.flow = workflow('release.yml')
+        cls.jobs = cls.flow['jobs']
+        cls.everything = cls.scope.EVERYTHING
+
+    def suites(self, *paths):
+        return self.scope.affected(list(paths), self.nodes)
+
+    def test_suites_cover_the_packages_and_scripts_their_jobs_use(self):
+        self.assertEqual(self.everything, ['checks', *self.scope.SUITES])
+        for suite, (roots, _) in self.scope.SUITES.items():
+            runs = '\n'.join(step.get('run', '') for step in self.jobs['test-' + suite]['steps'])
+            for command in re.findall(r'swift (?:test|build)\b[^\n]*', runs):
+                package = re.search(r'--package-path (\S+)', command)
+                self.assertIn(package[1] if package else '', roots, f'{suite}: {command}')
+            for script in re.findall(r'(?<![\w/])(?:scripts|Tests)/[\w./-]+\.(?:sh|py)', runs):
+                self.assertIn(suite, self.suites(script), f'{suite}: {script}')
+        self.assertIn('Mobile', self.scope.SUITES['mobile'][0])
+
+    def test_ignored_files_are_the_ones_the_trigger_leaves_out(self):
+        triggers = self.flow.get('on', self.flow.get('true'))
+        for event in ['push', 'pull_request']:
+            self.assertEqual(triggers[event]['paths'], ['**'] + ['!' + pattern for pattern in self.scope.IGNORED])
+
+    def test_changes_run_every_suite_that_depends_on_them(self):
+        root = ['checks', 'noodle', 'noodle-macos27', 'hub']
+        applet = ['applet', 'applet-rendering']
+        cases = [
+            (['Mobile/Sources/NoodleMobile/HubChats.swift'], ['checks', 'mobile']),
+            (['Mobile/Project.swift', 'Mobile/Tests/NoodleMobileTests/HubChatsTests.swift'], ['checks', 'mobile']),
+            (['Browser/Sources/NoodleBrowser/Tabs.swift'], ['checks', 'browser']),
+            (['Hub/Sources/NoodleHub/HubApp.swift', 'Hub/Support/Info.plist'], ['checks', 'hub']),
+            (['Applet/Sources/NoodleApplet/AppDelegate.swift'], ['checks', *applet]),
+            # A Swift file named like a manifest is still Applet's source.
+            (['Applet/Sources/AppletCore/Package.swift'], ['checks', *applet]),
+            (['Computer/Sources/ComputerCore/Machine.swift'], ['checks', 'computer']),
+            (['Computer/LocalMac/Sources/LocalMacCore/Account.swift'], ['checks', 'computer']),
+            (['Computer/Images/desktop/Dockerfile'], ['checks', 'computer']),
+            (['Push/Sources/PushCore/PushService.swift', 'Push/worker/src/index.ts'], ['checks', 'shared']),
+            (['Sources/NoodleCore/Bot.swift'], root),
+            (['Tests/NoodleAppTests/ScreenCaptureTests.swift'], root),
+            (['Tools/Maps/Sources/NoodleMapsTools/Maps.swift'], root),
+            (['Package.swift', 'Package.resolved', 'VERSION'], root),
+            # Mobile bundles the voice previews from the root's Support folder.
+            (['Support/VoicePreviews/ava.m4a'], root + ['mobile']),
+            (['Shared/ExternalTools/Sources/NoodleExternalTools/Access.swift'], ['checks', 'shared', 'computer', 'browser']),
+            (['Shared/HubLink/Sources/HubLink/Pairing.swift'], ['checks', 'noodle', 'shared', 'noodle-macos27', 'hub', 'mobile']),
+            (['Shared/Patch/Sources/NoodlePatch/Patch.swift'], ['checks', 'noodle', 'shared', 'noodle-macos27', 'hub', 'mobile']),
+            (['Computer/Bridge/Sources/ComputerBridge/Bridge.swift'],
+             ['checks', 'noodle', 'noodle-macos27', 'computer', 'bridge', 'hub']),
+            (['Applet/Protocol/Sources/AppletBridge/Request.swift'],
+             ['checks', 'noodle', 'noodle-macos27', *applet, 'hub', 'mobile']),
+            (['Browser/BrowserProtocol/Sources/BrowserBridge/Bridge.swift'],
+             ['checks', 'noodle', 'noodle-macos27', 'browser', 'hub']),
+            (['Shared/SettingsUI/Sources/NoodleSettingsUI/Window.swift'],
+             [suite for suite in self.everything if suite not in ['bridge', 'mobile']]),
+            # Every protocol is built on the live views.
+            (['Shared/Surface/Sources/NoodleSurface/Surface.swift'], self.everything),
+            (['scripts/mobile.sh'], ['checks', 'mobile']),
+            (['scripts/build-mlx-metal.sh'], ['checks', 'noodle-macos27']),
+            (['Mobile/Sources/NoodleMobile/Chat.swift', 'Browser/Sources/NoodleBrowser/Tabs.swift'],
+             ['checks', 'browser', 'mobile']),
+            # Documentation never widens a run; on its own it does not start one.
+            (['Mobile/README.md', 'docs/releases.md', 'website/index.html', 'Scenarios/launch-week/script.json'], ['checks']),
+            (['Mobile/CHANGELOG.md', 'Mobile/Sources/NoodleMobile/Chat.swift'], ['checks', 'mobile']),
+        ]
+        for paths, expected in cases:
+            with self.subTest(paths=paths):
+                self.assertEqual(self.suites(*paths), expected)
+
+    def test_ci_release_automation_and_unknown_files_run_every_suite(self):
+        for path in ['.github/workflows/release.yml', '.github/workflows/computer-images.yml',
+                     'Tests/ReleaseAutomation/test_workflows.py', 'scripts/ci-scope.py', 'scripts/release-versions.py',
+                     'scripts/package-xcode-release.sh', '.gitattributes', 'Makefile', 'Shared/unplaced.txt']:
+            with self.subTest(path=path):
+                self.assertEqual(self.suites(path), self.everything)
+                self.assertEqual(self.suites('Mobile/Sources/NoodleMobile/Chat.swift', path), self.everything)
+
+
+class PathScopeHistoryTests(ScopeHistoryTests):
+    """The same scratch history, now with packages, so pull requests and other pushes run what they change."""
+    def setUp(self):
+        super().setUp()
+        for manifest, kind in [('Package.swift', 'Package'), ('Browser/Package.swift', 'Package'),
+                               ('Mobile/Project.swift', 'Project')]:
+            (self.root / manifest).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / manifest).write_text(f'import {kind}Description\n')
+        self.base = self.commit('Manifests', 'Mobile/Sources/.keep')
+
+    # The inherited tests that expect every suite need a history this cannot place.
+    test_every_other_push_runs_every_suite = None
+    test_release_pull_request_runs_nothing_and_its_release_run_everything = None
+
+    def test_pull_request_runs_what_its_merge_changes(self):
+        self.assertEqual(self.pull_request_run('Browser/Sources/Tabs.swift', release='false'), ['checks', 'browser'])
+        self.assertEqual(self.pull_request_run('Mobile/Sources/Chat.swift', 'Browser/Sources/Tabs.swift', release='false'),
+                         ['checks', 'browser', 'mobile'])
+        self.assertEqual(self.pull_request_run('Sources/Core.swift', release='false'),
+                         ['checks', 'noodle', 'noodle-macos27', 'hub'])
+        self.assertEqual(self.pull_request_run('Browser/Sources/Tabs.swift', release='true'), self.scope.EVERYTHING)
+        # Release pull requests run nothing; a version change alongside code runs that code's suites.
+        self.assertEqual(self.pull_request_run('VERSION', 'Mobile/VERSION', 'Mobile/CHANGELOG.md'), [])
+        self.assertEqual(self.pull_request_run('Mobile/VERSION', 'Mobile/Sources/Chat.swift', release='false'),
+                         ['checks', 'mobile'])
+        # Main moved since the branch: only the pull request's own changes count.
+        head = self.pull_request(branch='behind')
+        self.commit('Elsewhere', 'Browser/Sources/Other.swift')
+        self.git('checkout', '-q', '--detach', 'main')
+        self.git('merge', '-q', '--no-ff', '-m', 'Test merge', head)
+        self.assertEqual(self.scope.scope({'GITHUB_EVENT_NAME': 'pull_request', 'RELEASE': 'false'}, self.root)[0],
+                         ['checks', 'mobile'])
+        self.git('checkout', '-q', head)
+        self.assertEqual(self.scope.scope({'GITHUB_EVENT_NAME': 'pull_request', 'RELEASE': 'false'}, self.root)[0],
+                         self.scope.EVERYTHING)
+        self.git('checkout', '-q', 'main')
+
+    def test_other_pushes_run_what_they_change(self):
+        head = self.pull_request()
+        sha = self.merge(head)
+        self.green(sha, head, conclusion='failure')
+        self.assertEqual(self.push(sha, self.base), ['checks', 'mobile'])
+        self.assertEqual(self.push(sha, self.base, release='true'), self.scope.EVERYTHING)
+        direct = self.commit('Direct', 'Browser/Sources/Tabs.swift')
+        self.assertEqual(self.push(direct, sha), ['checks', 'browser'])
+        # Without the previous commit (a new or rewritten branch) nothing is known to have passed.
+        for unknown in ['0' * 40, 'f' * 40, '']:
+            self.assertEqual(self.push(direct, unknown), self.scope.EVERYTHING)
+
+    def test_moved_files_count_where_they_left(self):
+        before = self.commit('shared code\n' * 20, 'Browser/Sources/Shared.swift')
+        self.git('mv', 'Browser/Sources/Shared.swift', 'Mobile/Sources/Shared.swift')
+        self.git('commit', '-q', '-m', 'Move')
+        self.assertEqual(self.push(self.git('rev-parse', 'HEAD'), before), ['checks', 'browser', 'mobile'])
 
 
 if __name__ == '__main__':

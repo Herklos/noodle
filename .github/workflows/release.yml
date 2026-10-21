@@ -91,9 +91,9 @@ jobs:
       - name: Verify app icons match their symbols
         run: zsh scripts/verify-icons.sh
 
-  # Each test job runs only when the versions job chose its suite (scripts/ci-scope.py): always, except on a
-  # push that merges a pull request which already passed them. A release runs every suite. A skipped suite
-  # passes "CI passed" but never the tag gate.
+  # Each test job runs only when the versions job chose its suite (scripts/ci-scope.py): when the change can
+  # affect it, except on a push that merges a pull request which already passed it. A release runs every
+  # suite. A skipped suite passes "CI passed" but never the tag gate.
   test-noodle:
     needs: [versions]
     if: contains(fromJSON(needs.versions.outputs.suites), 'noodle')
