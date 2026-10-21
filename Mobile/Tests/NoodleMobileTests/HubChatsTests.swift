@@ -2017,12 +2017,13 @@ private actor RecordedSubscriptions: PushSubscriptions {
         for (step, past) in steps { #expect(abs(past) < 1, "\(step): \(past) points past the end") }
     }
 
-    /// The first message sent after opening a conversation, with the keyboard up, ends just above the
-    /// composer, as later ones do, rather than leaving the screen blank until it is scrolled.
+    /// The first message sent after opening a long conversation from the list, with the keyboard up, ends
+    /// just above the composer, as later ones do, rather than leaving the screen blank until it is scrolled.
     /// Long replies make the rows the conversation has not laid out yet a poor guess of their height.
     @Test(arguments: [false, true]) func theFirstMessageSentWithTheKeyboardUpEndsAboveTheComposer(longReplies: Bool) async throws {
         let hub = FakeHub()
-        for index in 1..<40 {
+        // More than a page, so earlier messages wait on the Hub as in a conversation used for a while.
+        for index in 1..<120 {
             if longReplies, index.isMultiple(of: 3) {
                 let points = (1...(2 + index % 14)).map { "• Point \($0) of reply \(index), which runs long enough to wrap over more than one line." }
                 await hub.botSays("Reply \(index):\n\n" + points.joined(separator: "\n"))
@@ -2036,11 +2037,14 @@ private actor RecordedSubscriptions: PushSubscriptions {
         let scout = try #require(chats.agents.first)
 
         let scene = try #require(UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first)
+        let path = OpenChats()
         let window = UIWindow(windowScene: scene)
-        let host = UIHostingController(rootView: NavigationStack { ChatView(chats: chats, threadID: scout.id) })
+        let host = UIHostingController(rootView: ReopenedChat(chats: chats, path: path))
         window.rootViewController = host
         window.isHidden = false
         defer { window.isHidden = true }
+        try await Task.sleep(for: .milliseconds(500))
+        path.threads = [scout.id]
         try await Task.sleep(for: .seconds(1))
         let conversation = try #require(Self.view(UIScrollView.self, in: window) { !($0 is UITextView) && $0.contentSize.height > window.bounds.height })
         let field = try #require(Self.view(PastingTextView.self, in: window) { _ in true })
@@ -2049,7 +2053,7 @@ private actor RecordedSubscriptions: PushSubscriptions {
         }
         func state() -> String {
             "offset \(conversation.contentOffset.y), content \(conversation.contentSize.height), " +
-                "inset \(conversation.adjustedContentInset.bottom), height \(conversation.bounds.height)"
+                "inset \(conversation.adjustedContentInset.bottom), height \(conversation.bounds.height), messages \(chats.messages(of: scout).count)"
         }
         var steps: [(String, CGFloat, String)] = [("opened", pastEnd(), state())]
 
