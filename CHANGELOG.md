@@ -13,6 +13,10 @@ All notable changes to Noodle are documented here, following
 - Calls from bots on this Mac also ring your iPhone, and your other Macs, while they are joined to this Mac with Settings → Hub → Let My Devices Reach This Mac and Noodle is open on them. Answer on the iPhone to take the call there. Answering, declining or missing the call on one device stops it ringing on the others, and the conversation gets a single card.
 - Calls from bots on this Mac ring your iPhone even while Noodle is closed on it or it is away from home, on the phone's call screen with the bot's name, once Noodle on the iPhone is updated. Needs Let My Devices Reach This Mac on, and for a phone away from home, a way to reach this Mac from outside.
 
+### Fixed
+
+- Noodle no longer grows in memory while Settings → Hub → Let My Devices Reach This Mac is on: each request from your devices kept a little memory for good, which added up over days.
+
 ## [0.71.0] - 2026-10-20
 
 ### Added

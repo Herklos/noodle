@@ -341,6 +341,9 @@ public final class LinkServer: @unchecked Sendable {
         switch await handler(key, request.request) {
         case .response(let response):
             try? await LinkQUIC.send(response, on: stream)
+            // A stream both sides finished never reports it, so it would stay here for good.
+            // Cancelling at once can drop the answer on its way, as with a pushed stream's end.
+            LinkQUIC.queue.asyncAfter(deadline: .now() + LinkStream.closeGrace) { stream.cancel() }
         case .stream(let open):
             lock.withLock { _ = streams.removeValue(forKey: ObjectIdentifier(stream)) }
             let pushed = LinkStream(peer: key, connection: stream)

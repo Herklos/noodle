@@ -611,6 +611,25 @@ final class LinkSessionTests: XCTestCase {
         XCTAssertEqual(LinkSessions.handshakes(to: hub.publicKey), 1)
     }
 
+    /// The Hub answers each request on a stream of its own, and a device keeps its connection for
+    /// as long as it runs, so the Hub must let go of each stream once answered.
+    func testTheHubForgetsAnsweredStreams() async throws {
+        let hub = LinkIdentity(), device = LinkIdentity()
+        let server = try await echo(hub)
+        let endpoint = LinkEndpoint(host: "::1", port: try XCTUnwrap(server.port))
+        let requests = 20
+        for n in 0..<requests {
+            _ = try await LinkClient.exchange(Data("request \(n)".utf8), identity: device, hubKey: hub.publicKey, endpoints: [endpoint])
+        }
+        func held() -> Int {
+            let streams = Mirror(reflecting: server).children.first { $0.label == "streams" }?.value
+            return (streams as? [ObjectIdentifier: NWConnection])?.count ?? .max
+        }
+        let deadline = ContinuousClock.now + .seconds(LinkStream.closeGrace + 5)
+        while held() >= requests, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertLessThan(held(), requests)
+    }
+
     /// Video can fill the link, and answers queued behind it on the same connection would wait,
     /// so a channel that asks for it gets a connection of its own.
     func testAChannelOfItsOwnGetsItsOwnConnection() async throws {
