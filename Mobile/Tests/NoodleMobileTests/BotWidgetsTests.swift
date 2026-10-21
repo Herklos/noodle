@@ -89,6 +89,19 @@ import UIKit
         #expect(shelf.load().bots.map(\.callable) == [true, false])
     }
 
+    /// The Bot widget shows its call button only for a bot that takes calls, and only while the widget's Show Call
+    /// Button is on, as it is until the person turns it off.
+    @Test func theCallButtonShowsForABotThatTakesCallsUnlessTurnedOff() {
+        var scout = Self.bot("Scout")
+        #expect(!scout.showsCallButton())
+        #expect(!scout.showsCallButton(setting: true))
+
+        scout.callable = true
+        #expect(scout.showsCallButton())
+        #expect(scout.showsCallButton(setting: true))
+        #expect(!scout.showsCallButton(setting: false))
+    }
+
     /// Publishing tells the widgets which bots take calls, as the chat's Call button does.
     @Test func publishingMarksBotsThatTakeCalls() {
         let shelf = BotWidgetShelf(rootURL: Self.folder())
