@@ -97,6 +97,25 @@ import NoodleCore
         }
     }
 
+    /// A transcript keeps the rows it built, so a row scrolled away must not keep its picture too.
+    func testARowScrolledAwayLetsGoOfItsPicture() async throws {
+        let timeout = watchdog()
+        defer { timeout.cancel() }
+        let file = try imageFile(width: 800, height: 400)
+        let model = ThumbnailLayoutModel()
+        let window = window(ThumbnailLayoutFixture(model: model, attachment: attachment(file: file, annotated: false), file: file))
+        defer { window.close(); window.contentView = nil }
+        model.shouldLoad = true
+        try await waitForThumbnail(file)
+        weak var shown = AttachmentThumbnailCache.shared.object(forKey: file as NSURL)
+        XCTAssertNotNil(shown)
+        AttachmentThumbnailCache.shared.removeObject(forKey: file as NSURL)
+        model.shouldLoad = false
+        let end = ContinuousClock.now.advanced(by: .seconds(15))
+        while shown != nil, ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertNil(shown)
+    }
+
     func testTextAndLegacyAnnotationsDoNotReserveAnImageTheyCannotLoad() async throws {
         let timeout = watchdog()
         defer { timeout.cancel() }

@@ -229,6 +229,9 @@ struct AttachmentInlinePreview: View {
     private let imagePreviewSize: CGSize
     private let displaysAsImage: Bool
 
+    /// How long a row off screen keeps its picture, so scrolling back and forth does not reload it.
+    static let releaseDelay: Duration = .seconds(5)
+
     @State private var thumbnail: NSImage?
     @State private var thumbnailUnavailable = false
     /// What a patch file reads as, once read; nil while it is read and for a file that is not one.
@@ -315,8 +318,14 @@ struct AttachmentInlinePreview: View {
         .accessibilityHint(openHint)
         .accessibilityAddTraits(.isButton)
         .task(id: shouldLoad) {
-            guard shouldLoad,
-                  attachment.url.flatMap(NoodletLink.id) == nil, webLink == nil,
+            // A transcript keeps every row it built, so a row scrolled away gives its picture back
+            // after a while; the cache or the Caches folder returns it when the row shows again.
+            if !shouldLoad {
+                guard thumbnail != nil, (try? await Task.sleep(for: Self.releaseDelay)) != nil else { return }
+                thumbnail = nil
+                return
+            }
+            guard attachment.url.flatMap(NoodletLink.id) == nil, webLink == nil,
                   attachment.annotation == nil || attachment.mediaType.hasPrefix("image/") else { return }
             if attachment.isPatchFile, !isNotAPatch {
                 if let read = await PatchCache.patch(at: fileURL) {
@@ -500,14 +509,7 @@ struct AttachmentInlinePreview: View {
             return
         }
         if let card = attachment.card {
-            if let data = card.image,
-               let source = CGImageSourceCreateWithData(data as CFData, nil),
-               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: 1040,
-                kCGImageSourceCreateThumbnailWithTransform: true
-               ] as CFDictionary) {
-                let result = NSImage(cgImage: image, size: .zero)
+            if let result = card.image.flatMap(AttachmentThumbnailCache.cardThumbnail) {
                 AttachmentThumbnailCache.shared.setObject(result, forKey: key); thumbnail = result
             } else { thumbnailUnavailable = true }
             return
@@ -549,9 +551,54 @@ struct AttachmentInlinePreview: View {
     }
 }
 
+/// Decoded pictures kept up to `limit` bytes, the longest unseen let go first, and all of them
+/// when the system runs short of memory.
+@MainActor
+final class ThumbnailMemory {
+    private let limit: Int
+    private var images: [NSURL: (image: NSImage, cost: Int, used: Int)] = [:]
+    private var total = 0
+    private var clock = 0
+    private let pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+
+    init(limit: Int) {
+        self.limit = limit
+        pressure.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.removeAllObjects() } }
+        pressure.resume()
+    }
+
+    func object(forKey key: NSURL) -> NSImage? {
+        guard let entry = images[key] else { return nil }
+        clock += 1
+        images[key]?.used = clock
+        return entry.image
+    }
+
+    func setObject(_ image: NSImage, forKey key: NSURL) {
+        removeObject(forKey: key)
+        let cost = image.representations.reduce(0) { $0 + $1.pixelsWide * $1.pixelsHigh * 4 }
+        clock += 1
+        images[key] = (image, cost, clock)
+        total += cost
+        while total > limit, images.count > 1,
+              let oldest = images.filter({ $0.key != key }).min(by: { $0.value.used < $1.value.used })?.key {
+            removeObject(forKey: oldest)
+        }
+    }
+
+    func removeObject(forKey key: NSURL) {
+        if let entry = images.removeValue(forKey: key) { total -= entry.cost }
+    }
+
+    func removeAllObjects() {
+        images.removeAll()
+        total = 0
+    }
+}
+
 @MainActor
 enum AttachmentThumbnailCache {
-    static let shared = NSCache<NSURL, NSImage>()
+    static let shared = ThumbnailMemory(limit: 64 << 20)
     private static var previewSizes: [URL: CGSize] = [:]
     private static let counts = Counts()
 
@@ -600,6 +647,17 @@ enum AttachmentThumbnailCache {
             if CGImageDestinationFinalize(destination), rename(partial.path, copy.path) == 0 { return NSImage(cgImage: image, size: .zero) }
         }
         try? FileManager.default.removeItem(at: partial)
+        return NSImage(cgImage: image, size: .zero)
+    }
+
+    /// The picture a browser tab or computer card carries.
+    nonisolated static func cardThumbnail(from data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: thumbnailPixels,
+                kCGImageSourceCreateThumbnailWithTransform: true
+              ] as CFDictionary) else { return nil }
         return NSImage(cgImage: image, size: .zero)
     }
 

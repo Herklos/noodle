@@ -43,6 +43,40 @@ import XCTest
         XCTAssertGreaterThan(size.pixelsHigh, size.pixelsWide)
     }
 
+    /// A card is shown no wider than an image preview, so its picture is decoded no larger.
+    func testACardPictureIsDecodedAtTheSizeItIsShown() throws {
+        let file = root.appendingPathComponent("tab.png")
+        try writePNG(width: 2_400, height: 1_200, to: file)
+        let card = try XCTUnwrap(AttachmentThumbnailCache.cardThumbnail(from: Data(contentsOf: file)))
+        let pixels = try XCTUnwrap(card.representations.first)
+        XCTAssertLessThanOrEqual(max(pixels.pixelsWide, pixels.pixelsHigh), AttachmentThumbnailCache.thumbnailPixels)
+    }
+
+    /// Every picture scrolled past is remembered, so what is remembered must have a limit; the
+    /// oldest unseen go first.
+    func testRememberedThumbnailsStayWithinAMemoryLimit() throws {
+        let cache = AttachmentThumbnailCache.shared
+        cache.removeAllObjects()
+        defer { cache.removeAllObjects() }
+        func picture() throws -> NSImage {
+            let image = NSImage(size: NSSize(width: 2_000, height: 2_000))
+            image.addRepresentation(try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2_000, pixelsHigh: 2_000,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 0, bitsPerPixel: 0)))
+            return image
+        }
+        let keys = (0..<40).map { root.appendingPathComponent("\($0).png") as NSURL }
+        cache.setObject(try picture(), forKey: keys[0])
+        cache.setObject(try picture(), forKey: keys[1])
+        for key in keys.dropFirst(2) {
+            XCTAssertNotNil(cache.object(forKey: keys[0]))
+            cache.setObject(try picture(), forKey: key)
+        }
+        XCTAssertNotNil(cache.object(forKey: keys[0]), "A picture still being looked at stays")
+        XCTAssertNil(cache.object(forKey: keys[1]))
+        XCTAssertNotNil(cache.object(forKey: keys[39]))
+    }
+
     /// A bubble is rebuilt many times while scrolling; its file is opened once to see if it is a picture.
     func testWhetherAFileIsAPictureIsReadOnce() throws {
         let file = root.appendingPathComponent("unlabelled.bin")

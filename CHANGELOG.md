@@ -16,6 +16,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - Noodle no longer grows in memory while Settings → Hub → Let My Devices Reach This Mac is on: each request from your devices kept a little memory for good, which added up over days.
+- Long conversations with pictures, shared tabs and computers use far less memory: pictures scrolled out of view are let go after a few seconds and load again when you scroll back, Noodle remembers at most 64 MB of them, and shared tab and computer pictures are kept at the size they are shown.
 
 ## [0.71.0] - 2026-10-20
 
