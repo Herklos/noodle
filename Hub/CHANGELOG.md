@@ -6,6 +6,10 @@
 
 - Basecamp can be added as a tool.
 
+### Fixed
+
+- Noodle Hub no longer grows in memory after Settings was opened once: the closed Settings window kept updating out of sight for as long as the app ran.
+
 ## [0.39.1] - 2026-10-22
 
 ### Added

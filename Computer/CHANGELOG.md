@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Noodle Computer no longer grows in memory after Settings was opened once: the closed Settings window kept updating out of sight for as long as the app ran.
+
 ## [0.33.0] - 2026-10-20
 
 ### Added

@@ -10,6 +10,10 @@ All notable changes to Noodle are documented here, following
 
 - Basecamp can be added as a tool.
 
+### Fixed
+
+- Noodle no longer grows in memory after Settings was opened once: the closed Settings window kept updating out of sight for as long as the app ran.
+
 ## [0.72.1] - 2026-10-22
 
 ### Added

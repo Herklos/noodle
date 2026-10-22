@@ -23,6 +23,35 @@ import NoodleSettingsUI
         try await wait { self.centre(of: host) == .blue }
     }
 
+    /// SwiftUI keeps a closed Settings window and its content. Content that still follows the
+    /// app's data piles up observations for as long as the app runs, so a closed window holds none.
+    func testAClosedWindowStopsFollowingTheAppsData() async throws {
+        let model = Model()
+        let host = NSHostingView(rootView: LiveFixture(model: model))
+        host.sizingOptions = []
+        let window = FixtureWindow(contentRect: .init(x: -10000, y: -10000, width: 300, height: 300),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        addTeardownBlock { @MainActor in window.contentView = nil; window.close() }
+        window.orderBack(nil)
+        try await wait { self.centre(of: host) == .red }
+        let frame = window.frame
+
+        window.close()
+        try await Task.sleep(for: .milliseconds(100))
+        let evaluations = model.evaluations
+        for value in 1...5 {
+            model.value = value
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(model.evaluations, evaluations, "a closed window still updates its content")
+
+        window.orderBack(nil)
+        try await wait { self.centre(of: host) == .red }
+        XCTAssertEqual(window.frame, frame, "reopening keeps the window's size")
+    }
+
     private enum Colour { case red, blue, clear, other }
 
     private func centre(of host: NSView) -> Colour {
@@ -61,6 +90,30 @@ private struct Fixture: View {
             Color(red: 1, green: 0, blue: 0).frame(width: 300, height: 260).tabItem { Text("Red") }.tag(0)
             Color(red: 0, green: 0, blue: 1).frame(width: 300, height: 260).tabItem { Text("Blue") }.tag(1)
         }
+    }
+}
+
+@MainActor @Observable private final class Model {
+    var value = 0
+    @ObservationIgnored var evaluations = 0
+}
+
+private struct LiveFixture: View {
+    let model: Model
+
+    var body: some View {
+        SettingsTabView(selection: .constant(0)) {
+            LiveRow(model: model).frame(width: 300, height: 260).tabItem { Text("Red") }.tag(0)
+        }
+    }
+}
+
+private struct LiveRow: View {
+    let model: Model
+
+    var body: some View {
+        model.evaluations += 1
+        return Color(red: 1, green: 0, blue: 0).overlay(Text("\(model.value)"))
     }
 }
 
