@@ -655,6 +655,28 @@ class ScopeHistoryTests(unittest.TestCase):
                 self.assertEqual(self.push(sha, before), [])
                 self.assertEqual(self.push(sha, before, release='true'), self.scope.EVERYTHING)
 
+    def test_merge_github_never_linked_to_its_pull_request_still_runs_nothing(self):
+        # As #142's merge: GitHub listed no pull request for the commit, and its CI passed on a re-run.
+        before = self.commit('Elsewhere', 'Browser/elsewhere.swift')
+        head = self.pull_request()
+        sha = self.merge(head)
+        merged = {'number': 7, 'merged_at': '2026-10-22T17:56:35Z', 'merge_commit_sha': sha,
+                  'base': {'ref': 'main'}, 'head': {'sha': head}}
+        other = {'number': 6, 'merged_at': '2026-10-22T10:30:27Z', 'merge_commit_sha': before,
+                 'base': {'ref': 'main'}, 'head': {'sha': before}}
+        runs = {'check_runs': [
+            {'id': 119947378273, 'status': 'completed', 'conclusion': 'success', 'started_at': '2026-10-22T16:25:39Z',
+             'completed_at': '2026-10-22T16:25:43Z', 'app': {'slug': 'github-actions'}},
+            {'id': 119927641548, 'status': 'completed', 'conclusion': 'failure', 'started_at': '2026-10-22T15:49:13Z',
+             'completed_at': '2026-10-22T15:49:16Z', 'app': {'slug': 'github-actions'}}]}
+        for closed, expected in [([{'number': 8, 'merged_at': None, 'merge_commit_sha': 'a' * 40,
+                                    'base': {'ref': 'main'}, 'head': {'sha': 'b' * 40}}, merged, other], True),
+                                 ([other], False), (subprocess.CalledProcessError(1, ['gh']), False)]:
+            with self.subTest(closed=closed):
+                self.answers = {f'commits/{sha}/pulls': [], 'pulls?state=closed&base=main': closed,
+                                f'commits/{head}/check-runs': runs}
+                self.assertEqual(self.push(sha, before) == [], expected)
+
     def test_every_other_push_runs_every_suite(self):
         head = self.pull_request()
         sha = self.merge(head)
