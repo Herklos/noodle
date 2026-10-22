@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- The Hub records in the Mac's system log every command a bot runs: which bot ran it, the program, when it started and ended, and its peak memory. Command lines and output are not logged; they stay in the bot's conversation. To see the last day's entries, run `log show --predicate 'category == "audit"' --last 1d` in Terminal.
+
 ## [0.39.0] - 2026-10-21
 
 ### Added

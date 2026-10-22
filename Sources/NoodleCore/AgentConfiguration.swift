@@ -86,3 +86,8 @@ struct AgentConfiguration: Codable {
         try files.writeData(encoder.encode(self), named: "agent.json")
     }
 }
+
+extension AgentStorageLayout {
+    /// The bot's name from its agent.json, which Agent Host puts in its audit log.
+    public var displayName: String? { try? AgentConfiguration.load(from: self).agent.displayName }
+}
