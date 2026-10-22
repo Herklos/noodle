@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings → Bots and Settings → Groups open straight away with dozens of bots and groups. Each bot’s picture is shrunk once for the size it is shown at instead of on every redraw, and each row is built once instead of up to four times.
+
 ## [0.72.1] - 2026-10-22
 
 ### Added
