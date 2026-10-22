@@ -307,11 +307,15 @@ struct PushedCall: Equatable {
 
     func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials, for type: PKPushType) {
         guard type == .voIP else { return }
+        if token != credentials.token {
+            Self.log.notice("PushKit gave this phone a VoIP token for \(self.environment.rawValue, privacy: .public) pushes")
+        }
         token = credentials.token
     }
 
     func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
         guard type == .voIP else { return }
+        Self.log.notice("iOS took back this phone's VoIP token")
         token = nil
     }
 
@@ -326,7 +330,10 @@ struct PushedCall: Equatable {
     @available(iOS 26.4, *)
     func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingVoIPPushWith payload: PKPushPayload,
                       metadata: PKVoIPPushMetadata, withCompletionHandler completion: @escaping () -> Void) {
-        guard metadata.mustReport else { return completion() }
+        guard metadata.mustReport else {
+            Self.log.notice("A call pushed through Noodle Push needs no call screen: Noodle is in front or on a call, or it came late")
+            return completion()
+        }
         receive(payload.dictionaryPayload, completion: completion)
     }
 
@@ -335,14 +342,29 @@ struct PushedCall: Equatable {
     /// with that Hub's key, is refused.
     static func answer(to dictionary: [AnyHashable: Any], hubs: [PushedHub], keys: any CallKeys, now: Date) -> Answer {
         guard JSONSerialization.isValidJSONObject(dictionary), let data = try? JSONSerialization.data(withJSONObject: dictionary),
-              let payload = try? JSONDecoder().decode(PushCallPayload.self, from: data) else { return .refuse(UUID()) }
-        guard let hub = hubs.first(where: { PushCallPayload.hubHash(for: $0.key.x963) == payload.hub }),
-              let key = keys.key(for: payload.hub),
-              let caller = LinkCallPushCaller.open(payload.blob, callID: payload.callID, with: key) else { return .refuse(payload.callID) }
+              let payload = try? JSONDecoder().decode(PushCallPayload.self, from: data) else {
+            log.error("Refused a call pushed through Noodle Push: its payload is unreadable")
+            return .refuse(UUID())
+        }
+        guard let hub = hubs.first(where: { PushCallPayload.hubHash(for: $0.key.x963) == payload.hub }) else {
+            log.error("Refused a call pushed through Noodle Push: it names no Hub this phone is in (\(hubs.count, privacy: .public) joined)")
+            return .refuse(payload.callID)
+        }
+        guard let key = keys.key(for: payload.hub) else {
+            log.error("Refused a call pushed through Noodle Push: this phone has no call key for its Hub")
+            return .refuse(payload.callID)
+        }
+        guard let caller = LinkCallPushCaller.open(payload.blob, callID: payload.callID, with: key) else {
+            log.error("Refused a call pushed through Noodle Push: who calls does not open with the Hub's call key")
+            return .refuse(payload.callID)
+        }
         // The earlier of Push's end of the ring and the Hub's own, sealed with the caller.
         let ends = min(payload.expiresAt, caller.expiresAt ?? payload.expiresAt)
         let secondsLeft = TimeInterval(ends) - now.timeIntervalSince1970
-        guard secondsLeft > 0 else { return .refuse(payload.callID) }
+        guard secondsLeft > 0 else {
+            log.error("Refused a call pushed through Noodle Push: it stopped ringing \(Int(-secondsLeft), privacy: .public) s before it arrived")
+            return .refuse(payload.callID)
+        }
         return .ring(PushedCall(id: payload.callID, caller: caller, hub: hub, secondsLeft: min(secondsLeft, 300)))
     }
 
@@ -355,15 +377,35 @@ struct PushedCall: Equatable {
         case .ring(let call):
             // Already ringing, as when the app heard the call from its Hub first: iOS still hears of the push.
             guard !screen.isShowing(call.id), sessions[call.id] == nil else {
+                Self.log.notice("A call pushed through Noodle Push already rings here")
                 return screen.reportPushed(call.id, name: call.caller.botName, for: nil) { _ in done.run() }
             }
+            Self.log.notice("Ringing a call pushed through Noodle Push, \(Int(call.secondsLeft), privacy: .public) s left")
             let session = PushedCallSession(call)
             sessions[call.id] = session
             screen.reportPushed(call.id, name: call.caller.botName, for: session.line) { [weak self] rings in
-                done.run()
-                if rings { session.start { self?.sessions[call.id] = nil } } else { self?.sessions[call.id] = nil }
+                if rings {
+                    done.run()
+                    session.start { self?.sessions[call.id] = nil }
+                } else {
+                    self?.sessions[call.id] = nil
+                    // iOS kept it off the call screen, as while a Focus silences Noodle: say so rather than nothing.
+                    Self.notifyMissed(call) { done.run() }
+                }
             }
         }
+    }
+
+    /// A call iOS would not ring shows as missed, opening its conversation, before PushKit hears it is done.
+    private static func notifyMissed(_ call: PushedCall, then finish: @escaping @MainActor @Sendable () -> Void) {
+        let content = UNMutableNotificationContent()
+        content.title = "Missed call from \(call.caller.botName)"
+        content.body = "Your iPhone didn’t ring, as when a Focus silences Noodle."
+        content.sound = .default
+        content.userInfo = [LinkPush.topicField: PushTopic.topic(for: call.hub.folder),
+                            LinkPush.conversationField: call.caller.conversationID.uuidString]
+        let request = UNNotificationRequest(identifier: "missed-\(call.id)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { _ in Task { @MainActor in finish() } }
     }
 
     /// What happens to calls rung through Push, without tokens, keys or who called. Read in the Mac's Console.
