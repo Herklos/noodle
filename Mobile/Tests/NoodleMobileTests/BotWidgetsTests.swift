@@ -74,6 +74,14 @@ import UIKit
         #expect(WidgetLink(url: try #require(URL(string: "noodle://call/not-a-uuid?hub=abc"))) == nil)
     }
 
+    /// Call Agent, from Shortcuts or the Action Button, calls a bot that takes calls and opens the chat of one that does not.
+    @Test func callingABotThatTakesNoCallsOpensItsChat() {
+        var scout = Self.bot("Scout")
+        #expect(WidgetLink(calling: scout) == WidgetLink(scout))
+        scout.callable = true
+        #expect(WidgetLink(calling: scout) == WidgetLink(scout, call: true))
+    }
+
     /// Bots saved before widgets knew about calls read back as not callable; the flag is kept once saved.
     @Test func botsSavedBeforeCallsAreNotCallable() throws {
         let conversationID = UUID()

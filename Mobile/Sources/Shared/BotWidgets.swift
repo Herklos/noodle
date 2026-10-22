@@ -91,6 +91,9 @@ struct WidgetLink: Equatable, Sendable {
 
     init(_ bot: WidgetBot, call: Bool = false) { self.init(hub: bot.hub, conversationID: bot.conversationID, call: call) }
 
+    /// Call Agent's link: a call to a bot that takes calls, otherwise its chat.
+    init(calling bot: WidgetBot) { self.init(bot, call: bot.callable) }
+
     /// Nil for any other link, such as a Hub's invitation.
     init?(url: URL) {
         guard let host = url.host, host == Self.host || host == Self.callHost, url.pathComponents.count == 2,
