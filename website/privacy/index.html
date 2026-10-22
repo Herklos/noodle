@@ -25,6 +25,7 @@
     .legal h3 { margin-top: 28px; font-size: 19px; font-weight: 600; }
     .legal p, .legal li { margin-top: 12px; }
     .legal ul { padding-left: 1.2em; list-style: disc; }
+    .legal li.sub { margin-left: 1.4em; list-style: circle; }
     .legal p, .legal li { text-wrap: pretty; }
     .legal a { color: var(--blue); }
     .legal a:hover { text-decoration: underline; }
@@ -53,7 +54,7 @@
   <main id="main" class="legal">
     <div class="wrap">
       <h1>Privacy</h1>
-      <p class="updated">Last updated: 21 October 2026</p>
+      <p class="updated">Last updated: 22 October 2026</p>
       <p>Noodle is a free family of apps for running AI agents on your Mac, iPhone and iPad, made by the Noodle project. Noodle's source code is publicly available under the Apache 2.0 licence: <a href="https://github.com/pdparchitect/noodle">https://github.com/pdparchitect/noodle</a></p>
       <h2>The short version</h2>
       <ul>
@@ -98,7 +99,15 @@
       </ul>
       <p><strong>Limited Use.</strong> Noodle's use of information received from Google APIs will adhere to the Google API Services User Data Policy (<a href="https://developers.google.com/terms/api-services-user-data-policy">https://developers.google.com/terms/api-services-user-data-policy</a>), including the Limited Use requirements.</p>
       <h2>Services the developers use</h2>
-      <p>Noodle has no servers that receive your content. These services the developers use see some technical data:</p>
+      <p>Noodle has no servers that can read your content. Noodle Push, below, carries call alerts it cannot read. These services the developers use see some technical data:</p>
+      <ul>
+        <li><strong>Noodle Push</strong> (push.usenoodle.app) rings your iPhone when an agent calls, even when Noodle Mobile is closed. The developers run it on Cloudflare. Noodle Push itself writes nothing to disk.</li>
+        <li class="sub"><em>Signing up.</em> Your iPhone sends Push its Apple call token, a public key and a signature. Push sends back a sealed copy of the token that only Push can open, and keeps nothing. Your Hub or Mac keeps the sealed token, your iPhone's signed permission to ring it, and a key from your iPhone used to encrypt who is calling.</li>
+        <li class="sub"><em>A call.</em> Your Hub sends Push the sealed token, that permission, a call ID and who is calling. Who is calling is encrypted so that only your iPhone can read it. Push and Apple cannot.</li>
+        <li class="sub"><em>To Apple.</em> Push passes Apple's push service the call token, the call ID, when the ringing stops, a code that identifies your Hub and the encrypted caller. Nothing else.</li>
+        <li class="sub"><em>In memory.</em> To limit abuse, Push counts requests by IP address (for IPv6, by network), by Hub and by iPhone. It also remembers call IDs for five minutes. These are held in memory only and are lost when the service restarts.</li>
+        <li class="sub"><em>Logs.</em> Push's own logs contain no IP addresses, tokens or call contents. Cloudflare keeps request logs for up to seven days. They may include IP addresses and approximate location.</li>
+      </ul>
       <ul>
         <li><strong>GitHub</strong> hosts this website, the app downloads and the update feed. It sees the IP address and browser or app information of each request, such as website visits, downloads and daily update checks, under GitHub's privacy statement.</li>
         <li><strong>Apple iCloud (CloudKit)</strong> delivers new-message notifications to Noodle Mobile. It holds a random device code, a conversation ID and an unread count. It holds no message content.</li>
