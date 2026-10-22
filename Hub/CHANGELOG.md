@@ -9,6 +9,7 @@
 - Devices are also told when its owner's plan token limit holds a bot, with when it continues, or when the plan no longer lends it, so Noodle on the Mac and iPhone show it in the bot's status rather than only a grey dot.
 - Basecamp can be added as a tool.
 - The Usage window can group by user and show one user's usage, with tokens, cost and share per person. Usage from before the Hub kept whose bot it was counts for the bot's owner; usage of someone removed from the Hub, or of a bot deleted before then, shows as Unknown.
+- When a plan stops lending a model, its editor in Settings › Plans lists the bots that use it, which can't answer until they move, with Change Model… for each and Move All to… for every one on that harness. Settings › Bots marks them "model not lent", with Change Model… too.
 
 ### Changed
 

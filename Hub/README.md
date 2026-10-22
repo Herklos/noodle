@@ -10,6 +10,9 @@ pairing your first device.
 In Settings, Users lists the people who can use the Hub, and Plans decides which
 harnesses each plan lends. Every user is on one plan. New users start on Default,
 which lends nothing until you add harnesses to it.
+A bot on a model its owner's plan no longer lends can't answer. The plan's editor lists
+such bots: choose Change Model… to move one to a model the plan lends, or Move All to…
+for every one on that harness. Bots marks them "model not lent", with Change Model… too.
 Turn on Suspended in a user’s actions menu to stop their bots and block their devices
 without deleting their data. Turn it off to restore access with the same plan and paired devices.
 
