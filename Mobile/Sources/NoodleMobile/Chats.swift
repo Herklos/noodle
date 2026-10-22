@@ -1911,6 +1911,8 @@ struct ConversationScrolling: ViewModifier {
     @State private var pastEnd = false
     /// Whether it is on its way back from beyond the end.
     @State private var returning = false
+    /// Whether it is on its way to the end after your own message, aimed while the new row's height was a guess.
+    @State private var settling = false
 
     func body(content: Content) -> some View {
         content
@@ -1919,7 +1921,15 @@ struct ConversationScrolling: ViewModifier {
             .defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
             .onScrollPhaseChange { _, phase in
                 scrolling = phase != .idle
-                if phase == .idle, pastEnd { backToEnd() }
+                if phase == .interacting { settling = false }
+                if phase == .idle, pastEnd {
+                    backToEnd()
+                } else if phase == .idle, settling {
+                    // The row is laid out by now, so the end is where it really is: on iOS 27.1 the scroll
+                    // to it stopped a couple of points short, by how far the guess was out.
+                    settling = false
+                    if #available(iOS 27, *) { position.scrollTo(edge: .bottom) }
+                }
             }
             // A scroll worked out before the conversation's height and the keyboard's room settle can stop
             // beyond the end, which stays blank until scrolled by hand: it goes back to the end instead.
@@ -1956,6 +1966,7 @@ struct ConversationScrolling: ViewModifier {
                 // past the end; the end itself is where your own message is.
                 if #available(iOS 27, *), anchor == .bottom {
                     atBottom = true
+                    settling = true
                     withAnimation { position.scrollTo(edge: .bottom) }
                 } else {
                     withAnimation { position.scrollTo(id: latest.id, anchor: anchor) }
