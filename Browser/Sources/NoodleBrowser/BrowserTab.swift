@@ -70,6 +70,8 @@ import WebKit
         super.init()
         surface.isReleasedWhenClosed = false
         surface.hidesOnDeactivate = false
+        // Transparent on screen, it would still show in Mission Control as an empty window.
+        surface.collectionBehavior = [.transient, .ignoresCycle]
         surface.contentView = web
         web.navigationDelegate = self; web.uiDelegate = self
         mute((try? runtime.library.profile(browserID).muted) ?? true)

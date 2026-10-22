@@ -184,6 +184,17 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.info.error?.contains("(tabs, close)") == true, tab.info.error ?? "no note on the tab")
     }
 
+    /// A tab's own window, transparent at the back while a bot uses it, stays out of Mission
+    /// Control and the window cycle, where it would show as an empty "Noodle Browser" window.
+    @MainActor func testATabsOwnWindowStaysOutOfMissionControl() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let tab = try runtime.makeTab(browserID: try library.create(name: "Work").id)
+        XCTAssertTrue(tab.surface.collectionBehavior.isSuperset(of: [.transient, .ignoresCycle]))
+    }
+
     /// A bot's script or click that fails in the page says why, in the page's words, instead of
     /// WebKit's "A JavaScript exception occurred".
     @MainActor func testFailedPageScriptsSayWhy() async throws {
