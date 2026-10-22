@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-10-22
+
 ### Changed
 
 - Calls from your bots show in the Phone app's Recents, so you can see a bot tried to reach you even when a Focus silenced the call.

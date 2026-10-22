@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.72.1] - 2026-10-22
+
 ### Added
 
 - Noodle records in the Mac's system log every command a bot runs: which bot ran it, the program, when it started and ended, and its peak memory. Command lines and output are not logged; they stay in the bot's conversation. To see the last day's entries, run `log show --predicate 'category == "audit"' --last 1d` in Terminal.
