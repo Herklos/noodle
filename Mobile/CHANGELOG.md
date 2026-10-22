@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Calls from your bots show in the Phone app's Recents, so you can see a bot tried to reach you even when a Focus silenced the call.
+
+### What to Test
+
+- Turn on a Focus that doesn't allow Noodle, lock the phone and have a bot call you: check the call shows as missed in the Phone app's Recents with the bot's name.
+
 ## [0.42.0] - 2026-10-21
 
 ### Added

@@ -283,19 +283,23 @@ final class SpokenAudio: @unchecked Sendable {
     /// Whether iOS has given the call its audio, which can come before the answered call asks for it.
     private var audioActive = false
 
+    static var configuration: CXProviderConfiguration {
+        let configuration = CXProviderConfiguration()
+        configuration.supportsVideo = false
+        configuration.maximumCallGroups = 1
+        configuration.maximumCallsPerCallGroup = 1
+        configuration.supportedHandleTypes = [.generic]
+        configuration.includesCallsInRecents = true
+        configuration.iconTemplateImageData = UIImage(systemName: "bubble.left.fill")?.pngData()
+        return configuration
+    }
+
     override init() {
         // Apps may not use CallKit in China.
         if Locale.current.region == .chinaMainland {
             provider = nil
         } else {
-            let configuration = CXProviderConfiguration()
-            configuration.supportsVideo = false
-            configuration.maximumCallGroups = 1
-            configuration.maximumCallsPerCallGroup = 1
-            configuration.supportedHandleTypes = [.generic]
-            configuration.includesCallsInRecents = false
-            configuration.iconTemplateImageData = UIImage(systemName: "bubble.left.fill")?.pngData()
-            provider = CXProvider(configuration: configuration)
+            provider = CXProvider(configuration: Self.configuration)
         }
         super.init()
         provider?.setDelegate(self, queue: .main)

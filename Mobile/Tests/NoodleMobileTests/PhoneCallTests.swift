@@ -86,6 +86,11 @@ private struct Failure: LocalizedError {
 
     private var tone: [Int16] { (0..<960).map { Int16(sin(Double($0) * 2 * .pi * 440 / 48_000) * 8000) } }
 
+    /// A bot's call that a Focus silenced still shows in the Phone app's Recents, so the person sees it tried.
+    @Test func botsCallsShowInThePhonesRecents() {
+        #expect(PhoneCallScreen.configuration.includesCallsInRecents)
+    }
+
     /// The phone's audio goes up the call's channel and the bot's comes down it; the Hub holds the
     /// connection to the bot's voice. The call is on the phone's call screen throughout.
     @Test func aCallConnectsThroughTheHubAndEndsWhenEitherSideHangsUp() async throws {
