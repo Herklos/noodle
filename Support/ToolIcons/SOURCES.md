@@ -16,6 +16,7 @@ under a uniform `.icon` extension. They are bundled, never remotely fetched by t
 | atlassian.icon (2026-10-06) | https://www.atlassian.com/apple-touch-icon.png |
 | attio.icon | https://attio.com/favicon.ico?favicon.0t61hvyp-jaev.ico |
 | axiom.icon (2026-10-06) | https://axiom.co/favicon.ico |
+| basecamp.icon (2026-10-22) | https://basecamp.com/favicon.ico |
 | buildkite.icon | https://buildkite.com/_site/favicon.png |
 | cal-com.icon (2026-10-06) | https://framerusercontent.com/images/63tSo3fa0ylcjt88Er8WTEPS6Dw.png |
 | calendly.icon (2026-10-06) | https://calendly.com/media/favicon/apple-touch-icon.png |
