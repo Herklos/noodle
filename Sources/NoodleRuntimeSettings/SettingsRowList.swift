@@ -40,7 +40,9 @@ public struct SettingsRowList<Item: Identifiable, Row: View>: View {
     private var rows: some View {
         VStack(spacing: 10) {
             ForEach(items) { item in
-                row(item)
+                // ForEach calls this closure twice for each item; building the row
+                // in its own view's body leaves the second call as cheap as a struct.
+                SettingsRowListRow(item: item, row: row)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if item.id != items.last?.id {
                     Divider()
@@ -48,6 +50,14 @@ public struct SettingsRowList<Item: Identifiable, Row: View>: View {
             }
         }
     }
+}
+
+/// Builds one row of a `SettingsRowList` when SwiftUI renders it, not each time ForEach is evaluated.
+private struct SettingsRowListRow<Item, Row: View>: View {
+    let item: Item
+    let row: (Item) -> Row
+
+    var body: some View { row(item) }
 }
 
 /// Sizes the list's scroll view to its rows, up to the same limit as `SettingsBotListLayout`,
