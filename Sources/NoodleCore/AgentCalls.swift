@@ -42,7 +42,7 @@ public enum UnansweredCall: String, Codable, Hashable, Sendable {
     case missed, declined
 }
 
-/// Limits that keep a bot from ringing its person again and again.
+/// Limits that keep a bot from ringing its person again and again unprompted.
 public enum AgentCallLimits {
     /// How long a call rings before it counts as missed.
     public static let ringing: TimeInterval = 45
@@ -50,6 +50,9 @@ public enum AgentCallLimits {
     public static let cooldown: TimeInterval = 30 * 60
     /// Calls a bot may place in any 24 hours.
     public static let perDay = 3
+    /// A call placed this soon after the person wrote in the bot's conversation, and after the bot's
+    /// last call, counts as asked for: the cooldown and the daily limit do not hold it back.
+    public static let askedWithin: TimeInterval = 5 * 60
     public static let reasonLength = 200
 }
 
@@ -94,12 +97,16 @@ extension WorkspaceRepository {
                 throw AgentCallError("Your call is still ringing. Wait for it to be answered, declined or missed.")
             }
             state.placed.removeAll { now.timeIntervalSince($0) >= 24 * 60 * 60 }
-            if let last = state.placed.max(), now.timeIntervalSince(last) < AgentCallLimits.cooldown {
-                let minutes = Int((AgentCallLimits.cooldown - now.timeIntervalSince(last)) / 60) + 1
-                throw AgentCallError("You called less than \(Int(AgentCallLimits.cooldown / 60)) minutes ago. Send a message instead, or call again in \(minutes) minutes if it is still urgent.")
-            }
-            guard state.placed.count < AgentCallLimits.perDay else {
-                throw AgentCallError("You have called \(AgentCallLimits.perDay) times in the last 24 hours. Send a message instead.")
+            let last = state.placed.max()
+            if try !personAskedForCall(in: conversation.id, since: last, now: now) {
+                let asked = "If they write to you asking for a call, you can call within \(Int(AgentCallLimits.askedWithin / 60)) minutes of their message."
+                if let last, now.timeIntervalSince(last) < AgentCallLimits.cooldown {
+                    let minutes = Int((AgentCallLimits.cooldown - now.timeIntervalSince(last)) / 60) + 1
+                    throw AgentCallError("You called less than \(Int(AgentCallLimits.cooldown / 60)) minutes ago. Send a message instead, or call again in \(minutes) minutes if it is still urgent. \(asked)")
+                }
+                guard state.placed.count < AgentCallLimits.perDay else {
+                    throw AgentCallError("You have called \(AgentCallLimits.perDay) times in the last 24 hours. Send a message instead. \(asked)")
+                }
             }
             let requestedAt = Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down))
             let request = AgentCallRequest(agentID: agentID, conversationID: conversation.id, reason: reason,
@@ -107,6 +114,15 @@ extension WorkspaceRepository {
             state.pending = request
             state.placed.append(requestedAt)
             return request
+        }
+    }
+
+    /// Whether the person wrote in the bot's conversation in the last few minutes and after its last call,
+    /// so one message asks for one call. Messages from the bot itself or Noodle do not count.
+    private func personAskedForCall(in conversationID: UUID, since lastCall: Date?, now: Date) throws -> Bool {
+        let earliest = max(now.addingTimeInterval(-AgentCallLimits.askedWithin), lastCall ?? .distantPast)
+        return try loadMessages(conversationID: conversationID).reversed().contains {
+            $0.author == .user && $0.call == nil && $0.createdAt > earliest
         }
     }
 

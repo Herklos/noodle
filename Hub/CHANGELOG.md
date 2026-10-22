@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A bot can call its owner right away when they wrote to it in the last 5 minutes, such as to ask for a call, even if it called less than 30 minutes ago or already three times today. Calls it places on its own keep those limits.
+
 ## [0.39.1] - 2026-10-22
 
 ### Added
