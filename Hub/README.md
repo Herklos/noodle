@@ -4,7 +4,7 @@ Noodle Hub runs bots on an always-on Mac so the people you pair with it can use 
 It lives in the menu bar and keeps its bots and conversations apart from Noodle's
 own. Its menu bar item pairs a new device, opens Usage, Logs and Settings, and quits the Hub.
 Quitting asks first, since devices cannot reach the Hub until it opens again. Usage shows
-token use and cost for the Hub's bots. The first launch opens on a welcome that ends in
+token use and cost for the Hub's bots, by bot, user, harness or model, for everyone or one user. The first launch opens on a welcome that ends in
 pairing your first device.
 
 In Settings, Users lists the people who can use the Hub, and Plans decides which

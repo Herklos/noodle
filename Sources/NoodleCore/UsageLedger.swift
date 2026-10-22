@@ -76,7 +76,7 @@ public struct UsageSpend: Hashable, Sendable {
     }
 }
 
-/// Samples summed per local day, agent, harness and model.
+/// Samples summed per local day, agent, harness, model and owner.
 public struct UsageDay: Hashable, Sendable {
     public var day: Date
     public var agentID: UUID
@@ -85,6 +85,8 @@ public struct UsageDay: Hashable, Sendable {
     public var model: String
     public var tokens: UsageTokens
     public var costUSD: Double?
+    /// Whose bot it was on a Hub; nil in records from before owners were kept.
+    public var owner: UUID?
 }
 
 /// Append-only history that outlives the agents it describes.
@@ -154,11 +156,11 @@ public final class UsageLedger: @unchecked Sendable {
         try withStatement("""
             SELECT date(u.time, 'unixepoch', 'localtime') AS day, u.agent_id, n.agent_name, u.harness, u.model,
                    SUM(u.input), SUM(u.output), SUM(u.cache_read), SUM(u.cache_write), SUM(u.reasoning),
-                   SUM(u.cost_usd)
+                   SUM(u.cost_usd), u.owner
             FROM usage u
             JOIN (SELECT agent_id, agent_name, MAX(time) FROM usage GROUP BY agent_id) n ON n.agent_id = u.agent_id
             WHERE u.time >= ? AND u.time < ? AND (? IS NULL OR u.agent_id = ?)
-            GROUP BY day, u.agent_id, u.harness, u.model
+            GROUP BY day, u.agent_id, u.harness, u.model, u.owner
             ORDER BY day
             """) { statement in
             sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
@@ -184,7 +186,8 @@ public final class UsageLedger: @unchecked Sendable {
                     reasoning: Int(sqlite3_column_int64(statement, 9)))
                 let cost = sqlite3_column_type(statement, 10) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 10)
                 days.append(UsageDay(day: Calendar.current.startOfDay(for: day), agentID: agentID, agentName: text(statement, 2),
-                    harness: text(statement, 3), model: text(statement, 4), tokens: tokens, costUSD: cost))
+                    harness: text(statement, 3), model: text(statement, 4), tokens: tokens, costUSD: cost,
+                    owner: UUID(uuidString: text(statement, 11))))
             }
             return days
         }

@@ -81,4 +81,53 @@ final class UsageReportTests: XCTestCase {
         let report = UsageReport(days: [cached], span: .week, grouping: .agent, metric: .tokens, now: now, calendar: calendar)
         XCTAssertEqual(report.cacheHitRate, 0.7, accuracy: 0.000_001)
     }
+
+    /// Usage counts for whoever owned the bot when it was used. Records from before owners were kept
+    /// count for the bot's owner now; deleted bots and people who left the Hub show as Unknown.
+    func testUsersGroupByOwnerAndUnknownCoversDeletedBotsAndPeople() {
+        let ada = UUID(), grace = UUID(), gone = UUID()
+        let kept = UUID(), deleted = UUID()
+        var recorded = day(0, "Kai", tokens: 10), old = day(0, "Kai", tokens: 20), lost = day(0, "Old", tokens: 5)
+        var left = day(1, "Moe", tokens: 7), graces = day(1, "Max", tokens: 30)
+        recorded.agentID = kept; recorded.owner = ada
+        old.agentID = kept
+        lost.agentID = deleted
+        left.owner = gone
+        graces.owner = grace
+        let people = UsagePeople(names: [ada: "Ada", grace: "Grace"], botOwners: [kept: ada])
+        let days = [recorded, old, lost, left, graces]
+        let report = UsageReport(days: days, span: .week, grouping: .user, metric: .tokens, now: now,
+                                 people: people, calendar: calendar)
+        XCTAssertEqual(report.rows.map(\.group), ["Ada", "Grace", "Unknown"])
+        XCTAssertEqual(report.rows.map(\.tokens.total), [30, 30, 12])
+        XCTAssertEqual(people.users.map(\.name), ["Ada", "Grace"])
+    }
+
+    func testUserFilterKeepsOnePersonsOrTheUnknownUsage() {
+        let ada = UUID(), bot = UUID()
+        var mine = day(0, "Kai", tokens: 10), old = day(0, "Kai", tokens: 20), other = day(0, "Moe", tokens: 5)
+        mine.owner = ada
+        old.agentID = bot
+        other.owner = UUID()
+        let people = UsagePeople(names: [ada: "Ada"], botOwners: [bot: ada])
+        let days = [mine, old, other]
+        let adas = UsageReport(days: days, span: .week, grouping: .agent, metric: .tokens, now: now,
+                               user: .user(ada), people: people, calendar: calendar)
+        XCTAssertEqual(adas.tokens.total, 30)
+        XCTAssertEqual(adas.rows.count, 2)
+        let unknown = UsageReport(days: days, span: .week, grouping: .agent, metric: .tokens, now: now,
+                                  user: .unknown, people: people, calendar: calendar)
+        XCTAssertEqual(unknown.rows.map(\.group), ["Moe"])
+        let everyone = UsageReport(days: days, span: .week, grouping: .agent, metric: .tokens, now: now,
+                                   people: people, calendar: calendar)
+        XCTAssertEqual(everyone.tokens.total, 35)
+    }
+
+    func testPeopleSharingANameStayApart() {
+        let first = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let second = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let people = UsagePeople(names: [second: "Sam", first: "Sam"])
+        XCTAssertEqual(people.users.map(\.name), ["Sam", "Sam (2)"])
+        XCTAssertEqual(people.users.map(\.id), [first, second])
+    }
 }

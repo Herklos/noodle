@@ -72,6 +72,23 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(try ledger.spending(owner: UUID(), after: start), [])
     }
 
+    /// The Hub's Usage window groups by person, so a bot's day keeps whose it was apart.
+    func testDaysKeepEachOwnerApart() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ledger = try UsageLedger(url: root.appendingPathComponent("usage.sqlite"))
+        let today = Calendar.current.startOfDay(for: Date())
+        let ada = UUID(), bot = UUID()
+        for (owner, input) in [(ada, 1), (ada, 2), (nil, 40)] as [(UUID?, Int)] {
+            try ledger.record(UsageSample(date: today.addingTimeInterval(3600), agentID: bot, agentName: "Kai", harness: "codex",
+                                          model: "gpt-5", tokens: UsageTokens(input: input), costUSD: nil, owner: owner))
+        }
+        let days = try ledger.days(from: today, to: today.addingTimeInterval(86_400))
+        XCTAssertEqual(days.count, 2)
+        XCTAssertEqual(days.first { $0.owner == ada }?.tokens.input, 3)
+        XCTAssertEqual(days.first { $0.owner == nil }?.tokens.input, 40)
+    }
+
     func testRecordedTotalsSumOneSessionPerModelInHistoriesFromBeforeSessions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
