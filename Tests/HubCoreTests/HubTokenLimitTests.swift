@@ -144,4 +144,21 @@ import XCTest
         // Grace's own plan has no limit; what Ada's bot used is not hers.
         XCTAssertNil(f.hub.tokenLimits.holds[grace.id])
     }
+
+    /// A bot that waits for Kick says why to its owner, who can Kick it; the people it is shared with see it waits.
+    func testABotWaitingForKickSaysWhyToItsOwner() throws {
+        let f = try fixture()
+        let grace = try f.hub.access.addUser(named: "Grace")
+        _ = try f.hub.bots.share(f.kai.id, with: [grace.id], for: f.ada)
+        f.runtime.start(agent: f.kai, repository: f.hub.repository)
+        let process = try XCTUnwrap(f.processes().last)
+        process.set(.failed, failure: .recoveryFailed)
+        let pause = try XCTUnwrap(f.hub.bots.bots(for: f.ada).first?.pause)
+        XCTAssertEqual(pause.summary, "Paused: recovery interrupted")
+        XCTAssertTrue(pause.kickable)
+        XCTAssertEqual(pause.detail, f.runtime.snapshot(for: f.kai.id).detail)
+        XCTAssertEqual(try f.hub.bots.bots(for: grace).first?.pause, LinkBotPause(summary: "Paused"))
+        process.set(.ready)
+        XCTAssertNil(try f.hub.bots.bots(for: f.ada).first?.pause)
+    }
 }

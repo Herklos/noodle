@@ -189,6 +189,8 @@ final class LinkCompatibilityTests: XCTestCase {
         let draftJSON = #""draft":{"name":"Alfred","provider":"codex"}"#
         let bot = try decode(LinkBot.self, #"{"id":"\#(id)","conversationID":"\#(conversation)",\#(draftJSON),"createdAt":0}"#)
         XCTAssertNil(bot.phase)
+        // From a Hub that does not say why a bot is paused.
+        XCTAssertNil(bot.pause)
         // From a Hub that does not keep backgrounds.
         XCTAssertNil(bot.background)
         let group = try decode(LinkGroup.self, #"{"id":"\#(id)","draft":{"name":"Crew","publicDescription":"","botIDs":[]},"createdAt":0}"#)
@@ -208,6 +210,8 @@ final class LinkCompatibilityTests: XCTestCase {
         XCTAssertFalse(status.isAdmin)
         // Nor does one that drops comments on files say it keeps them.
         XCTAssertFalse(status.keepsAnnotations)
+        // Nor does one from before pauses say it explains them.
+        XCTAssertFalse(status.explainsPauses)
 
         let harness = try decode(LinkHarness.self, #"{"provider":"codex","providerName":"Codex"}"#)
         XCTAssertEqual(harness.models, [])
@@ -389,6 +393,10 @@ final class LinkVersion1Tests: XCTestCase {
                                                   attachments: [marked])),
             "annotationsStatus": .status(LinkStatus(hubName: "Hub", userName: "Ada", planName: "Family", harnesses: [], endpoints: [],
                                                     keepsAnnotations: true)),
+            "pausesStatus": .status(LinkStatus(hubName: "Hub", userName: "Ada", planName: "Family", harnesses: [], endpoints: [],
+                                               explainsPauses: true)),
+            "pausedBot": .bot(LinkBot(id: a, conversationID: b, draft: LinkBotDraft(name: "Alfred", provider: "codex"), createdAt: date,
+                                      phase: .offline, pause: LinkBotPause(summary: "Paused: plan limit", until: date, detail: "Used up."))),
         ]
     }
     private var nextEvents: [String: LinkEvent] {
@@ -504,7 +512,9 @@ final class LinkVersion1Tests: XCTestCase {
         "noodlet": #"{"noodlet":{"_0":{"grant":"00000000-0000-0000-0000-00000000000A","noodletID":"00000000-0000-0000-0000-00000000000B","revision":"abc","byteCount":9,"manifest":"Aw=="}}}"#,
         "noodletAnswer": #"{"noodletAnswer":{"_0":"BA=="}}"#,
         "markedMessage": #"{"message":{"_0":{"id":"00000000-0000-0000-0000-00000000000A","conversationID":"00000000-0000-0000-0000-00000000000B","author":{"you":{}},"body":"See","createdAt":1790000000,"delivered":true,"attachments":[{"id":"00000000-0000-0000-0000-00000000000C","filename":"Annotation — Photo.png","mediaType":"image\/png","byteCount":9,"annotation":{"version":2,"sourceAttachmentID":"00000000-0000-0000-0000-00000000000A","sourceFilename":"Photo.png","comment":"Crop here","region":{"x":0.25,"y":0.5,"width":0.5,"height":0.25}}}]}}}"#,
-        "annotationsStatus": #"{"status":{"_0":{"hubName":"Hub","userName":"Ada","planName":"Family","harnesses":[],"endpoints":[],"protocolVersion":1,"keepsAnnotations":true}}}"#
+        "annotationsStatus": #"{"status":{"_0":{"hubName":"Hub","userName":"Ada","planName":"Family","harnesses":[],"endpoints":[],"protocolVersion":1,"keepsAnnotations":true}}}"#,
+        "pausesStatus": #"{"status":{"_0":{"hubName":"Hub","userName":"Ada","planName":"Family","harnesses":[],"endpoints":[],"protocolVersion":1,"explainsPauses":true}}}"#,
+        "pausedBot": #"{"bot":{"_0":{"id":"00000000-0000-0000-0000-00000000000A","conversationID":"00000000-0000-0000-0000-00000000000B","draft":{"name":"Alfred","provider":"codex"},"createdAt":1790000000,"phase":"offline","pause":{"summary":"Paused: plan limit","until":1790000000,"detail":"Used up.","kickable":false}}}}"#
     ]
     private static let nextEventJSON: [String: String] = [
         "browsersChanged": #"{"browsersChanged":{}}"#,
@@ -594,5 +604,21 @@ final class LinkVersion1Tests: XCTestCase {
         XCTAssertEqual(invitation.endpoints, [LinkEndpoint(host: "hub.local", port: 38415)])
         XCTAssertEqual(invitation.expires, date)
         XCTAssertEqual(invitation.version, 1)
+    }
+
+    /// When a paused bot resumes reads in the device's own time zone, with the day only when it is not today.
+    func testAPauseSaysWhenTheBotResumesWhereTheDeviceIs() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/London")!
+        let locale = Locale(identifier: "en_GB")
+        let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 22, hour: 9))!
+        let pause = LinkBotPause(summary: "Paused: plan limit", until: now.addingTimeInterval(5 * 3600 + 20 * 60))
+        XCTAssertEqual(pause.shown(now: now, calendar: calendar, locale: locale), "Paused: plan limit, resumes at 14:20")
+        let tomorrow = LinkBotPause(summary: "Paused: plan limit", until: now.addingTimeInterval(26 * 3600))
+        XCTAssertTrue(tomorrow.shown(now: now, calendar: calendar, locale: locale).hasPrefix("Paused: plan limit, resumes 23 Oct"),
+                      tomorrow.shown(now: now, calendar: calendar, locale: locale))
+        // Without a time, or once it has passed, only the reason.
+        XCTAssertEqual(LinkBotPause(summary: "Paused: recovery interrupted").shown(now: now), "Paused: recovery interrupted")
+        XCTAssertEqual(LinkBotPause(summary: "Paused: plan limit", until: now.addingTimeInterval(-1)).shown(now: now), "Paused: plan limit")
     }
 }

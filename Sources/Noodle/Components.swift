@@ -124,21 +124,6 @@ extension NoodleStore {
     }
 }
 
-extension AgentRuntimeSnapshot {
-    /// Why a bot waits for Kick, in a few words for its sidebar row and conversation; nil while it does not.
-    var pauseSummary: String? {
-        guard phase == .failed else { return nil }
-        switch failure {
-        case .recoveryFailed: return "Paused: recovery interrupted"
-        case .missingSession: return "Paused: session missing"
-        case .usageLimit: return "Paused: usage limit reached"
-        case .authenticationRequired: return "Paused: sign-in needed"
-        case .safetyStop: return "Paused: safety stop"
-        case nil: return "Stopped"
-        }
-    }
-}
-
 extension NoodleStore {
     /// The conversation's bots that run on this Mac and wait for Kick.
     func agentsWaitingForKick(in conversation: BotConversation) -> [AgentRecord] {
