@@ -183,11 +183,13 @@ import WebKit
     private func showUnseen() {
         let unseen = (watched || attended) && !stopped && web.window === surface
         guard unseen != (surface.alphaValue == 0) else { return }
+        // Alpha reaches the screen at once, so the window turns opaque only once it is off screen.
+        if !unseen { surface.orderOut(nil) }
         surface.alphaValue = unseen ? 0 : 1
         surface.ignoresMouseEvents = unseen
         // A transparent window at the back counts as occluded, which WebKit reports to the page as hidden.
         setOcclusionDetection(!unseen)
-        if unseen { surface.showUnseen() } else { surface.orderOut(nil) }
+        if unseen { surface.showUnseen() }
     }
     private func setOcclusionDetection(_ enabled: Bool) {
         let selector = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")

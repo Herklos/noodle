@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A window no longer flashes on screen when a bot finishes with a tab, closes one, or a person starts watching a browser live.
+
 ## [0.21.1] - 2026-10-21
 
 ### Fixed

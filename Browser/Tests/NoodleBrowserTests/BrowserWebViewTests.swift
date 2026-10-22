@@ -119,6 +119,30 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(hiddenWhileWatched, "a bot's page still counts as seen while a person watches another")
     }
 
+    /// A tab's own window turns opaque only once it is off screen, so a bot's tab resting, moving
+    /// or closing never flashes its page, or an empty window, on this Mac.
+    @MainActor func testATabsOwnWindowNeverShowsOpaqueOnScreen() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let tab = try runtime.makeTab(browserID: browser)
+        defer { tab.surface.orderOut(nil) }
+        var shown: [String] = [], step = ""
+        let observation = tab.surface.observe(\.alphaValue, options: [.new]) { surface, _ in
+            MainActor.assumeIsolated { if surface.isVisible && surface.alphaValue > 0 { shown.append(step) } }
+        }
+        defer { observation.invalidate() }
+        step = "attention ending"; tab.attend(for: .seconds(300)); tab.endAttention()
+        step = "live view ending"; tab.watched = true; tab.watched = false
+        step = "moving into a browser window"; tab.attend(for: .seconds(300))
+        let container = BrowserWebContainer(web: tab.web)
+        step = "moving back"; BrowserWebView.dismantleNSView(container, coordinator: tab)
+        step = "closing"; try runtime.closeTab(browserID: browser, tabID: tab.id)
+        XCTAssertEqual(shown, [], "the tab's window was on screen while opaque")
+    }
+
     /// A bot's script or click that fails in the page says why, in the page's words, instead of
     /// WebKit's "A JavaScript exception occurred".
     @MainActor func testFailedPageScriptsSayWhy() async throws {
