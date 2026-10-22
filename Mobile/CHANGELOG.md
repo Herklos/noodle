@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A bot's call that iOS keeps off the call screen, as while a Focus silences Noodle, also shows as a missed call notification instead of nothing. Noodle logs each step of a call rung through Noodle Push, under Calls in Console, to tell why a call didn't ring.
+
+### What to Test
+
+- Lock the phone, then right away have a bot call you: it rings on the call screen. With a Focus that doesn't allow Noodle, the missed call also shows as a notification.
+
 ## [0.42.1] - 2026-10-22
 
 ### Changed

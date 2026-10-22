@@ -6,6 +6,14 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- While this Mac serves your devices, Noodle logs each call it rings through Noodle Push and how many devices it rang, under Calls in Console.
+
+### Fixed
+
+- While this Mac serves your devices, a bot's call rings your iPhone through Noodle Push even right after the phone locks or Noodle goes to the background on it, instead of ringing only in an app the phone has suspended.
+
 ## [0.72.1] - 2026-10-22
 
 ### Added

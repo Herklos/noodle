@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Hub logs how many devices each call rings through Noodle Push, or that none gave it a grant, and when a device gives or takes back its grant, under Calls in Console.
+
+### Fixed
+
+- A bot's call rings its owner's iPhone through Noodle Push even right after the phone locks or Noodle goes to the background on it. Until then the Hub rang only in-app on a phone that still looked connected, which a suspended app cannot show, so the call never reached the phone.
+
 ## [0.39.1] - 2026-10-22
 
 ### Added

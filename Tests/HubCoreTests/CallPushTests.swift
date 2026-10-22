@@ -5,7 +5,7 @@ import NoodleCore
 import NoodleRuntime
 import XCTest
 
-/// A bot's call ringing its owner's devices that are away from the Hub through Noodle Push, here a stand-in
+/// A bot's call ringing its owner's devices through Noodle Push, here a stand-in
 /// that keeps what the Hub posted and answers as Push would. Devices pair over real QUIC on this Mac.
 @MainActor final class CallPushTests: XCTestCase {
     /// Stands in for Noodle Push.
@@ -93,31 +93,39 @@ import XCTest
         }
     }
 
-    /// A call rings the phone that is away through Push, with a request the Hub signed over the phone's own
-    /// grant and the caller only the phone can read, and leaves the Mac, which follows the Hub, to ring in-app.
-    func testACallRingsDevicesAwayThroughPushAndNotOnesFollowingTheHub() async throws {
+    /// A call rings every device with a grant through Push, with a request the Hub signed over the device's own
+    /// grant and the caller only the device can read, even the phone that still follows the Hub: a locked phone
+    /// looks connected until its connection times out, and its suspended app cannot ring in-app.
+    func testACallRingsEveryDeviceWithAGrantThroughPushEvenWhileItFollowsTheHub() async throws {
         let f = try await fixture()
         let sent = try grant(f.phone)
         let answer = try await f.phone.request(.callPush(sent))
         XCTAssertEqual(answer, .done)
-        _ = try await f.mac.request(.callPush(try grant(f.mac)))
+        let fromMac = try grant(f.mac)
+        _ = try await f.mac.request(.callPush(fromMac))
         let status = try await status(f.phone)
         XCTAssertTrue(status.ringsThroughPush)
         XCTAssertEqual(status.callPushExpiresAt, sent.grant.map { Date(timeIntervalSince1970: TimeInterval($0.expiresAt)) })
-        let events = try await f.mac.subscribe()
+        // Both follow the Hub, as a phone does for a while after it locks.
+        let phoneEvents = try await f.phone.subscribe()
+        let macEvents = try await f.mac.subscribe()
+        _ = try await f.phone.request(.status)
         _ = try await f.mac.request(.status)
 
         let request = try f.hub.repository.requestCall(agentID: f.kai.id, reason: "The build is broken")
         let started = Int64(Date().timeIntervalSince1970)
         f.hub.bots.ringCall(of: f.kai.id)
-        await until { await !f.push.posts.isEmpty }
-        // Long enough for a ring to the Mac to have been posted too, had there been one.
+        await until { await f.push.posts.count >= 2 }
+        // Long enough for a third ring to have been posted, had there been one.
         try await Task.sleep(for: .milliseconds(300))
 
         let posts = await f.push.posts
-        XCTAssertEqual(posts.map(\.url), [URL(string: "https://push.usenoodle.app/v1/ring")!], "Only the phone away is rung")
-        let rings = await f.push.rings
-        let ring = try XCTUnwrap(rings.first)
+        XCTAssertEqual(posts.map(\.url), Array(repeating: URL(string: "https://push.usenoodle.app/v1/ring")!, count: 2),
+                       "Each device with a grant is rung once, following the Hub or not")
+        let all = await f.push.rings
+        XCTAssertEqual(Set(all.map(\.grant.deviceKey)), Set([try XCTUnwrap(sent.grant).deviceKey, try XCTUnwrap(fromMac.grant).deviceKey]))
+        XCTAssertEqual(Set(all.map(\.callID)), [request.id], "One call ID, so the phone rings a push and an in-app ring once")
+        let ring = try XCTUnwrap(all.first { $0.grant == sent.grant })
         XCTAssertTrue(ring.hasValidSignature, "Signed by the Hub the grant names, as Push checks")
         XCTAssertEqual(ring.grant, sent.grant)
         XCTAssertEqual(ring.grant.hubKey, f.link.key.x963)
@@ -128,7 +136,7 @@ import XCTest
         XCTAssertEqual([caller.botID, caller.conversationID], [f.kai.id, f.kai.conversationID])
         XCTAssertEqual(caller.botName, "Kai")
         XCTAssertTrue((started + 40...started + 46).contains(caller.expiresAt ?? 0), "The Hub's own end of the ring, which Push cannot change")
-        withExtendedLifetime(events) {}
+        withExtendedLifetime((phoneEvents, macEvents)) {}
     }
 
     /// When Push says the token is gone, the Hub forgets the grant and tells the phone in its status, which
@@ -244,7 +252,7 @@ import XCTest
         await f.push.answer(410, #"{"outcome":"unregistered","apnsStatus":410,"reason":"Unregistered"}"#)
         _ = try f.hub.repository.requestCall(agentID: f.kai.id, reason: "The build is broken")
         f.hub.bots.ringCall(of: f.kai.id)
-        await until { !f.logged().isEmpty }
+        await until { f.logged().contains { $0.contains("unregistered") } }
         let log = f.logged().joined(separator: "\n")
         XCTAssertTrue(log.contains("unregistered"), log)
         XCTAssertTrue(log.contains("410"), log)
