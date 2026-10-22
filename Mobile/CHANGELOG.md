@@ -5,10 +5,12 @@
 ### Added
 
 - A bot on your Hub that waits for Kick says why at the top of its conversation and in its row, such as "Paused: recovery interrupted", with a Kick button for your own bots. Needs the Hub updated.
+- A bot on your Hub that a limit holds says so the same way, with when it continues, such as "Paused: plan limit, resumes at 14:20" once you used the tokens your plan allows. Needs the Hub updated.
 
 ### What to Test
 
 - Make a bot on the Hub wait for Kick, for example by interrupting a Grok Build recovery: check its row and the top of its conversation say why, and Kick there starts it again.
+- On a Hub plan with a small token limit, use it up: check the bot's row and the top of its conversation say "Paused: plan limit" with the time it resumes, and nothing is written in the conversation.
 
 ## [0.42.1] - 2026-10-22
 

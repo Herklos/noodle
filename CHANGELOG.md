@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- A bot on a Noodle Hub that does not answer for now says why in its sidebar row and at the top of its conversation, such as "Paused: plan limit, resumes at 14:20" when you used the tokens your plan allows, or "Paused: recovery interrupted". Needs the Hub updated.
+
 ### Changed
 
 - A bot can call you right away when you wrote to it in the last 5 minutes, such as to ask for a call, even if it called less than 30 minutes ago or already three times today. Calls it places on its own keep those limits, and one call rings at a time.

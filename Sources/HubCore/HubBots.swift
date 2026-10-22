@@ -837,9 +837,18 @@ import NoodleVoicePeer
     }
 
     /// Why a bot here does not answer for now, as its owner's devices show it, or someone's it is shared with:
-    /// it waits for Kick. Nil while it runs, and for one a device hosts.
+    /// its owner's plan holds it, or it waits for Kick. Nil while it runs, and for one a device hosts.
     public func pause(of agent: AgentRecord, forOwner: Bool = true) -> LinkBotPause? {
-        guard access.host(ofBot: agent.id) == nil, access.owner(ofBot: agent.id) != nil else { return nil }
+        guard access.host(ofBot: agent.id) == nil,
+              let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }) else { return nil }
+        if let tokenLimits, let until = tokenLimits.holds[owner.id] {
+            let detail = forOwner ? tokenLimits.refusal(for: owner) : tokenLimits.refusal(forGuestOf: agent.displayName, ownedBy: owner.id)
+            return LinkBotPause(summary: "Paused: plan limit", until: until, detail: detail)
+        }
+        if !lendsBot(agent, to: owner) {
+            return LinkBotPause(summary: "Paused: not in plan",
+                                detail: forOwner ? "Your plan no longer lends this bot’s harness or model." : nil)
+        }
         let snapshot = runtime.snapshot(for: agent.id)
         guard let summary = snapshot.pauseSummary else { return nil }
         // Only its owner can Kick it; the people it is shared with see that it waits.

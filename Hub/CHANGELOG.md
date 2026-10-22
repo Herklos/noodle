@@ -5,6 +5,7 @@
 ### Added
 
 - Devices are told why a bot does not answer for now when it waits for Kick, so Noodle on the iPhone can show it with a Kick button.
+- Devices are also told when its owner's plan token limit holds a bot, with when it continues, or when the plan no longer lends it, so Noodle on the Mac and iPhone show it in the bot's status rather than only a grey dot.
 
 ### Changed
 
