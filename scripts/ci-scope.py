@@ -144,9 +144,13 @@ def tested_merge(repository, sha, before, root=ROOT):
         if not resolves(before, root) or not resolves("HEAD^1", root) or git("rev-parse", "HEAD^1", root=root) != git(
                 "rev-parse", before + "^{commit}", root=root) or git("rev-parse", "HEAD", root=root) != sha:
             return False
-        pulls = [pull for pull in gh(f"repos/{repository}/commits/{sha}/pulls")
-                 if pull.get("merged_at") and pull.get("merge_commit_sha") == sha
-                 and pull["base"]["ref"] == "main"]
+        def landing(pulls):
+            return [pull for pull in pulls if pull.get("merged_at") and pull.get("merge_commit_sha") == sha
+                    and pull["base"]["ref"] == "main"]
+        # GitHub links a commit to its pull request some time after the merge, or never, as it never did
+        # for #142's: then the pull requests most recently closed on main show which one made this commit.
+        pulls = landing(gh(f"repos/{repository}/commits/{sha}/pulls")) or landing(
+            gh(f"repos/{repository}/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100"))
         if len(pulls) != 1:
             return False
         head = pulls[0]["head"]["sha"]
