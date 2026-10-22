@@ -107,6 +107,45 @@ struct HubBotProfileButton: View {
     }
 }
 
+/// The models a bot's owner's plan lends, to move a bot, or several on the same harness, to one of them.
+struct HubChangeModelMenu: View {
+    let host: HubSettingsHost
+    let title: String
+    let bots: [HubUnlentModel]
+    /// Runs after a move, with why one failed.
+    var moved: (String?) -> Void = { _ in }
+
+    var body: some View {
+        Menu(title) {
+            ForEach(bots.first?.lent ?? [], id: \.self) { model in
+                Button(host.modelName(model, on: bots[0].harness)) { moved(host.changeModel(of: bots, to: model)) }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+}
+
+/// Marks a bot in Settings > Bots whose owner's plan no longer lends its model, with Change Model….
+struct HubUnlentModelLabel: View {
+    let host: HubSettingsHost
+    let bot: HubUnlentModel
+
+    var body: some View {
+        let owner = host.hub.access.users.first { $0.id == bot.owner }?.name ?? "Its owner"
+        HStack(spacing: 4) {
+            Text("model not lent")
+                .foregroundStyle(.orange)
+                .help("\(owner)’s plan no longer lends \(host.modelName(bot.model, on: bot.harness)), so this bot can’t answer.")
+            Text("·").foregroundStyle(.secondary)
+            HubChangeModelMenu(host: host, title: "Change Model…", bots: [bot]) { error in
+                if let error { host.problem = HubSettingsProblem(title: "Could Not Change Model", message: error) }
+            }
+        }
+    }
+}
+
 /// Every group kept on the Hub, whose it is and its bots, with an Archived switch as in Noodle.
 struct HubGroupsSettingsView: View {
     let host: HubSettingsHost

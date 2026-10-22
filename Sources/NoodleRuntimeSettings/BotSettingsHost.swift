@@ -20,8 +20,14 @@ import SwiftUI
     func setArchived(_ archived: Bool, agent: AgentRecord)
     /// The editor for a bot's harness and model.
     func botRuntimeEditor(_ agent: AgentRecord) -> AnyView
+    /// What keeps the bot from answering that its row should show, with how to fix it; nil when nothing does.
+    func botProblem(_ agent: AgentRecord) -> AnyView?
     /// Rereads the skills companions publish to bots.
     func refreshCompanionSkills()
     /// Opens an installed companion's library.
     func openCompanionLibrary(_ app: CompanionApp) async throws
+}
+
+public extension BotSettingsHost {
+    func botProblem(_ agent: AgentRecord) -> AnyView? { nil }
 }

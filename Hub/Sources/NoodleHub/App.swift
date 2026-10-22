@@ -43,7 +43,10 @@ struct NoodleHubApp: App {
         .windowResizability(.contentMinSize)
         .restorationBehavior(.disabled)
         Window("Usage", id: UsageView.windowID) {
-            UsageView(history: delegate.settings.hub.usage, agents: delegate.settings.agents)
+            let access = delegate.settings.hub.access
+            UsageView(history: delegate.settings.hub.usage, agents: delegate.settings.agents,
+                      people: UsagePeople(names: Dictionary(uniqueKeysWithValues: access.users.map { ($0.id, $0.name) }),
+                                          botOwners: access.botOwners))
         }
         .defaultSize(width: 860, height: 680)
         .windowResizability(.contentMinSize)

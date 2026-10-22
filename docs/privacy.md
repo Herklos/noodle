@@ -66,8 +66,8 @@ gives them to their own services.
 
 - In a group, every bot sends the conversation to its own provider. Adding a
   bot on another provider shares the group's messages with that provider too.
-- On a Noodle Hub, conversations, bot files and memory are kept on the Hub's
-  Mac, within reach of whoever runs it.
+- On a Noodle Hub, conversations, bot files, memory and tool sign-ins are kept
+  on the Hub's Mac, within reach of whoever runs it.
 - Hub bots use the sign-ins the Hub lends, so the lender's account and its
   privacy settings apply, not yours.
 - A bot shared with other people can tell them what it remembers from your
@@ -77,8 +77,20 @@ gives them to their own services.
 
 ## Noodle itself
 
-Noodle collects no analytics or usage data. It checks for updates, and
-downloads harnesses and models from their publishers when you ask. Voice
-messages are transcribed on your Mac.
+Noodle has no accounts and no ads, and its own code sends no analytics or
+crash reports. It checks GitHub for Noodle updates.
+
+When you ask, Noodle downloads harnesses and models from their publishers. It
+also checks those publishers regularly for newer releases of the harnesses it
+installed, and installs them itself unless you turn off **Update harnesses
+installed by Noodle automatically** in **Settings → Harness**. The publishers
+see these requests.
+
+Voice messages are transcribed on your Mac or iPhone. The bot then receives
+both the audio and the transcript.
+
+Noodle for iPhone is a beta on Apple's TestFlight. While you test it, Apple
+collects crash logs and usage information and shares them with Noodle's
+developers.
 
 [Documentation](README.md)

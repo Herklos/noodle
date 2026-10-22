@@ -4,6 +4,48 @@ import NoodleCore
 import NoodleRuntime
 import SwiftUI
 
+/// The people on a Hub, to group and filter its usage by. Noodle has none.
+public struct UsagePeople: Equatable {
+    struct User: Identifiable, Equatable {
+        let id: UUID
+        let name: String
+    }
+
+    static let unknown = "Unknown"
+
+    /// By name; a repeated name gets a number.
+    let users: [User]
+    private let labels: [UUID: String]
+    private let botOwners: [UUID: UUID]
+
+    /// `botOwners` gives the owner of each bot that still exists.
+    public init(names: [UUID: String] = [:], botOwners: [UUID: UUID] = [:]) {
+        var labels: [UUID: String] = [:]
+        for (name, ids) in Dictionary(grouping: names.keys, by: { names[$0]! }) {
+            for (index, id) in ids.sorted(by: { $0.uuidString < $1.uuidString }).enumerated() {
+                labels[id] = index == 0 ? name : "\(name) (\(index + 1))"
+            }
+        }
+        self.labels = labels
+        self.botOwners = botOwners
+        users = labels.map { User(id: $0.key, name: $0.value) }
+            .sorted { $0.name == $1.name ? $0.id.uuidString < $1.id.uuidString : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    var isEmpty: Bool { users.isEmpty }
+
+    /// Whose bot it was when it was used. Records from before owners were kept count for the bot's
+    /// owner now; a deleted bot's, or one of someone no longer on the Hub, belong to nobody.
+    func owner(of day: UsageDay) -> UUID? {
+        guard let owner = day.owner ?? botOwners[day.agentID], labels[owner] != nil else { return nil }
+        return owner
+    }
+
+    func label(of day: UsageDay) -> String {
+        owner(of: day).flatMap { labels[$0] } ?? Self.unknown
+    }
+}
+
 /// Everything the Usage window shows, computed from the ledger's days.
 struct UsageReport {
     enum Span: String, CaseIterable, Identifiable {
@@ -13,8 +55,14 @@ struct UsageReport {
     }
 
     enum Grouping: String, CaseIterable, Identifiable {
-        case agent = "Bot", harness = "Harness", model = "Model"
+        case agent = "Bot", user = "User", harness = "Harness", model = "Model"
         var id: Self { self }
+    }
+
+    /// Whose usage a Hub's window shows, when not everyone's.
+    enum UserFilter: Hashable {
+        case user(UUID)
+        case unknown
     }
 
     enum Metric: String, CaseIterable, Identifiable {
@@ -62,8 +110,16 @@ struct UsageReport {
         }
     }
 
-    init(days: [UsageDay], span: Span, grouping: Grouping, metric: Metric, now: Date, calendar: Calendar = .current) {
+    init(days: [UsageDay], span: Span, grouping: Grouping, metric: Metric, now: Date,
+         user: UserFilter? = nil, people: UsagePeople = UsagePeople(), calendar: Calendar = .current) {
         self.metric = metric
+        let days = days.filter { day in
+            switch user {
+            case nil: true
+            case .user(let id): people.owner(of: day) == id
+            case .unknown: people.owner(of: day) == nil
+            }
+        }
         // Bots are told apart by ID; a repeated name gets a number.
         var botLabels: [UUID: String] = [:]
         for (name, ids) in Dictionary(grouping: Set(days.map(\.agentID)), by: { id in days.first { $0.agentID == id }!.agentName }) {
@@ -74,6 +130,7 @@ struct UsageReport {
         func group(_ day: UsageDay) -> String {
             switch grouping {
             case .agent: botLabels[day.agentID] ?? day.agentName
+            case .user: people.label(of: day)
             case .harness: HarnessProvider(rawValue: day.harness)?.displayName ?? day.harness
             case .model: day.model.isEmpty ? "Default Model" : day.model
             }
@@ -120,14 +177,16 @@ struct UsageReport {
     }
 }
 
-/// Token use and cost per bot, harness and model, for Noodle and Noodle Hub.
+/// Token use and cost per bot, harness and model, for Noodle and Noodle Hub, and per user on a Hub.
 public struct UsageView: View {
     public static let windowID = "usage"
 
     let history: UsageHistory
     let agents: [AgentRecord]
+    let people: UsagePeople
     @State private var span = UsageReport.Span.month
     @State private var grouping = UsageReport.Grouping.agent
+    @State private var user: UsageReport.UserFilter?
     @State private var metric = UsageReport.Metric.tokens
     @State private var selectedBucket: Date?
     /// Read only while the window is on screen: SwiftUI keeps a closed window alive to reopen it.
@@ -145,19 +204,22 @@ public struct UsageView: View {
         return Color(red: red, green: green, blue: blue)
     }
 
-    public init(history: UsageHistory, agents: [AgentRecord]) {
+    /// `people` adds grouping and filtering by user, on a Hub.
+    public init(history: UsageHistory, agents: [AgentRecord], people: UsagePeople = UsagePeople()) {
         self.history = history
         self.agents = agents
+        self.people = people
     }
 
     public var body: some View {
         let now = Date()
         let range = UsageReport.range(span, now: now)
-        let report = UsageReport(days: days ?? [], span: span, grouping: grouping, metric: metric, now: now)
+        let report = UsageReport(days: days ?? [], span: span, grouping: people.isEmpty && grouping == .user ? .agent : grouping,
+                                 metric: metric, now: now, user: people.isEmpty ? nil : user, people: people)
         Group {
             if days == nil {
                 Color.clear
-            } else if days?.isEmpty == true {
+            } else if report.rows.isEmpty {
                 ContentUnavailableView("No Usage", systemImage: "chart.bar.xaxis",
                                        description: Text("No tokens were used in this period."))
             } else {
@@ -213,10 +275,23 @@ public struct UsageView: View {
             .padding(.horizontal, 6)
             .help("Bot")
         }
+        if !people.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                Picker("User", selection: $user) {
+                    Text("All Users").tag(UsageReport.UserFilter?.none)
+                    Divider()
+                    ForEach(people.users) { Text($0.name).tag(Optional(UsageReport.UserFilter.user($0.id))) }
+                    Text(UsagePeople.unknown).tag(Optional(UsageReport.UserFilter.unknown))
+                }
+                .pickerStyle(.menu)
+                .padding(.horizontal, 6)
+                .help("User")
+            }
+        }
         ToolbarSpacer(.fixed)
         ToolbarItem(placement: .primaryAction) {
             Picker("Group By", selection: $grouping) {
-                ForEach(UsageReport.Grouping.allCases) { Text("By \($0.rawValue)").tag($0) }
+                ForEach(UsageReport.Grouping.allCases.filter { $0 != .user || !people.isEmpty }) { Text("By \($0.rawValue)").tag($0) }
             }
             .pickerStyle(.menu)
             .padding(.horizontal, 6)

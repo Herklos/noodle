@@ -8,6 +8,18 @@ import NoodleCore
 import NoodleRuntime
 import NoodleVoicePeer
 
+/// A bot that cannot answer because its owner's plan stopped lending its model, though it still lends the harness.
+public struct HubUnlentModel: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let name: String
+    public let owner: UUID
+    public let plan: UUID
+    public let harness: HubHarness
+    public let model: String
+    /// The models the plan lends on the harness, any of which the bot can move to.
+    public let lent: [String]
+}
+
 /// Bots paired devices keep on the Hub. Each belongs to one user, runs on a harness that
 /// user's plan lends, and talks with that user, alone or in groups of their bots, and with
 /// whoever else they share it with, each in a conversation of their own.
@@ -1506,6 +1518,49 @@ import NoodleVoicePeer
         let profile: UUID?
         do { profile = try repository.loadAgentHarnessProfile(agent) } catch { return false }
         return access.lends(HubHarness(provider: provider, profile: profile), model: agent.modelIdentifier, to: user)
+    }
+
+    /// The bots here whose owner's plan still lends their harness but no longer their model, by name.
+    public func unlentModels() -> [HubUnlentModel] {
+        ((try? repository.loadAgents()) ?? []).compactMap(unlentModel).sorted {
+            $0.name == $1.name ? $0.id.uuidString < $1.id.uuidString : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// Nil when the bot's model is lent, or a model change would not make it answer: it runs on a device,
+    /// on a harness the plan does not lend, or on the harness default.
+    public func unlentModel(of agent: AgentRecord) -> HubUnlentModel? {
+        guard !access.isPersonal, !isHidden(agent.id), access.host(ofBot: agent.id) == nil, let model = agent.modelIdentifier,
+              let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }),
+              let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)) else { return nil }
+        let profile: UUID?
+        do { profile = try repository.loadAgentHarnessProfile(agent) } catch { return nil }
+        let harness = HubHarness(provider: provider, profile: profile)
+        guard access.lends(harness, to: owner), !access.lends(harness, model: model, to: owner),
+              let lent = access.models(on: harness, for: owner) else { return nil }
+        return HubUnlentModel(id: agent.id, name: agent.displayName, owner: owner.id, plan: owner.plan,
+                              harness: harness, model: model, lent: lent.sorted())
+    }
+
+    /// Moves a bot here to a model its owner's plan lends, as its owner would in Edit Bot.
+    public func changeModel(of id: UUID, to model: String) throws {
+        guard let agent = try repository.loadAgents().first(where: { $0.id == id }), access.host(ofBot: id) == nil,
+              let owner = access.owner(ofBot: id).flatMap({ id in access.users.first { $0.id == id } }),
+              let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)) else {
+            throw LinkError("This bot’s model can’t be changed here.")
+        }
+        let harness = HubHarness(provider: provider, profile: try repository.loadAgentHarnessProfile(agent))
+        guard access.lends(harness, model: model, to: owner) else {
+            throw LinkError("\(owner.name)’s plan does not lend \(model) on \(provider.displayName).")
+        }
+        let updated = try repository.updateAgent(
+            agent, displayName: agent.displayName, harnessIdentifier: agent.harnessIdentifier, modelIdentifier: model,
+            reasoningEffort: agent.reasoningEffort, publicDescription: agent.publicDescription,
+            avatarSymbolName: agent.avatarSymbolName, avatarColorIndex: agent.avatarColorIndex, avatarImageData: agent.avatarImageData)
+        if running || watching { runtime.restart(agent: updated, repository: repository) }
+        onChange?(owner.id, .botsChanged)
+        tellGuests(of: id)
+        onBotsEdited?()
     }
 
     /// Reads the user's current plan, not the one they were on when `user` was read.
