@@ -1934,7 +1934,9 @@ struct ConversationScrolling: ViewModifier {
                 } else if !past, returning {
                     // Back at the last row, which sits just short of the end: the bottom edge is a new place now.
                     returning = false
-                    if #available(iOS 27, *) { position.scrollTo(edge: .bottom) }
+                    // Asked for in the same update as the scroll back to the row, iOS 27.1 drops it, leaving
+                    // the conversation short of its end by the padding under the row: it waits for the next.
+                    if #available(iOS 27, *) { Task { position.scrollTo(edge: .bottom) } }
                 }
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -2067,8 +2069,11 @@ struct ChatView: View {
     static let controlHeight: CGFloat = 48
 
     /// How far the composer's bottom sits above the screen's, given the home bar's room under it: as low
-    /// as the system's search field, partly over the home bar.
-    static func composerGap(homeBar: CGFloat) -> CGFloat { max(8, homeBar - 6) }
+    /// as the system's search field, partly over the home bar. From iOS 27.1 the search field sits 4 points lower.
+    static func composerGap(homeBar: CGFloat) -> CGFloat {
+        if #available(iOS 27.1, *) { return max(8, homeBar - 10) }
+        return max(8, homeBar - 6)
+    }
     let chats: HubChats
     let threadID: UUID
     @AppStorage(WebLinkPreview.key) private var previewsLinks = true

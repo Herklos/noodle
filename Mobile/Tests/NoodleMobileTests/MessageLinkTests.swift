@@ -140,6 +140,8 @@ import Testing
         defer { try? FileManager.default.removeItem(at: folder) }
         let previews = LinkPreviews(folder: folder) { _ in nil }
         let host = UIHostingController(rootView: LinkPreviewCard(url: Self.page, previews: previews, conversationID: UUID()))
+        // The card's own size, without the window's safe area: an iPhone Duo's has room beside the screen too.
+        host.safeAreaRegions = []
         let scene = try #require(UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.rootViewController = host
@@ -148,7 +150,7 @@ import Testing
         try await Task.sleep(for: .seconds(1))
 
         let size = host.sizeThatFits(in: CGSize(width: 390, height: 1000))
-        #expect(size.width == 280)
-        #expect(size.height > 190)
+        #expect(size.width == 280, "\(size)")
+        #expect(size.height > 190, "\(size)")
     }
 }

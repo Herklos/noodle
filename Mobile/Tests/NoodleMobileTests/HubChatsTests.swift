@@ -2138,8 +2138,8 @@ private actor RecordedSubscriptions: PushSubscriptions {
         let fieldBottom = field.convert(field.bounds, to: window).maxY + 13
         let end = conversation.convert(conversation.bounds, to: window).maxY - conversation.adjustedContentInset.bottom
 
-        #expect(abs(fieldBottom - searchBottom) < 1)
-        #expect(abs(fieldBottom - ChatView.controlHeight - end - 16) < 1)
+        #expect(abs(fieldBottom - searchBottom) < 1, "The field ends at \(fieldBottom), search at \(searchBottom)")
+        #expect(abs(fieldBottom - ChatView.controlHeight - end - 16) < 1, "The field ends at \(fieldBottom), the conversation at \(end)")
     }
 
     /// Left at its end and opened again, a conversation shows its end again.
