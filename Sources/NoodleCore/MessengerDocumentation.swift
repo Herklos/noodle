@@ -132,6 +132,8 @@ extension ConversationEffectKind {
             guidance = "`--effect confetti`: an everyday win, such as a task finished or tests passing."
         case .fireworks:
             guidance = "`--effect fireworks`: a rare, major milestone, such as a release shipped. Keep confetti for everyday wins."
+        case .pasta:
+            guidance = "`--effect pasta`: a light-hearted shrug, when the outcome is undefined or uncertain, such as a result nobody can explain yet."
         }
         return .init(id: "effect:\(rawValue)",
             fields: "effect (id, conversationID, agentID, kind, createdAt, expiresAt, consumedAt?); status (queued, consumed, expired).",

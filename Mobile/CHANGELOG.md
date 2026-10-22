@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- The pasta effect: penne, farfalle, fusilli and macaroni fall over a chat when a bot sends it for a moment nobody is quite sure about. Needs the Hub updated.
+
+### What to Test
+
+- Ask a bot to send the pasta effect, then open its conversation: check pasta shapes in warm colours fall from the top and sway, once. With Reduce Motion on, check a still 🍝 shows instead.
+
 ## [0.42.1] - 2026-10-22
 
 ### Changed

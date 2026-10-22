@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bots on the Hub can send the new pasta effect, `messenger --effect pasta`, for a moment nobody is quite sure about.
+
 ## [0.39.1] - 2026-10-22
 
 ### Added
