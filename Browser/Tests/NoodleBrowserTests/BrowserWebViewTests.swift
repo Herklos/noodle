@@ -1,6 +1,7 @@
 import AppKit
 import BrowserBridge
 import BrowserCore
+import SwiftUI
 @testable import NoodleBrowser
 import XCTest
 
@@ -163,6 +164,62 @@ final class BrowserWebViewTests: XCTestCase {
         eval.text = "const editor = null;\nreturn editor.fields;"
         let evaluated = await failure(eval)
         XCTAssertTrue(evaluated?.hasPrefix("TypeError: null is not an object") == true, evaluated ?? "no error")
+    }
+
+    /// Switching tabs and back leaves a page where the person scrolled it, also while a bot uses
+    /// the tab, when its own window is put on screen out of sight each time it leaves the browser
+    /// window.
+    @MainActor func testSwitchingTabsKeepsTheScrollPositionOfATabABotUses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let opened = try await runtime.perform(.init(.open, browserID: browser))
+        let tab = try runtime.tab(browserID: browser, tabID: try XCTUnwrap(opened.tabID))
+        let other = try runtime.makeTab(browserID: browser)
+        XCTAssertTrue(tab.attended)
+        func until(_ condition: () async throws -> Bool) async throws -> Bool {
+            for _ in 0..<100 {
+                if try await condition() { return true }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            return false
+        }
+        let page = "<!doctype html><title>Long</title><body style='min-height:3000px'><input id=name></body>"
+        for loading in [tab, other] { loading.web.loadHTMLString(page, baseURL: URL(string: "https://example.com/")) }
+        let loaded = try await until {
+            for loading in [tab, other] where try await loading.evaluate("return document.readyState==='complete' && !!document.querySelector('#name');") as? Bool != true { return false }
+            return true
+        }
+        XCTAssertTrue(loaded, "pages did not load")
+        // As in the browser window, which the person may have closed meanwhile.
+        let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 700), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        let presentation = BrowserPresentation(library: library, runtime: runtime, defaults: nil)
+        presentation.selection = browser; presentation.selectTab(tab.id)
+        let host = NSHostingView(rootView: BrowserLibraryView(presentation: presentation))
+        window.contentView = host; host.frame = window.contentLayoutRect; host.layoutSubtreeIfNeeded()
+        let mounted = try await until { tab.web.window === window }
+        XCTAssertTrue(mounted, "the tab never reached the browser window")
+        try await Task.sleep(for: .milliseconds(300))
+        _ = try await tab.evaluate("scrollTo(0,500); return true;")
+        let scrolled = try await until { try await tab.evaluate("return scrollY===500;") as? Bool == true }
+        XCTAssertTrue(scrolled, "the page did not scroll")
+        for _ in 0..<3 {
+            presentation.selectTab(other.id)
+            let away = try await until { tab.web.window === tab.surface && other.web.window === window }
+            XCTAssertTrue(away, "switching away did not move the pages")
+            XCTAssertTrue(tab.attended && tab.surface.isVisible && tab.surface.alphaValue == 0, "the bot's tab stopped drawing out of sight")
+            try await Task.sleep(for: .milliseconds(100))
+            presentation.selectTab(tab.id)
+            let back = try await until { tab.web.window === window }
+            XCTAssertTrue(back, "switching back did not move the page")
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let scroll = try await tab.evaluate("return scrollY;") as? Int
+        XCTAssertEqual(scroll, 500, "switching tabs lost the scroll position")
     }
 
     /// A page that cannot load, or whose process stopped, gives way to an error page that says

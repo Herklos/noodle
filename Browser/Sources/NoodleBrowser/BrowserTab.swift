@@ -144,9 +144,38 @@ import WebKit
             surface.setContentSize(size)
             surface.contentView = web
             web.setFrameOrigin(.zero)
+            if watched || attended { keepScrollPosition() }
         }
         showUnseen()
     }
+    /// A page scrolled while out of sight, such as in a closed browser window, goes back to its top
+    /// when WebKit draws it again, which happens when its own window goes on screen for a bot or a
+    /// live view. The position is read before the window moves and put back if the page jumps to
+    /// its top as it starts drawing; a page that scrolls itself meanwhile is left where it went.
+    private func keepScrollPosition() {
+        web.callAsyncJavaScript(Self.keepScrollScript, arguments: [:], in: nil, in: Self.controlWorld, completionHandler: nil)
+    }
+    static let keepScrollScript = """
+        const x = scrollX, y = scrollY;
+        if (!x && !y) return;
+        if (document.visibilityState !== 'visible') {
+            const shown = await new Promise(resolve => {
+                const timer = setTimeout(() => resolve(false), 2000);
+                document.addEventListener('visibilitychange', () => { clearTimeout(timer); resolve(true); }, {once: true});
+            });
+            if (!shown) return;
+        }
+        // Counted in frames, which stop while the page is out of sight again, and given up after a
+        // few seconds, so a position from long ago is never put back.
+        const deadline = performance.now() + 5000;
+        for (let frame = 0; frame < 30 && performance.now() < deadline; frame++) {
+            if (scrollX !== x || scrollY !== y) {
+                if (!scrollX && !scrollY) scrollTo(x, y);
+                return;
+            }
+            await new Promise(resolve => requestAnimationFrame(resolve));
+        }
+        """
     func detachSurface() {
         if let window = web.window, let responder = window.firstResponder as? NSView,
            responder === web || responder.isDescendant(of: web) {
