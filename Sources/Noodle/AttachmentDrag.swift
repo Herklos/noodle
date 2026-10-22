@@ -9,6 +9,15 @@ enum AttachmentDrag {
         fileURL: URL,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) throws -> NSItemProvider {
+        try exportedProvider(for: attachment, fileURL: fileURL, temporaryDirectory: temporaryDirectory).provider
+    }
+
+    /// The provider and the separate file it offers, which identifies the attachment when it is dropped back on Noodle.
+    static func exportedProvider(
+        for attachment: ConversationAttachment,
+        fileURL: URL,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) throws -> (provider: NSItemProvider, file: URL) {
         let manager = FileManager.default
         let filename = try exportFilename(for: attachment, fileURL: fileURL)
 
@@ -40,7 +49,29 @@ enum AttachmentDrag {
             return nil
         }
         provider.registerObject(exportedURL as NSURL, visibility: .all)
-        return provider
+        return (provider, exportedURL)
+    }
+
+    /// Files recently dragged out of a conversation, by the copy each drag offered, so a drop on another
+    /// conversation can tell them from files dragged in from elsewhere. Only the latest drags are kept.
+    @MainActor private static var dragged: [(file: URL, attachment: ConversationAttachment)] = []
+    private static let draggedLimit = 32
+
+    @MainActor static func remember(_ attachment: ConversationAttachment, exportedAs file: URL) {
+        dragged.append((file.resolvingSymlinksInPath(), attachment))
+        if dragged.count > draggedLimit { dragged.removeFirst(dragged.count - draggedLimit) }
+    }
+
+    /// The conversation file a dropped item was dragged from, if it came from one.
+    @MainActor static func draggedAttachment(in provider: NSItemProvider) async -> ConversationAttachment? {
+        guard !dragged.isEmpty, provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else { return nil }
+        let url: URL? = await withCheckedContinuation { continuation in
+            _ = provider.loadObject(ofClass: NSURL.self) { object, _ in
+                continuation.resume(returning: object as? URL)
+            }
+        }
+        guard let file = url?.resolvingSymlinksInPath(), file.isFileURL else { return nil }
+        return dragged.last { $0.file == file }?.attachment
     }
 
     /// Copies the stored file to where the person chose in the save panel, which already confirmed any replacement.
@@ -90,11 +121,44 @@ extension ConversationAttachment {
 extension NoodleStore {
     func attachmentDragProvider(_ attachment: ConversationAttachment) -> NSItemProvider {
         do {
-            return try AttachmentDrag.provider(for: attachment, fileURL: attachmentFileURL(attachment))
+            let export = try AttachmentDrag.exportedProvider(for: attachment, fileURL: attachmentFileURL(attachment))
+            AttachmentDrag.remember(attachment, exportedAs: export.file)
+            return export.provider
         } catch {
             errorMessage = "The attachment could not be dragged: \(error.localizedDescription)"
             return NSItemProvider()
         }
+    }
+
+    /// A drop on a conversation in the sidebar. A file dragged out of another conversation is sent there at
+    /// once, as Forward… sends it with no comment; anything else opens the conversation with it staged.
+    func drop(_ providers: [NSItemProvider], onConversation conversationID: UUID) -> Bool {
+        guard !providers.isEmpty, let conversation = conversations.first(where: { $0.id == conversationID }),
+              composerUnavailableReason(for: conversation) == nil else { return false }
+        Task {
+            var others: [NSItemProvider] = []
+            for provider in providers {
+                guard let attachment = await AttachmentDrag.draggedAttachment(in: provider) else {
+                    others.append(provider)
+                    continue
+                }
+                // Back on its own conversation, it is already there.
+                guard attachment.conversationID != conversationID else { continue }
+                guard AttachmentForwarding.canForward(attachment) else {
+                    others.append(provider)
+                    continue
+                }
+                do {
+                    try forward(attachment, to: conversationID, comment: "")
+                } catch {
+                    errorMessage = "The attachment could not be sent: \(error.localizedDescription)"
+                }
+            }
+            guard !others.isEmpty else { return }
+            selectedConversationID = conversationID
+            importAttachments(from: others, into: conversationID)
+        }
+        return true
     }
 
     func saveAttachment(_ attachment: ConversationAttachment) {

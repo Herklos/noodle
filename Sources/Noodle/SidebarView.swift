@@ -149,6 +149,7 @@ struct SidebarView: View {
 private struct ConversationRow: View {
     @Environment(NoodleStore.self) private var store
     @AppStorage(SidebarRowDetail.key) private var rowDetail = SidebarRowDetail.standard.rawValue
+    @State private var isDropTargeted = false
     let conversation: BotConversation
 
     var body: some View {
@@ -195,6 +196,18 @@ private struct ConversationRow: View {
             }
         }
         .frame(height: 66)
+        // A file dropped here goes to this conversation; the row shows where it will land.
+        .background {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.25))
+                    .padding(.horizontal, -6)
+                    .accessibilityHidden(true)
+            }
+        }
+        .onDrop(of: AttachmentTransfer.dropContentTypes, isTargeted: $isDropTargeted) { providers in
+            store.drop(providers, onConversation: conversation.id)
+        }
         .overlay(alignment: .leading) {
             if store.hasUnreadMessages(in: conversation) {
                 Circle()

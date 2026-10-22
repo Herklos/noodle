@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - Settings → General → Sidebar shows chooses what the line under each name in the sidebar says: Latest Message, as before, or Description, what the bot or group is for. A bot or group without a description keeps showing its latest message.
+- Drag a file from a conversation onto another bot or group in the sidebar to send it there straight away, as Forward… does without a comment. The row it will go to is highlighted while you drag. Any other file dropped on a row opens that conversation with the file ready to send.
 
 ### Fixed
 
