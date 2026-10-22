@@ -118,6 +118,24 @@ import XCTest
         XCTAssertTrue(list.spaces.allSatisfy { $0.position != nil })
     }
 
+    /// The joined Hubs' spaces in the person's order, on this device: a Hub not yet put in order, such as one just
+    /// joined, follows in the order it was joined, and one left keeps its place for when it is joined again.
+    func testHubSpacesKeepThePersonsOrder() {
+        var order = HubSpaceOrder()
+        XCTAssertEqual(order.sorted(["studio", "office", "home"]) { $0 }, ["studio", "office", "home"])
+
+        order.move(["studio", "office", "home"], fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        XCTAssertEqual(order.sorted(["studio", "office", "home"]) { $0 }, ["home", "studio", "office"])
+        XCTAssertEqual(order.sorted(["studio", "lab", "office", "home"]) { $0 }, ["home", "studio", "office", "lab"])
+
+        // With office left, studio moves above home; office comes back after them.
+        order.move(["home", "studio"], fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        XCTAssertEqual(order.sorted(["studio", "office", "home"]) { $0 }, ["studio", "home", "office"])
+
+        XCTAssertEqual(HubSpaceOrder(stored: order.stored), order)
+        XCTAssertEqual(HubSpaceOrder(stored: ""), HubSpaceOrder())
+    }
+
     /// One record per space in the private database, its contents encrypted.
     func testASpaceRoundTripsThroughItsRecord() throws {
         let member = CustomSpace.Member(hub: "studio", conversation: UUID())

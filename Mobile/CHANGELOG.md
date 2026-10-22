@@ -5,10 +5,12 @@
 ### Added
 
 - The pasta effect: penne, farfalle, fusilli and macaroni fall over a chat when a bot sends it for a moment nobody is quite sure about. Needs the Hub updated.
+- Put your Hubs' spaces in order: open the space menu, choose Edit Spaces… and drag them. All stays first. The order is kept on this phone.
 
 ### What to Test
 
 - Ask a bot to send the pasta effect, then open its conversation: check pasta shapes in warm colours fall from the top and sway, once. With Reduce Motion on, check a still 🍝 shows instead.
+- With two or more Hubs joined, open the space menu and choose Edit Spaces…: drag a Hub above another, then check the menu lists them in that order after All, and still does after closing and reopening Noodle. Check the Hubs can't be renamed or deleted there.
 
 ## [0.42.1] - 2026-10-22
 
