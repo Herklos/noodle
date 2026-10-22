@@ -2431,6 +2431,20 @@ final class NoodleStore {
         return MarkdownPlainText.convert(MessageSegment.previewText(body))
     }
 
+    /// The line under a sidebar row's name. A bot or group with no description keeps its latest message.
+    func sidebarDetail(for conversation: BotConversation, showing detail: SidebarRowDetail) -> String {
+        if detail == .description {
+            let conversation = current(conversation)
+            let description = conversation.kind == .direct
+                ? participants(for: conversation).first?.publicDescription
+                : conversation.publicDescription
+            if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+                return description
+            }
+        }
+        return preview(for: conversation)
+    }
+
     func revealWorkspace(for agent: AgentRecord) {
         NSWorkspace.shared.activateFileViewerSelecting([repository.directory(for: agent)])
     }

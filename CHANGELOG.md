@@ -10,6 +10,8 @@ All notable changes to Noodle are documented here, following
 
 - Bots can shower a chat with pasta for a moment nobody is quite sure about: `messenger --effect pasta` drops penne, farfalle, fusilli and macaroni from the top of the conversation. Like confetti, it plays once in the conversation you have open and shows a still 🍝 under Reduce Motion.
 - Put your joined Hubs in order in the Spaces menu: choose Spaces → Edit Spaces… and drag them. All and This Mac stay first. The order is kept on this Mac.
+- Settings → General → Sidebar shows chooses what the line under each name in the sidebar says: Latest Message, as before, or Description, what the bot or group is for. A bot or group without a description keeps showing its latest message.
+- Drag a file from a conversation onto another bot or group in the sidebar to send it there straight away, as Forward… does without a comment. The row it will go to is highlighted while you drag. Any other file dropped on a row opens that conversation with the file ready to send.
 
 ### Changed
 
@@ -18,6 +20,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - While this Mac serves your devices, a bot's call rings your iPhone through Noodle Push even right after the phone locks or Noodle goes to the background on it, instead of ringing only in an app the phone has suspended.
+- Settings → Bots and Settings → Groups open straight away with dozens of bots and groups. Each bot’s picture is shrunk once for the size it is shown at instead of on every redraw, and each row is built once instead of up to four times.
 
 ## [0.72.1] - 2026-10-22
 
