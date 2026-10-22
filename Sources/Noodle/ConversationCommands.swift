@@ -149,7 +149,7 @@ struct SpaceCommands: Commands {
                     Toggle("This Mac", isOn: Binding(get: { store.showsThisMac }, set: { if $0 { store.showThisMac() } }))
                         .keyboardShortcut("2")
                 }
-                ForEach(Array(store.hubMirrors.enumerated()), id: \.element.pairing.directory) { index, mirror in
+                ForEach(Array(store.spaceMirrors.enumerated()), id: \.element.pairing.directory) { index, mirror in
                     Toggle(mirror.pairing.hub?.name ?? "Noodle Hub",
                            isOn: Binding(get: { store.spaceMirror === mirror }, set: { if $0 { store.showSpace(mirror) } }))
                         .keyboardShortcut(Self.shortcut(1 + index))
@@ -162,7 +162,7 @@ struct SpaceCommands: Commands {
                 }
                 Divider()
                 Button("New Space…") { store.spaceNaming = .init() }
-                if !store.customSpaces.isEmpty {
+                if !store.customSpaces.isEmpty || store.hubMirrors.count > 1 {
                     Button("Edit Spaces…") { store.editsSpaces = true }
                 }
             }
@@ -215,17 +215,31 @@ struct SpaceEditorSheet: View {
             Divider()
 
             List {
-                ForEach(store.customSpaces) { space in
-                    SpaceEditorRow(space: space)
+                // All and This Mac stay first, so they are not listed; a joined Hub's space can only be moved.
+                if store.hubMirrors.count > 1 {
+                    Section {
+                        ForEach(store.spaceMirrors, id: \.pairing.directory) { mirror in
+                            HStack {
+                                Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                                Text(mirror.pairing.hub?.name ?? "Noodle Hub")
+                            }
+                        }
+                        .onMove(perform: store.moveHubSpaces)
+                    }
                 }
-                .onMove(perform: store.moveSpaces)
+                Section {
+                    ForEach(store.customSpaces) { space in
+                        SpaceEditorRow(space: space)
+                    }
+                    .onMove(perform: store.moveSpaces)
+                }
             }
             .frame(minHeight: 160, idealHeight: 260)
         }
         .frame(width: 360)
         .noodleSheetSizing()
         .onChange(of: store.customSpaces.isEmpty) { _, isEmpty in
-            if isEmpty { dismiss() }
+            if isEmpty, store.hubMirrors.count < 2 { dismiss() }
         }
     }
 }

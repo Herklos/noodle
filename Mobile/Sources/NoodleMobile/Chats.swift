@@ -1287,6 +1287,8 @@ struct AgentsView: View {
     @State private var chats: [HubChats] = []
     /// The space shown: a Hub's by `CurrentHub.space`, or one the person made by its ID; empty for All.
     @AppStorage("space") private var space = ""
+    /// The joined Hubs' spaces in the person's order, after All.
+    @AppStorage(HubSpaceOrder.key) private var hubOrder = ""
     @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
     /// The spaces the person made, kept on this phone.
     @State private var spaceList = SpaceList(file: URL.applicationSupportDirectory.appendingPathComponent("spaces.json"))
@@ -1322,6 +1324,9 @@ struct AgentsView: View {
 
     /// The Hub whose bots and groups alone are shown, with the pins it keeps; nil shows All, with this phone's pins.
     private var spaceChats: HubChats? { chats.first { CurrentHub.space(of: $0.pairing) == space } }
+
+    /// The joined Hubs in the order the person put their spaces in.
+    private var spaceHubs: [HubChats] { HubSpaceOrder(stored: hubOrder).sorted(chats) { CurrentHub.space(of: $0.pairing) } }
 
     private var rows: [Row] {
         let shown = spaceChats.map { [$0] } ?? chats
@@ -1448,7 +1453,11 @@ struct AgentsView: View {
                 Button("Create") { saveSpace() }
                     .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .sheet(isPresented: $editingSpaces) { SpaceEditor(list: spaceList, change: { changeSpaces($0) }) }
+            .sheet(isPresented: $editingSpaces) {
+                SpaceEditor(list: spaceList,
+                            hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
+                            moveHubs: moveHubs, change: { changeSpaces($0) })
+            }
             .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread) }
         }
         .onChange(of: opening, initial: true, open)
@@ -1486,7 +1495,7 @@ struct AgentsView: View {
         Menu {
             Picker("Space", selection: ticked) {
                 Text("All").tag("")
-                ForEach(chats, id: \.pairing.directory) { hub in
+                ForEach(spaceHubs, id: \.pairing.directory) { hub in
                     Text(hub.pairing.hubName).tag(CurrentHub.space(of: hub.pairing))
                 }
             }
@@ -1497,7 +1506,7 @@ struct AgentsView: View {
             }
             Divider()
             Button { name(SpaceNaming(adding: nil)) } label: { Label("New Space…", systemImage: "plus") }
-            if !spaceList.spaces.isEmpty {
+            if !spaceList.spaces.isEmpty || chats.count > 1 {
                 Button { editingSpaces = true } label: { Label("Edit Spaces…", systemImage: "pencil") }
             }
         } label: {
@@ -1539,6 +1548,12 @@ struct AgentsView: View {
     private func joinShownSpace(_ hub: HubChats, _ conversation: some HubConversation) {
         guard let customSpace else { return }
         changeSpaces { try spaceList.setMember(true, hub.spaceMember(of: conversation), of: customSpace.id) }
+    }
+
+    private func moveHubs(fromOffsets source: IndexSet, toOffset destination: Int) {
+        var order = HubSpaceOrder(stored: hubOrder)
+        order.move(spaceHubs.map { CurrentHub.space(of: $0.pairing) }, fromOffsets: source, toOffset: destination)
+        hubOrder = order.stored
     }
 
     @discardableResult
@@ -1643,7 +1658,7 @@ struct AgentsView: View {
     /// What the widgets show, once every Hub's list is known or could not be, so they never show a Hub's bots gone.
     private var widgetSource: BotWidgetPublisher.Source? {
         guard chats.count == pairings.count, chats.allSatisfy({ $0.isLoaded || $0.error != nil }) else { return nil }
-        return BotWidgetPublisher.source(chats: chats, spaces: spaceList.spaces)
+        return BotWidgetPublisher.source(chats: spaceHubs, spaces: spaceList.spaces)
     }
 
     private func openChosen() {
@@ -3402,20 +3417,39 @@ struct ThreadAvatar: View {
 
 /// The spaces the person made, to put in order, rename and delete.
 private struct SpaceEditor: View {
+    /// A joined Hub's space, which can only be moved.
+    struct Hub: Identifiable {
+        let key: String
+        let name: String
+        var id: String { key }
+    }
+
     let list: SpaceList
+    /// In the person's order; with one, there is nothing to put in order.
+    let hubs: [Hub]
+    let moveHubs: (IndexSet, Int) -> Void
     let change: (() throws -> Void) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(list.spaces) { space in
-                    SpaceEditorRow(space: space) { name in change { try list.rename(space.id, to: name) } }
+                // All stays first, so it is not listed.
+                if hubs.count > 1 {
+                    Section {
+                        ForEach(hubs) { Text($0.name) }
+                            .onMove(perform: moveHubs)
+                    }
                 }
-                .onMove { source, destination in change { try list.move(fromOffsets: source, toOffset: destination) } }
-                .onDelete { offsets in
-                    let deleted = offsets.map { list.spaces[$0].id }
-                    change { for id in deleted { try list.delete(id) } }
+                Section {
+                    ForEach(list.spaces) { space in
+                        SpaceEditorRow(space: space) { name in change { try list.rename(space.id, to: name) } }
+                    }
+                    .onMove { source, destination in change { try list.move(fromOffsets: source, toOffset: destination) } }
+                    .onDelete { offsets in
+                        let deleted = offsets.map { list.spaces[$0].id }
+                        change { for id in deleted { try list.delete(id) } }
+                    }
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -3426,7 +3460,7 @@ private struct SpaceEditor: View {
             }
         }
         .onChange(of: list.spaces.isEmpty) { _, isEmpty in
-            if isEmpty { dismiss() }
+            if isEmpty, hubs.count < 2 { dismiss() }
         }
     }
 }

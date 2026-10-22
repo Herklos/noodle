@@ -6,7 +6,7 @@ import XCTest
 @MainActor final class ChatEffectTests: XCTestCase {
     /// Names travel between apps as they are; one an app does not know is no effect there.
     func testEffectsAreKnownByName() {
-        XCTAssertEqual(ChatEffect.allCases.map(\.rawValue), ["confetti", "fireworks"])
+        XCTAssertEqual(ChatEffect.allCases.map(\.rawValue), ["confetti", "fireworks", "pasta"])
         XCTAssertNil(ChatEffect(rawValue: "future-kind"))
     }
 

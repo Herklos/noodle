@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bots on the Hub can send the new pasta effect, `messenger --effect pasta`, for a moment nobody is quite sure about.
+
 ### Changed
 
 - The Hub logs how many devices each call rings through Noodle Push, or that none gave it a grant, and when a device gives or takes back its grant, under Calls in Console.
