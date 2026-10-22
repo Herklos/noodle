@@ -198,6 +198,39 @@ import XCTest
         XCTAssertEqual(bots.first { $0.id == alfred.id }?.phase, .failed)
     }
 
+    /// Bots on a model their owner's plan stopped lending are listed with what it still lends, and
+    /// moving one to a lent model lets it answer again.
+    func testBotsOnAModelThePlanNoLongerLendsAreListedAndCanMove() async throws {
+        let f = try await fixture()
+        f.hub.access.setModels(["sonnet", "haiku", "opus"], for: claude, in: f.hub.access.plans[1])
+        guard case .bot(let alfred) = try await f.device.request(.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code", model: "sonnet"))),
+              case .bot = try await f.device.request(.createBot(LinkBotDraft(name: "Jeeves", provider: "claude-code", model: "haiku"))),
+              case .bot = try await f.device.request(.createBot(LinkBotDraft(name: "Bunter", provider: "claude-code"))) else {
+            return XCTFail("no bots")
+        }
+        XCTAssertEqual(f.hub.bots.unlentModels(), [])
+        f.hub.access.setModels(["opus", "haiku"], for: claude, in: f.hub.access.plans[1])
+        let unlent = f.hub.bots.unlentModels()
+        XCTAssertEqual(unlent.map(\.id), [alfred.id])
+        XCTAssertEqual(unlent.first?.model, "sonnet")
+        XCTAssertEqual(unlent.first?.lent, ["haiku", "opus"])
+        XCTAssertEqual(unlent.first?.owner, f.ada.id)
+        XCTAssertEqual(unlent.first?.plan, f.hub.access.plans[1].id)
+        XCTAssertThrowsError(try f.hub.bots.changeModel(of: alfred.id, to: "sonnet"))
+        try f.hub.bots.changeModel(of: alfred.id, to: "opus")
+        XCTAssertEqual(f.hub.bots.unlentModels(), [])
+        let agent = try XCTUnwrap(f.hub.repository.loadAgents().first { $0.id == alfred.id })
+        XCTAssertEqual(agent.modelIdentifier, "opus")
+        XCTAssertEqual(agent.displayName, "Alfred")
+        guard case .bots(let bots) = try await f.device.request(.bots) else { return XCTFail("no bots") }
+        XCTAssertNotEqual(bots.first { $0.id == alfred.id }?.phase, .failed)
+        // A harness the plan stopped lending is not fixed by another model, so it is not listed.
+        f.hub.access.setModels(["haiku"], for: claude, in: f.hub.access.plans[1])
+        XCTAssertEqual(f.hub.bots.unlentModels().map(\.id), [alfred.id])
+        f.hub.access.set(claude, included: false, in: f.hub.access.plans[1])
+        XCTAssertEqual(f.hub.bots.unlentModels(), [])
+    }
+
     /// A bot without a model runs on the harness default, whichever models the plan lists.
     func testABotWithoutAModelRunsOnTheHarnessDefault() async throws {
         let f = try await fixture()
@@ -846,6 +879,8 @@ import XCTest
         let bot = try await createBot(f)
         guard case .status(let status) = try await f.device.request(.status) else { return XCTFail("no status") }
         XCTAssertTrue(status.keepsAnnotations)
+        // It says why a bot is paused, so a device trusts a bot listed without a pause to run.
+        XCTAssertTrue(status.explainsPauses)
         let photo = LinkAttachment(id: UUID(), filename: "Photo.png", mediaType: "image/png", byteCount: 3)
         let region = LinkAnnotation.Region(x: 0.25, y: 0.5, width: 0.5, height: 0.25)
         let comment = LinkAnnotation(version: 2, sourceAttachmentID: photo.id, sourceFilename: "Photo.png", comment: "Crop here", region: region)

@@ -4,12 +4,15 @@ Noodle Hub runs bots on an always-on Mac so the people you pair with it can use 
 It lives in the menu bar and keeps its bots and conversations apart from Noodle's
 own. Its menu bar item pairs a new device, opens Usage, Logs and Settings, and quits the Hub.
 Quitting asks first, since devices cannot reach the Hub until it opens again. Usage shows
-token use and cost for the Hub's bots. The first launch opens on a welcome that ends in
+token use and cost for the Hub's bots, by bot, user, harness or model, for everyone or one user. The first launch opens on a welcome that ends in
 pairing your first device.
 
 In Settings, Users lists the people who can use the Hub, and Plans decides which
 harnesses each plan lends. Every user is on one plan. New users start on Default,
 which lends nothing until you add harnesses to it.
+A bot on a model its owner's plan no longer lends can't answer. The plan's editor lists
+such bots: choose Change Model… to move one to a model the plan lends, or Move All to…
+for every one on that harness. Bots marks them "model not lent", with Change Model… too.
 Turn on Suspended in a user’s actions menu to stop their bots and block their devices
 without deleting their data. Turn it off to restore access with the same plan and paired devices.
 

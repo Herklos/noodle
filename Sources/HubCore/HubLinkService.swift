@@ -98,7 +98,7 @@ import os
     @ObservationIgnored private let pushes: (any HubPushPublisher)?
     /// How long a conversation stays quiet before its devices are told, so a burst of replies is one push.
     @ObservationIgnored private let pushDelay: Duration
-    /// Rings devices that are away, or have Noodle closed, through Noodle Push; nil where it is not offered.
+    /// Rings devices that gave a grant through Noodle Push, beside ringing in-app; nil where it is not offered.
     @ObservationIgnored private let callPusher: CallPusher?
     /// Each conversation's unread replies, as last pushed or as first seen.
     @ObservationIgnored private var pushedUnread: [UUID: Int] = [:]
@@ -154,7 +154,7 @@ import os
         bots?.onChange = { [weak self] user, event in
             self?.push(event, to: user)
             self?.schedulePushes(for: event, of: user)
-            if case .callRinging(let call) = event { self?.ringAway(call, of: user) }
+            if case .callRinging(let call) = event { self?.ringThroughPush(call, of: user) }
         }
         bots?.onClosed = { [weak self] conversation, user in self?.close(conversation, for: user) }
         bots?.onHostChange = { [weak self] device, event in self?.push(event, toDevice: device) }
@@ -531,16 +531,19 @@ import os
         }
     }
 
-    /// Rings a bot's call on its owner's devices that gave a grant and are not following the Hub now, the
-    /// same rule as notifications of unread replies, through Noodle Push. Those following hear
-    /// `callRinging` itself; for the rest, away or with Noodle closed, this is how the call reaches them.
-    /// A grant Push says can never ring again is forgotten.
-    private func ringAway(_ call: LinkIncomingCall, of user: UUID) {
+    /// Rings a bot's call through Noodle Push on every one of its owner's devices that gave a grant, whether
+    /// or not it follows the Hub now. A phone that locked or put Noodle away still looks connected here
+    /// until its connection times out, and its suspended app cannot ring the `callRinging` it is sent, so
+    /// following is no sign it will ring. The phone reports a push and an in-app ring under the same call
+    /// ID, so it rings once either way. A grant Push says can never ring again is forgotten.
+    private func ringThroughPush(_ call: LinkIncomingCall, of user: UUID) {
         guard let callPusher else { return }
-        let away = access.devices.filter { $0.user == user && $0.callPush != nil && !isFollowing($0) }
-        guard !away.isEmpty else { return }
+        let granted = access.devices.filter { $0.user == user && $0.callPush != nil }
+        callPusher.log(granted.isEmpty ? "Not ringing through Noodle Push: no device of the caller's owner gave this Hub a grant"
+                                       : "Ringing \(granted.count) device(s) through Noodle Push")
+        guard !granted.isEmpty else { return }
         let name = bots?.name(ofBot: call.botID) ?? "Noodle"
-        for device in away {
+        for device in granted {
             guard let push = device.callPush else { continue }
             Task { [weak self] in
                 let result = await callPusher.ring(call, botName: name, with: push)
@@ -736,6 +739,8 @@ import os
             let kept = try push.checked(device: device.key, hub: self.key, now: now())
             access.setCallPush(kept.map { HubCallPush(grant: $0.grant, callKey: $0.callKey) }, for: device)
             Self.pushLog.notice("A device \(kept == nil ? "stopped ringing" : "rings", privacy: .public) through Noodle Push while away")
+            callPusher?.log(kept == nil ? "A device took back its grant to ring through Noodle Push"
+                                        : "A device gave a grant to ring it through Noodle Push")
             return .done
         case .toolCatalog:
             _ = try user(key)
@@ -1084,7 +1089,7 @@ import os
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
                           userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil,
                           signsInToBrowsers: browsers != nil, ringsThroughPush: callPusher != nil && bots != nil,
-                          callPushExpiresAt: device.callPush?.expiresAt)
+                          callPushExpiresAt: device.callPush?.expiresAt, explainsPauses: bots != nil)
     }
 
     /// Opens the port on the router, then keeps it open.

@@ -4,7 +4,21 @@
 
 ### Added
 
+- Bots on the Hub can send the new pasta effect, `messenger --effect pasta`, for a moment nobody is quite sure about.
+- Devices are told why a bot does not answer for now when it waits for Kick, so Noodle on the iPhone can show it with a Kick button.
+- Devices are also told when its owner's plan token limit holds a bot, with when it continues, or when the plan no longer lends it, so Noodle on the Mac and iPhone show it in the bot's status rather than only a grey dot.
 - Basecamp can be added as a tool.
+- The Usage window can group by user and show one user's usage, with tokens, cost and share per person. Usage from before the Hub kept whose bot it was counts for the bot's owner; usage of someone removed from the Hub, or of a bot deleted before then, shows as Unknown.
+- When a plan stops lending a model, its editor in Settings › Plans lists the bots that use it, which can't answer until they move, with Change Model… for each and Move All to… for every one on that harness. Settings › Bots marks them "model not lent", with Change Model… too.
+
+### Changed
+
+- The Hub logs how many devices each call rings through Noodle Push, or that none gave it a grant, and when a device gives or takes back its grant, under Calls in Console.
+- A bot can call its owner right away when they wrote to it in the last 5 minutes, such as to ask for a call, even if it called less than 30 minutes ago or already three times today. Calls it places on its own keep those limits.
+
+### Fixed
+
+- A bot's call rings its owner's iPhone through Noodle Push even right after the phone locks or Noodle goes to the background on it. Until then the Hub rang only in-app on a phone that still looked connected, which a suspended app cannot show, so the call never reached the phone.
 
 ### Fixed
 

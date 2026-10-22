@@ -144,4 +144,56 @@ import XCTest
         // Grace's own plan has no limit; what Ada's bot used is not hers.
         XCTAssertNil(f.hub.tokenLimits.holds[grace.id])
     }
+
+    /// Devices show why a held bot does not answer and when it continues, in its status rather than in the
+    /// conversation: its owner, and the people it is shared with. They hear to list the bots again.
+    func testAHeldBotTellsDevicesWhyAndWhenItContinues() throws {
+        let f = try fixture()
+        let grace = try f.hub.access.addUser(named: "Grace")
+        _ = try f.hub.bots.share(f.kai.id, with: [grace.id], for: f.ada)
+        f.runtime.start(agent: f.kai, repository: f.hub.repository)
+        f.hub.bots.checkForChanges()
+        XCTAssertNil(try f.hub.bots.bots(for: f.ada).first?.pause)
+        var events: [(UUID, LinkEvent)] = []
+        f.hub.bots.onChange = { events.append(($0, $1)) }
+
+        f.hub.access.setTokenLimit(HubTokenLimit(tokens: 400, length: 2, unit: .hours), in: f.plan)
+        use(f, input: 500, at: 0)
+        let pause = try XCTUnwrap(f.hub.bots.bots(for: f.ada).first?.pause)
+        XCTAssertEqual(pause.summary, "Paused: plan limit")
+        XCTAssertEqual(pause.until, start.addingTimeInterval(2 * 3600))
+        XCTAssertFalse(pause.kickable, "Kick cannot lift a plan's limit")
+        XCTAssertTrue(pause.detail?.contains("400 tokens your plan allows") == true, pause.detail ?? "")
+        let theirs = try XCTUnwrap(f.hub.bots.bots(for: grace).first?.pause)
+        XCTAssertEqual(theirs.summary, "Paused: plan limit")
+        XCTAssertEqual(theirs.until, pause.until)
+        f.hub.bots.checkForChanges()
+        XCTAssertTrue(events.contains { $0.0 == f.ada.id && $0.1 == .botsChanged })
+        XCTAssertTrue(events.contains { $0.0 == grace.id && $0.1 == .botsChanged })
+        // Nothing is written in the conversation.
+        XCTAssertTrue(try f.hub.repository.loadMessages(conversationID: f.conversation).isEmpty)
+
+        events = []
+        f.hub.access.setTokenLimit(nil, in: f.plan)
+        XCTAssertNil(try f.hub.bots.bots(for: f.ada).first?.pause)
+        f.hub.bots.checkForChanges()
+        XCTAssertTrue(events.contains { $0.0 == f.ada.id && $0.1 == .botsChanged })
+    }
+
+    /// A bot that waits for Kick says why to its owner, who can Kick it; the people it is shared with see it waits.
+    func testABotWaitingForKickSaysWhyToItsOwner() throws {
+        let f = try fixture()
+        let grace = try f.hub.access.addUser(named: "Grace")
+        _ = try f.hub.bots.share(f.kai.id, with: [grace.id], for: f.ada)
+        f.runtime.start(agent: f.kai, repository: f.hub.repository)
+        let process = try XCTUnwrap(f.processes().last)
+        process.set(.failed, failure: .recoveryFailed)
+        let pause = try XCTUnwrap(f.hub.bots.bots(for: f.ada).first?.pause)
+        XCTAssertEqual(pause.summary, "Paused: recovery interrupted")
+        XCTAssertTrue(pause.kickable)
+        XCTAssertEqual(pause.detail, f.runtime.snapshot(for: f.kai.id).detail)
+        XCTAssertEqual(try f.hub.bots.bots(for: grace).first?.pause, LinkBotPause(summary: "Paused"))
+        process.set(.ready)
+        XCTAssertNil(try f.hub.bots.bots(for: f.ada).first?.pause)
+    }
 }

@@ -39,7 +39,7 @@ public struct NoodlePushTransport: CallPushTransport {
     private let transport: any CallPushTransport
     private let service: URL
     private let now: () -> Date
-    private let log: (String) -> Void
+    let log: (String) -> Void
     /// While Push limits this Hub as a whole, by its address or its key, no ring is sent until then.
     private var pausedUntil: Date?
 

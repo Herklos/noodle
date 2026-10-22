@@ -21,7 +21,7 @@ final class ConversationEffectTests: XCTestCase {
         let command = repository.directory(for: bot.agent).appendingPathComponent(".agents/skills/messenger/messenger").path
         let list = MessengerCLI.runDirect(arguments: [command, "--list-effects"], environment: [:])
         XCTAssertEqual(list.exitCode, 0, list.standardError)
-        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(list.standardOutput.utf8)), ["confetti", "fireworks"])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(list.standardOutput.utf8)), ["confetti", "fireworks", "pasta"])
         let id = UUID()
         let arguments = [command, "--effect", "confetti", "--conversation", bot.conversation.id.uuidString,
                          "--request-id", id.uuidString]
@@ -191,6 +191,7 @@ final class ConversationEffectTests: XCTestCase {
         let directory = repository.directory(for: bot.agent)
         let text = try String(contentsOf: directory.appendingPathComponent(".agents/skills/messenger/SKILL.md"), encoding: .utf8)
         XCTAssertTrue(text.contains("--effect confetti"))
+        XCTAssertTrue(text.contains("--effect pasta"))
         XCTAssertTrue(text.contains("--list-effects"))
         XCTAssertTrue(text.contains("not that the user saw it"))
         XCTAssertTrue(text.contains("the next time the user has that conversation in front"))

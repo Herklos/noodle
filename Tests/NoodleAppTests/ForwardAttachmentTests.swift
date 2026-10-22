@@ -83,4 +83,62 @@ import XCTest
         XCTAssertTrue(f.store.setArchived(true, agentID: f.b.id))
         XCTAssertEqual(ids(""), [group.id])
     }
+
+    /// Dragging a file out of a conversation onto another one in the sidebar sends it there at once, as Forward… does.
+    func testDroppingAFileFromAConversationOnAnotherSendsItThere() async throws {
+        let f = try fixture(), file = try sentFile(f), group = try f.group()
+        f.store.selectedConversationID = f.directA.id
+        f.store.setDraft("Half a thought", for: f.directB.id)
+
+        XCTAssertTrue(f.store.drop([f.store.attachmentDragProvider(file)], onConversation: f.directB.id))
+        try await waitUntil { !f.store.messages(for: f.directB).isEmpty }
+        let message = try XCTUnwrap(f.store.messages(for: f.directB).last)
+        XCTAssertEqual(message.author, .user)
+        XCTAssertEqual(message.body, "Sent 1 attachment")
+        let copy = try XCTUnwrap(f.store.attachments(for: message).first)
+        XCTAssertNotEqual(copy.id, file.id)
+        XCTAssertEqual(try Data(contentsOf: f.store.attachmentFileURL(copy)), Data("Quarterly numbers".utf8))
+        XCTAssertEqual(f.store.draft(for: f.directB.id), "Half a thought")
+        XCTAssertTrue(f.store.pendingAttachments(for: f.directB.id).isEmpty, "sent, not staged")
+        XCTAssertEqual(f.store.selectedConversationID, f.directA.id, "the conversation in front stays")
+
+        XCTAssertTrue(f.store.drop([f.store.attachmentDragProvider(file)], onConversation: group.id))
+        try await waitUntil { !f.store.messages(for: group).isEmpty }
+        XCTAssertEqual(f.store.attachments(for: try XCTUnwrap(f.store.messages(for: group).last)).map(\.originalFilename), ["report.txt"])
+    }
+
+    /// A file from elsewhere, such as the Finder, opens the conversation it was dropped on with the file ready to send.
+    func testDroppingAnyOtherFileOnAConversationStagesItThere() async throws {
+        let f = try fixture()
+        f.store.selectedConversationID = f.directA.id
+        let url = f.runtime.root.appendingPathComponent("notes.txt")
+        try Data("Notes".utf8).write(to: url)
+        let provider = try XCTUnwrap(NSItemProvider(contentsOf: url))
+
+        XCTAssertTrue(f.store.drop([provider], onConversation: f.directB.id))
+        try await waitUntil { !f.store.pendingAttachments(for: f.directB.id).isEmpty }
+        XCTAssertEqual(f.store.pendingAttachments(for: f.directB.id).map(\.originalFilename), ["notes.txt"])
+        XCTAssertEqual(f.store.selectedConversationID, f.directB.id)
+        XCTAssertTrue(f.store.messages(for: f.directB).isEmpty)
+    }
+
+    func testAFileDroppedOnItsOwnOrAClosedConversationIsNotSent() async throws {
+        let f = try fixture(), file = try sentFile(f)
+        XCTAssertTrue(f.store.setArchived(true, agentID: f.b.id))
+        XCTAssertFalse(f.store.drop([f.store.attachmentDragProvider(file)], onConversation: f.directB.id))
+        XCTAssertFalse(f.store.drop([], onConversation: f.directA.id))
+        _ = f.store.drop([f.store.attachmentDragProvider(file)], onConversation: f.directA.id)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(f.store.messages(for: f.directA).count, 1)
+        XCTAssertTrue(f.store.pendingAttachments(for: f.directA.id).isEmpty)
+        XCTAssertTrue(f.store.messages(for: f.directB).isEmpty)
+    }
+
+    private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async throws {
+        let end = ContinuousClock.now.advanced(by: .seconds(15))
+        while !condition() {
+            guard ContinuousClock.now < end else { XCTFail("The drop did not finish"); throw CancellationError() }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
 }

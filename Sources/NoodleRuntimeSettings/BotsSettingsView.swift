@@ -123,6 +123,10 @@ public struct BotsSettingsView: View {
                         Text("·").foregroundStyle(.secondary)
                         AgentAppsStatusLabel(provider: provider)
                     }
+                    if let problem = store.botProblem(agent) {
+                        Text("·").foregroundStyle(.secondary)
+                        problem
+                    }
                 }
                 .font(.caption)
                 Group {

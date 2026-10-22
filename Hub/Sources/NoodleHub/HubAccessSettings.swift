@@ -213,6 +213,8 @@ struct HubPlanEditor: View {
     @State private var name = ""
     @State private var confirmingDelete = false
     @State private var error: String?
+    /// Counts moves to another model, which change no plan, so the list of bots on models not lent is read again.
+    @State private var moves = 0
 
     private var access: HubAccess { host.hub.access }
     private var plan: HubPlan? { access.plans.first { $0.id == planID } }
@@ -249,6 +251,7 @@ struct HubPlanEditor: View {
                             .onSubmit(saveName)
                     }
                     harnessList(plan)
+                    unlentList(plan)
                     limitList(plan)
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -328,6 +331,53 @@ struct HubPlanEditor: View {
             .frame(maxHeight: 360)
             .fixedSize(horizontal: false, vertical: true)
             .planPanel()
+        }
+    }
+
+    /// The bots of the plan's users on a model it no longer lends, which can't answer until they move to one it does:
+    /// each on its own, or all on a harness at once.
+    @ViewBuilder private func unlentList(_ plan: HubPlan) -> some View {
+        let _ = moves
+        let unlent = host.hub.bots.unlentModels().filter { $0.plan == plan.id }
+        if !unlent.isEmpty {
+            let titles = Dictionary(Self.harnesses(host).map { ($0.harness, $0.title) }) { first, _ in first }
+            let harnesses = Array(Set(unlent.map(\.harness)))
+                .sorted { (titles[$0] ?? $0.provider.displayName) < (titles[$1] ?? $1.provider.displayName) }
+            VStack(spacing: 0) {
+                ForEach(Array(harnesses.enumerated()), id: \.element) { index, harness in
+                    let bots = unlent.filter { $0.harness == harness }
+                    if index > 0 { Divider() }
+                    HStack {
+                        Label("\(titles[harness] ?? harness.provider.displayName): models not lent", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        if bots.count > 1 { changeModelMenu("Move All to…", bots) }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    ForEach(bots) { bot in
+                        Divider().padding(.leading, 12)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(bot.name)
+                                Text([access.users.first { $0.id == bot.owner }?.name, host.modelName(bot.model, on: harness)]
+                                        .compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            changeModelMenu("Change Model…", [bot])
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                    }
+                }
+            }
+            .planPanel()
+        }
+    }
+
+    private func changeModelMenu(_ title: String, _ bots: [HubUnlentModel]) -> some View {
+        HubChangeModelMenu(host: host, title: title, bots: bots) { failure in
+            moves += 1
+            error = failure
         }
     }
 

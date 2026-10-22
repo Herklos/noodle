@@ -85,6 +85,63 @@ final class AgentCallTests: XCTestCase {
         XCTAssertNoThrow(try repository.requestCall(agentID: bot.id, reason: "Next day", now: date.addingTimeInterval(24 * 60 * minute + minute)))
     }
 
+    private func write(_ author: MessageAuthor, in conversationID: UUID, at createdAt: Date) throws {
+        try repository.append(ChatMessage(conversationID: conversationID, author: author, body: "Can you call me",
+                                          createdAt: createdAt, delivery: .delivered))
+    }
+
+    /// Petko asked for a call, declined it by accident and asked again: a call within minutes of the
+    /// person writing counts as asked for, so neither the cooldown nor the daily limit holds it back.
+    func testACallThePersonAskedForSkipsTheCooldownAndTheDailyLimit() throws {
+        let made = try repository.createAgent(named: "Theo", harnessIdentifier: HarnessProvider.codex.rawValue)
+        let bot = made.agent
+        let minute: TimeInterval = 60
+        for (index, offset) in [0, 31, 62].enumerated() {
+            let call = try repository.requestCall(agentID: bot.id, reason: "Call \(index)", now: date.addingTimeInterval(Double(offset) * minute))
+            _ = try repository.endCall(agentID: bot.id, id: call.id)
+        }
+        try write(.user, in: made.conversation.id, at: date.addingTimeInterval(63 * minute))
+        let asked = try repository.requestCall(agentID: bot.id, reason: "You asked me to call", now: date.addingTimeInterval(65 * minute))
+        // Still one call ringing at a time.
+        XCTAssertTrue(refusal { try repository.requestCall(agentID: bot.id, reason: "Again", now: date.addingTimeInterval(65 * minute + 10)) }
+            .contains("still ringing"))
+        _ = try repository.endCall(agentID: bot.id, id: asked.id)
+        // One message asks for one call: calling again needs them to write again.
+        XCTAssertTrue(refusal { try repository.requestCall(agentID: bot.id, reason: "Again", now: date.addingTimeInterval(66 * minute)) }
+            .contains("less than 30 minutes ago"))
+        try write(.user, in: made.conversation.id, at: date.addingTimeInterval(66 * minute))
+        XCTAssertNoThrow(try repository.requestCall(agentID: bot.id, reason: "Call me again", now: date.addingTimeInterval(67 * minute)))
+        XCTAssertTrue(MessengerCommandKind.call.guidance.contains("in the last 5 minutes and after your last call"))
+    }
+
+    func testAMessageOlderThanFiveMinutesDoesNotAskForACall() throws {
+        let made = try repository.createAgent(named: "Theo", harnessIdentifier: HarnessProvider.codex.rawValue)
+        let first = try repository.requestCall(agentID: made.agent.id, reason: "One", now: date)
+        _ = try repository.endCall(agentID: made.agent.id, id: first.id)
+        try write(.user, in: made.conversation.id, at: date.addingTimeInterval(60))
+        let refused = refusal { try repository.requestCall(agentID: made.agent.id, reason: "Two", now: date.addingTimeInterval(60 + 5 * 60)) }
+        XCTAssertTrue(refused.contains("less than 30 minutes ago"))
+        XCTAssertTrue(refused.contains("you can call within 5 minutes of their message"), refused)
+    }
+
+    /// Only the person writing in the bot's own conversation asks for a call: not the bot itself, other
+    /// bots, Noodle, or the person writing somewhere else.
+    func testOnlyThePersonWritingInTheBotsConversationAsksForACall() throws {
+        let made = try repository.createAgent(named: "Theo", harnessIdentifier: HarnessProvider.codex.rawValue)
+        let other = try repository.createAgent(named: "Kai", harnessIdentifier: HarnessProvider.codex.rawValue).agent
+        let group = try repository.createGroup(named: "Team", participantIDs: [made.agent.id, other.id],
+                                               existingAgents: [made.agent, other])
+        let first = try repository.requestCall(agentID: made.agent.id, reason: "One", now: date)
+        _ = try repository.endCall(agentID: made.agent.id, id: first.id)
+        let later = date.addingTimeInterval(2 * 60)
+        try write(.agent(made.agent.id), in: made.conversation.id, at: later)
+        try write(.agent(other.id), in: made.conversation.id, at: later)
+        try write(.system, in: made.conversation.id, at: later)
+        try write(.user, in: group.id, at: later)
+        XCTAssertTrue(refusal { try repository.requestCall(agentID: made.agent.id, reason: "Two", now: later.addingTimeInterval(60)) }
+            .contains("less than 30 minutes ago"))
+    }
+
     func testACallThatRangWhileNobodyEndedItStopsBlockingTheNextOne() throws {
         let bot = try repository.createAgent(named: "Theo", harnessIdentifier: HarnessProvider.codex.rawValue).agent
         let stale = try repository.requestCall(agentID: bot.id, reason: "One", now: date)

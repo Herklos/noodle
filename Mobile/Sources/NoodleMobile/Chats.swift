@@ -265,6 +265,29 @@ enum HubThread: HubConversation {
     /// The bot's phase as its dot shows it: offline while its Hub does not answer.
     func phase(of agent: LinkBot) -> LinkBotPhase? { HubConnection(pairing).phase(of: agent.phase) }
 
+    /// Why a bot does not answer for now, as its Hub last listed it while it answers. Nil from a Hub that does not say.
+    func pause(of agent: LinkBot) -> LinkBotPause? {
+        guard pairing.status?.explainsPauses == true, HubConnection(pairing) != .notConnected else { return nil }
+        return self.agent(agent.id)?.pause
+    }
+
+    /// Why a conversation's bots do not answer, in its row and over it; nil while they run.
+    func pauseSummary(for thread: HubThread, now: Date = Date()) -> String? {
+        Self.pauseSummary(for: thread, members: thread.group.map(members(of:)) ?? [], pause: pause(of:), now: now)
+    }
+
+    /// A bot's own conversation says why it waits and when it continues; a group names the bots that wait.
+    static func pauseSummary(for thread: HubThread, members: [LinkBot], pause: (LinkBot) -> LinkBotPause?,
+                             now: Date = Date()) -> String? {
+        switch thread {
+        case .bot(let bot):
+            return pause(bot)?.shown(now: now)
+        case .group:
+            let paused = members.filter { $0.archivedAt == nil && pause($0) != nil }
+            return paused.isEmpty ? nil : "Paused: " + paused.map(\.draft.name).joined(separator: ", ")
+        }
+    }
+
     /// Whether a bot has written since the conversation was last opened here.
     func isUnread(_ conversation: some HubConversation) -> Bool {
         guard let seen, let reply = messages(of: conversation).last(where: { if case .bot = $0.author { true } else { false } }) else {
@@ -1287,6 +1310,8 @@ struct AgentsView: View {
     @State private var chats: [HubChats] = []
     /// The space shown: a Hub's by `CurrentHub.space`, or one the person made by its ID; empty for All.
     @AppStorage("space") private var space = ""
+    /// The joined Hubs' spaces in the person's order, after All.
+    @AppStorage(HubSpaceOrder.key) private var hubOrder = ""
     @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
     /// The spaces the person made, kept on this phone.
     @State private var spaceList = SpaceList(file: URL.applicationSupportDirectory.appendingPathComponent("spaces.json"))
@@ -1322,6 +1347,9 @@ struct AgentsView: View {
 
     /// The Hub whose bots and groups alone are shown, with the pins it keeps; nil shows All, with this phone's pins.
     private var spaceChats: HubChats? { chats.first { CurrentHub.space(of: $0.pairing) == space } }
+
+    /// The joined Hubs in the order the person put their spaces in.
+    private var spaceHubs: [HubChats] { HubSpaceOrder(stored: hubOrder).sorted(chats) { CurrentHub.space(of: $0.pairing) } }
 
     private var rows: [Row] {
         let shown = spaceChats.map { [$0] } ?? chats
@@ -1448,7 +1476,11 @@ struct AgentsView: View {
                 Button("Create") { saveSpace() }
                     .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .sheet(isPresented: $editingSpaces) { SpaceEditor(list: spaceList, change: { changeSpaces($0) }) }
+            .sheet(isPresented: $editingSpaces) {
+                SpaceEditor(list: spaceList,
+                            hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
+                            moveHubs: moveHubs, change: { changeSpaces($0) })
+            }
             .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread) }
         }
         .onChange(of: opening, initial: true, open)
@@ -1486,7 +1518,7 @@ struct AgentsView: View {
         Menu {
             Picker("Space", selection: ticked) {
                 Text("All").tag("")
-                ForEach(chats, id: \.pairing.directory) { hub in
+                ForEach(spaceHubs, id: \.pairing.directory) { hub in
                     Text(hub.pairing.hubName).tag(CurrentHub.space(of: hub.pairing))
                 }
             }
@@ -1497,7 +1529,7 @@ struct AgentsView: View {
             }
             Divider()
             Button { name(SpaceNaming(adding: nil)) } label: { Label("New Space…", systemImage: "plus") }
-            if !spaceList.spaces.isEmpty {
+            if !spaceList.spaces.isEmpty || chats.count > 1 {
                 Button { editingSpaces = true } label: { Label("Edit Spaces…", systemImage: "pencil") }
             }
         } label: {
@@ -1539,6 +1571,12 @@ struct AgentsView: View {
     private func joinShownSpace(_ hub: HubChats, _ conversation: some HubConversation) {
         guard let customSpace else { return }
         changeSpaces { try spaceList.setMember(true, hub.spaceMember(of: conversation), of: customSpace.id) }
+    }
+
+    private func moveHubs(fromOffsets source: IndexSet, toOffset destination: Int) {
+        var order = HubSpaceOrder(stored: hubOrder)
+        order.move(spaceHubs.map { CurrentHub.space(of: $0.pairing) }, fromOffsets: source, toOffset: destination)
+        hubOrder = order.stored
     }
 
     @discardableResult
@@ -1643,7 +1681,7 @@ struct AgentsView: View {
     /// What the widgets show, once every Hub's list is known or could not be, so they never show a Hub's bots gone.
     private var widgetSource: BotWidgetPublisher.Source? {
         guard chats.count == pairings.count, chats.allSatisfy({ $0.isLoaded || $0.error != nil }) else { return nil }
-        return BotWidgetPublisher.source(chats: chats, spaces: spaceList.spaces)
+        return BotWidgetPublisher.source(chats: spaceHubs, spaces: spaceList.spaces)
     }
 
     private func openChosen() {
@@ -1765,9 +1803,14 @@ private struct AgentRow: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
+                // Why its bots do not answer takes the preview's first line, as on the Mac, so the row keeps its height.
+                let pause = chats.pauseSummary(for: thread)
+                if let pause {
+                    Text(pause).font(.subheadline).foregroundStyle(.red).lineLimit(1)
+                }
                 Text(latest.map { MessageSegment.previewText($0.body) } ?? thread.about)
                     .font(.subheadline).foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(pause == nil ? 2 : 1)
             }
         }
         .padding(.vertical, 4)
@@ -1962,6 +2005,63 @@ private struct ChatEffectsOverlay: View {
     }
 }
 
+/// Over a conversation while its bot does not answer: why, when it continues, and Kick for its owner where Kick helps.
+/// In a group, Kick starts the first bot that waits; the next one shows once it is back.
+private struct PauseBar: View {
+    let chats: HubChats
+    let thread: HubThread
+    let summary: String
+    let onProblem: (String) -> Void
+    @State private var kickConfirmation: LinkKickConfirmation?
+    @State private var kicking = false
+
+    private var kickable: LinkBot? {
+        let bots = thread.group.map(chats.members(of:)) ?? thread.bot.flatMap { chats.agent($0.id) }.map { [$0] } ?? []
+        return bots.first { $0.owner == nil && chats.pause(of: $0)?.kickable == true }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(summary)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.red)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            if let bot = kickable {
+                Button("Kick") { run { kickConfirmation = try await chats.kick(bot) } }
+                    .disabled(kicking)
+                    .accessibilityLabel("Kick \(bot.draft.name)")
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: Capsule())
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .alert(kickConfirmation?.title ?? "Recover Bot", isPresented: Binding(
+            get: { kickConfirmation != nil }, set: { if !$0 { kickConfirmation = nil } }
+        ), presenting: kickConfirmation) { confirmation in
+            if let bot = kickable {
+                Button(confirmation.confirmTitle) { run { try await chats.confirmKick(confirmation, for: bot) } }
+                if confirmation.offersNewSession {
+                    Button("New Session") { run { try await chats.startNewSession(bot) } }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
+    }
+
+    private func run(_ action: @escaping () async throws -> Void) {
+        kicking = true
+        Task {
+            do { try await action() } catch { onProblem(error.localizedDescription) }
+            kicking = false
+        }
+    }
+}
+
 struct ChatView: View {
     /// The height of a one-line message field, which the buttons beside it match.
     static let controlHeight: CGFloat = 48
@@ -2110,7 +2210,13 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         // The conversation stays usable during a call; the call is only this bar.
         .safeAreaInset(edge: .top) {
-            if let call = chats.calls.call, call.threadID == thread.id { CallBar(calls: chats.calls, call: call) }
+            VStack(spacing: 0) {
+                if let call = chats.calls.call, call.threadID == thread.id { CallBar(calls: chats.calls, call: call) }
+                // Why its bots do not answer, in place of chat messages saying so.
+                if let pause = chats.pauseSummary(for: thread) {
+                    PauseBar(chats: chats, thread: thread, summary: pause) { problem = $0 }
+                }
+            }
         }
         .onChange(of: chats.calls.problem) { _, reason in
             guard let reason else { return }
@@ -3402,20 +3508,39 @@ struct ThreadAvatar: View {
 
 /// The spaces the person made, to put in order, rename and delete.
 private struct SpaceEditor: View {
+    /// A joined Hub's space, which can only be moved.
+    struct Hub: Identifiable {
+        let key: String
+        let name: String
+        var id: String { key }
+    }
+
     let list: SpaceList
+    /// In the person's order; with one, there is nothing to put in order.
+    let hubs: [Hub]
+    let moveHubs: (IndexSet, Int) -> Void
     let change: (() throws -> Void) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(list.spaces) { space in
-                    SpaceEditorRow(space: space) { name in change { try list.rename(space.id, to: name) } }
+                // All stays first, so it is not listed.
+                if hubs.count > 1 {
+                    Section {
+                        ForEach(hubs) { Text($0.name) }
+                            .onMove(perform: moveHubs)
+                    }
                 }
-                .onMove { source, destination in change { try list.move(fromOffsets: source, toOffset: destination) } }
-                .onDelete { offsets in
-                    let deleted = offsets.map { list.spaces[$0].id }
-                    change { for id in deleted { try list.delete(id) } }
+                Section {
+                    ForEach(list.spaces) { space in
+                        SpaceEditorRow(space: space) { name in change { try list.rename(space.id, to: name) } }
+                    }
+                    .onMove { source, destination in change { try list.move(fromOffsets: source, toOffset: destination) } }
+                    .onDelete { offsets in
+                        let deleted = offsets.map { list.spaces[$0].id }
+                        change { for id in deleted { try list.delete(id) } }
+                    }
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -3426,7 +3551,7 @@ private struct SpaceEditor: View {
             }
         }
         .onChange(of: list.spaces.isEmpty) { _, isEmpty in
-            if isEmpty { dismiss() }
+            if isEmpty, hubs.count < 2 { dismiss() }
         }
     }
 }

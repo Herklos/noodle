@@ -350,7 +350,10 @@ final class SpokenAudio: @unchecked Sendable {
         owners[id] = line
         // iOS refuses calls while Do Not Disturb or Focus silences this app, and calls it does not take.
         let reported = await withCheckedContinuation { continuation in
-            provider.reportNewIncomingCall(with: id, update: Self.incoming(name)) { error in continuation.resume(returning: error == nil) }
+            provider.reportNewIncomingCall(with: id, update: Self.incoming(name)) { error in
+                if let error { Self.logRefusal(error, of: "a call from the Hub") }
+                continuation.resume(returning: error == nil)
+            }
         }
         if !reported, owners[id] === line { owners[id] = nil }
         return reported
@@ -371,6 +374,7 @@ final class SpokenAudio: @unchecked Sendable {
             pushed.insert(id)
         }
         provider.reportNewIncomingCall(with: id, update: Self.incoming(name)) { error in
+            if takes, let error { Self.logRefusal(error, of: "a pushed call") }
             Task { @MainActor [weak self] in
                 if takes, error != nil, let self, self.pushed.remove(id) != nil, self.owners[id] === line { self.owners[id] = nil }
                 if line == nil, error == nil { self?.provider?.reportCall(with: id, endedAt: nil, reason: .failed) }
@@ -422,6 +426,18 @@ final class SpokenAudio: @unchecked Sendable {
             guard error != nil else { return }
             Task { @MainActor in _ = self?.ending.remove(id) }
         }
+    }
+
+    /// Why iOS would not show a call: a Focus or Do Not Disturb, a blocked caller, or a call it already shows.
+    nonisolated private static func logRefusal(_ error: Error, of call: String) {
+        let reason = switch (error as? CXErrorCodeIncomingCallError)?.code {
+        case .filteredByDoNotDisturb: "Do Not Disturb or a Focus silences Noodle"
+        case .filteredByBlockList: "the caller is blocked"
+        case .callUUIDAlreadyExists: "it is on the call screen already"
+        case .unentitled: "this build may not report calls"
+        default: "error \((error as NSError).domain) \((error as NSError).code)"
+        }
+        CallPushes.log.error("iOS did not put \(call, privacy: .public) on the call screen: \(reason, privacy: .public)")
     }
 
     private static func incoming(_ name: String) -> CXCallUpdate {

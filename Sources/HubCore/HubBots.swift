@@ -8,6 +8,18 @@ import NoodleCore
 import NoodleRuntime
 import NoodleVoicePeer
 
+/// A bot that cannot answer because its owner's plan stopped lending its model, though it still lends the harness.
+public struct HubUnlentModel: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let name: String
+    public let owner: UUID
+    public let plan: UUID
+    public let harness: HubHarness
+    public let model: String
+    /// The models the plan lends on the harness, any of which the bot can move to.
+    public let lent: [String]
+}
+
 /// Bots paired devices keep on the Hub. Each belongs to one user, runs on a harness that
 /// user's plan lends, and talks with that user, alone or in groups of their bots, and with
 /// whoever else they share it with, each in a conversation of their own.
@@ -69,6 +81,8 @@ import NoodleVoicePeer
     private var phases: [UUID: AgentRuntimePhase] = [:]
     /// Each bot's status when last checked; an absent bot has not been checked yet.
     private var statuses: [UUID: String?] = [:]
+    /// Why each bot was last reported paused; an absent bot has not been checked yet.
+    private var pauses: [UUID: LinkBotPause?] = [:]
     /// How many checks have been applied, so a check read in the background yields to one made meanwhile.
     private var checks = 0
     /// The latest Kick a device was asked to confirm, per bot. The runtime refuses it once stale.
@@ -834,6 +848,25 @@ import NoodleVoicePeer
         return AgentRuntimePhase(rawValue: phase.rawValue) ?? .offline
     }
 
+    /// Why a bot here does not answer for now, as its owner's devices show it, or someone's it is shared with:
+    /// its owner's plan holds it, or it waits for Kick. Nil while it runs, and for one a device hosts.
+    public func pause(of agent: AgentRecord, forOwner: Bool = true) -> LinkBotPause? {
+        guard access.host(ofBot: agent.id) == nil,
+              let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }) else { return nil }
+        if let tokenLimits, let until = tokenLimits.holds[owner.id] {
+            let detail = forOwner ? tokenLimits.refusal(for: owner) : tokenLimits.refusal(forGuestOf: agent.displayName, ownedBy: owner.id)
+            return LinkBotPause(summary: "Paused: plan limit", until: until, detail: detail)
+        }
+        if !lendsBot(agent, to: owner) {
+            return LinkBotPause(summary: "Paused: not in plan",
+                                detail: forOwner ? "Your plan no longer lends this bot’s harness or model." : nil)
+        }
+        let snapshot = runtime.snapshot(for: agent.id)
+        guard let summary = snapshot.pauseSummary else { return nil }
+        // Only its owner can Kick it; the people it is shared with see that it waits.
+        return forOwner ? LinkBotPause(summary: summary, detail: snapshot.detail, kickable: true) : LinkBotPause(summary: "Paused")
+    }
+
     /// Keeps a bot that runs on the user's device here, or changes its name, description and picture.
     /// The people it is shared with talk to it here; nothing of it runs here.
     public func publish(_ id: UUID, _ draft: LinkBotDraft, for user: HubUser, on device: HubDevice) throws -> LinkHostedBot {
@@ -1327,6 +1360,15 @@ import NoodleVoicePeer
             // A bot sets its status through Messenger; devices list the bots again to see it.
             if let known = statuses[agent.id], known != agent.status { restated.insert(owner) }
             statuses[agent.id] = .some(agent.status)
+            // Devices list the bots again to see why one paused, or that it no longer is; its guests too.
+            // Its detail may say "in 5 hours", which changes by itself.
+            var pause = self.pause(of: agent)
+            pause?.detail = nil
+            if let known = pauses[agent.id], known != pause {
+                restated.insert(owner)
+                restated.formUnion(conversations.filter { $0.participantIDs == [agent.id] }.compactMap(\.guest?.id))
+            }
+            pauses[agent.id] = .some(pause)
         }
         restated.forEach { onChange?($0, .botsChanged) }
     }
@@ -1476,6 +1518,49 @@ import NoodleVoicePeer
         let profile: UUID?
         do { profile = try repository.loadAgentHarnessProfile(agent) } catch { return false }
         return access.lends(HubHarness(provider: provider, profile: profile), model: agent.modelIdentifier, to: user)
+    }
+
+    /// The bots here whose owner's plan still lends their harness but no longer their model, by name.
+    public func unlentModels() -> [HubUnlentModel] {
+        ((try? repository.loadAgents()) ?? []).compactMap(unlentModel).sorted {
+            $0.name == $1.name ? $0.id.uuidString < $1.id.uuidString : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// Nil when the bot's model is lent, or a model change would not make it answer: it runs on a device,
+    /// on a harness the plan does not lend, or on the harness default.
+    public func unlentModel(of agent: AgentRecord) -> HubUnlentModel? {
+        guard !access.isPersonal, !isHidden(agent.id), access.host(ofBot: agent.id) == nil, let model = agent.modelIdentifier,
+              let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }),
+              let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)) else { return nil }
+        let profile: UUID?
+        do { profile = try repository.loadAgentHarnessProfile(agent) } catch { return nil }
+        let harness = HubHarness(provider: provider, profile: profile)
+        guard access.lends(harness, to: owner), !access.lends(harness, model: model, to: owner),
+              let lent = access.models(on: harness, for: owner) else { return nil }
+        return HubUnlentModel(id: agent.id, name: agent.displayName, owner: owner.id, plan: owner.plan,
+                              harness: harness, model: model, lent: lent.sorted())
+    }
+
+    /// Moves a bot here to a model its owner's plan lends, as its owner would in Edit Bot.
+    public func changeModel(of id: UUID, to model: String) throws {
+        guard let agent = try repository.loadAgents().first(where: { $0.id == id }), access.host(ofBot: id) == nil,
+              let owner = access.owner(ofBot: id).flatMap({ id in access.users.first { $0.id == id } }),
+              let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)) else {
+            throw LinkError("This bot’s model can’t be changed here.")
+        }
+        let harness = HubHarness(provider: provider, profile: try repository.loadAgentHarnessProfile(agent))
+        guard access.lends(harness, model: model, to: owner) else {
+            throw LinkError("\(owner.name)’s plan does not lend \(model) on \(provider.displayName).")
+        }
+        let updated = try repository.updateAgent(
+            agent, displayName: agent.displayName, harnessIdentifier: agent.harnessIdentifier, modelIdentifier: model,
+            reasoningEffort: agent.reasoningEffort, publicDescription: agent.publicDescription,
+            avatarSymbolName: agent.avatarSymbolName, avatarColorIndex: agent.avatarColorIndex, avatarImageData: agent.avatarImageData)
+        if running || watching { runtime.restart(agent: updated, repository: repository) }
+        onChange?(owner.id, .botsChanged)
+        tellGuests(of: id)
+        onBotsEdited?()
     }
 
     /// Reads the user's current plan, not the one they were on when `user` was read.
@@ -1640,7 +1725,7 @@ import NoodleVoicePeer
                        // On the owner's own Mac, those are people on another Hub.
                        sharedWith: access.isPersonal ? [] : direct.compactMap(\.guest?.id),
                        canCall: agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.voices.isEmpty == false,
-                       pinnedAt: pins[conversation.id])
+                       pinnedAt: pins[conversation.id], pause: pause(of: agent))
     }
 
     /// A bot as someone it is shared with sees it: whose it is and whether it is working, nothing of how it works.
@@ -1654,7 +1739,7 @@ import NoodleVoicePeer
                        phase: LinkBotPhase(rawValue: phase(of: agent).rawValue),
                        readUpTo: readMarks[conversation.id], background: background(of: conversation.id), owner: owner.name,
                        canCall: agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.voices.isEmpty == false,
-                       pinnedAt: pins[conversation.id])
+                       pinnedAt: pins[conversation.id], pause: pause(of: agent, forOwner: false))
     }
 
     /// Pictures' sizes, read once each: a stored file never changes.

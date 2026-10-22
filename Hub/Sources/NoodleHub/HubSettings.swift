@@ -11,6 +11,12 @@ enum HubSettingsTab: Hashable {
     case harnesses, users, plans, bots, groups, conversation, network, tools, companions, updates
 }
 
+/// What failed in Settings, shown in an alert until dismissed.
+struct HubSettingsProblem: Equatable {
+    let title: String
+    let message: String
+}
+
 /// Gives the shared Harness and Bots settings what they need from the Hub.
 /// The Hub has no bot editor yet; a bot's profile holds its folder, activity and New Session.
 @MainActor @Observable final class HubSettingsHost: BotSettingsHost {
@@ -18,8 +24,8 @@ enum HubSettingsTab: Hashable {
     let setup: HarnessSetupController
     let mcp: MCPController
     var selectedTab: HubSettingsTab = .network
-    /// Why archiving a bot or group failed, shown until dismissed.
-    var problem: String?
+    /// Why archiving a bot or group, or changing a bot's model, failed, shown until dismissed.
+    var problem: HubSettingsProblem?
     let activityWindows = AgentActivityWindows()
 
     init(hub: Hub) {
@@ -49,9 +55,28 @@ enum HubSettingsTab: Hashable {
     func canArchive(_ agent: AgentRecord) -> Bool { true }
     func setArchived(_ archived: Bool, agent: AgentRecord) { setArchived(archived, id: agent.id) }
 
+    func botProblem(_ agent: AgentRecord) -> AnyView? {
+        hub.bots.unlentModel(of: agent).map { AnyView(HubUnlentModelLabel(host: self, bot: $0)) }
+    }
+
     /// For the bot's or group's owner, on all their devices.
     func setArchived(_ archived: Bool, id: UUID) {
-        do { try hub.bots.setArchived(archived, id: id) } catch { problem = error.localizedDescription }
+        do { try hub.bots.setArchived(archived, id: id) } catch {
+            problem = HubSettingsProblem(title: "Could Not Archive", message: error.localizedDescription)
+        }
+    }
+
+    func modelName(_ model: String, on harness: HubHarness) -> String {
+        runtime.models(for: harness.provider.rawValue).first { $0.id == model }?.displayName ?? model
+    }
+
+    /// Moves each bot to `model`, for its owner, on all their devices; returns why one could not move.
+    func changeModel(of bots: [HubUnlentModel], to model: String) -> String? {
+        var failure: String?
+        for bot in bots {
+            do { try hub.bots.changeModel(of: bot.id, to: model) } catch { failure = error.localizedDescription }
+        }
+        return failure
     }
 
     /// Gives the Hub's bots Noodle Applet's skill as soon as it is installed.
@@ -155,10 +180,10 @@ struct HubSettingsView: View {
                 .tabItem { Label("Update", systemImage: "arrow.triangle.2.circlepath") }
                 .tag(HubSettingsTab.updates)
         }
-        .alert("Could Not Archive", isPresented: Binding(get: { host.problem != nil }, set: { if !$0 { host.problem = nil } })) {
+        .alert(host.problem?.title ?? "", isPresented: Binding(get: { host.problem != nil }, set: { if !$0 { host.problem = nil } })) {
             Button("OK") { host.problem = nil }
         } message: {
-            Text(host.problem ?? "")
+            Text(host.problem?.message ?? "")
         }
         .background(SettingsTabBadge(counts: ["Harness": harnessesNeedingAttention,
                                               "Tools": Self.showsAgentSettings ? toolsNeedingAttention : 0,

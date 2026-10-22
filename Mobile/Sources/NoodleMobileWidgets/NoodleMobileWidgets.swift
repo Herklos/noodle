@@ -7,6 +7,7 @@ struct NoodleMobileWidgets: WidgetBundle {
     var body: some Widget {
         BotWidget()
         BotsWidget()
+        AgentControl()
     }
 }
 

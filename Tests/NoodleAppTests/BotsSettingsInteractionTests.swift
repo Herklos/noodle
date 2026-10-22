@@ -65,6 +65,25 @@ import NoodleCore
         XCTAssertLessThan(settings.fittingSize.height, 500)
     }
 
+    /// Opening Bots or Groups builds each row once, whether the list fits or scrolls.
+    func testTheRowListBuildsEachRowOnce() async throws {
+        struct Item: Identifiable { let id: Int }
+        for count in [3, 40] {
+            final class Counter { var built = 0 }
+            let counter = Counter()
+            let list = host(Form {
+                Section {
+                    SettingsRowList((1...count).map(Item.init)) { item in
+                        let _ = counter.built += 1
+                        Text("Row \(item.id)")
+                    }
+                }
+            }.formStyle(.grouped).frame(width: 680))
+            _ = try await control("Row 1", in: list)
+            XCTAssertEqual(counter.built, count, "\(count) rows")
+        }
+    }
+
     func testALongListShowsItsScrollBarOnTheSectionEdge() async throws {
         let f = try fixture()
         for index in 1...20 { _ = try f.group(name: "Group \(index)") }

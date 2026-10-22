@@ -140,7 +140,22 @@ public enum IconImage {
 
     /// The picture shrunk until its shorter side is `pixels`, never enlarged. SwiftUI shrinks a large
     /// picture into a small badge by sampling too few of its pixels, which looks pixelated.
+    /// Badges are drawn again whenever a list they are in changes, so each copy is kept rather than decoded again.
     public static func thumbnail(_ data: Data, pixels: Int) -> CGImage? {
+        let key = ThumbnailKey(data: data, pixels: pixels)
+        if let cached = thumbnails.object(forKey: key) { return cached.image }
+        guard let image = makeThumbnail(data, pixels: pixels) else { return nil }
+        thumbnails.setObject(CachedThumbnail(image), forKey: key, cost: image.bytesPerRow * image.height)
+        return image
+    }
+
+    private static let thumbnails: NSCache<ThumbnailKey, CachedThumbnail> = {
+        let cache = NSCache<ThumbnailKey, CachedThumbnail>()
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+
+    private static func makeThumbnail(_ data: Data, pixels: Int) -> CGImage? {
         guard pixels > 0, let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
@@ -160,4 +175,32 @@ public enum IconImage {
         }
         return try prepare(Data(contentsOf: url), encoding: encoding)
     }
+}
+
+/// The whole picture is compared, so an equal copy finds the same thumbnail and a changed picture never does.
+private final class ThumbnailKey: NSObject {
+    let data: Data
+    let pixels: Int
+
+    init(data: Data, pixels: Int) {
+        self.data = data
+        self.pixels = pixels
+    }
+
+    override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(data)
+        hasher.combine(pixels)
+        return hasher.finalize()
+    }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? ThumbnailKey else { return false }
+        return pixels == other.pixels && data == other.data
+    }
+}
+
+private final class CachedThumbnail {
+    let image: CGImage
+    init(_ image: CGImage) { self.image = image }
 }
