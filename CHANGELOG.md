@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-10-22
+
 ### Added
 
 - Bots can shower a chat with pasta for a moment nobody is quite sure about: `messenger --effect pasta` drops penne, farfalle, fusilli and macaroni from the top of the conversation. Like confetti, it plays once in the conversation you have open and shows a still 🍝 under Reduce Motion.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-22
+
 ### Added
 
 - Bots on the Hub can send the new pasta effect, `messenger --effect pasta`, for a moment nobody is quite sure about.
@@ -19,9 +21,6 @@
 ### Fixed
 
 - A bot's call rings its owner's iPhone through Noodle Push even right after the phone locks or Noodle goes to the background on it. Until then the Hub rang only in-app on a phone that still looked connected, which a suspended app cannot show, so the call never reached the phone.
-
-### Fixed
-
 - Noodle Hub no longer grows in memory after Settings was opened once: the closed Settings window kept updating out of sight for as long as the app ran.
 
 ## [0.39.1] - 2026-10-22

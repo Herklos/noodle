@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-22
+
 ### Added
 
 - The pasta effect: penne, farfalle, fusilli and macaroni fall over a chat when a bot sends it for a moment nobody is quite sure about. Needs the Hub updated.
@@ -18,7 +20,6 @@
 ### What to Test
 
 - On iOS 27.1, open a conversation: check the message field's bottom lines up with the bots list's search. Tap the field: check the last message sits right above it with no gap, and still does after sending a message.
-
 - Lock the phone, then right away have a bot call you: it rings on the call screen. With a Focus that doesn't allow Noodle, the missed call also shows as a notification.
 - Ask a bot to send the pasta effect, then open its conversation: check pasta shapes in warm colours fall from the top and sway, once. With Reduce Motion on, check a still 🍝 shows instead.
 - With two or more Hubs joined, open the space menu and choose Edit Spaces…: drag a Hub above another, then check the menu lists them in that order after All, and still does after closing and reopening Noodle. Check the Hubs can't be renamed or deleted there.
