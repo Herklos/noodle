@@ -13,8 +13,11 @@
 ### Fixed
 
 - A bot's call that iOS keeps off the call screen, as while a Focus silences Noodle, also shows as a missed call notification instead of nothing. Noodle logs each step of a call rung through Noodle Push, under Calls in Console, to tell why a call didn't ring.
+- On iOS 27.1 the message field sits as low as the search in the bots list again, and with the keyboard up a conversation ends right above the field instead of leaving a gap under its last message.
 
 ### What to Test
+
+- On iOS 27.1, open a conversation: check the message field's bottom lines up with the bots list's search. Tap the field: check the last message sits right above it with no gap, and still does after sending a message.
 
 - Lock the phone, then right away have a bot call you: it rings on the call screen. With a Focus that doesn't allow Noodle, the missed call also shows as a notification.
 - Ask a bot to send the pasta effect, then open its conversation: check pasta shapes in warm colours fall from the top and sway, once. With Reduce Motion on, check a still 🍝 shows instead.
