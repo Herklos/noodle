@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Basecamp can be added as a tool.
+
 ## [0.72.1] - 2026-10-22
 
 ### Added

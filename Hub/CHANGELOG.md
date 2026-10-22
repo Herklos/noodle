@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Basecamp can be added as a tool.
+
 ## [0.39.1] - 2026-10-22
 
 ### Added
