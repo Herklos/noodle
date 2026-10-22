@@ -24,6 +24,9 @@ import WebKit
     /// From this many tabs, opening another asks the bot to close the ones it no longer needs,
     /// well before the 100-tab limit.
     static let manyTabs = 30
+    static let tabLimit = 100
+    /// What a bot is told at the tab limit, so it can make room itself.
+    static let botTabLimit = "This browser has reached its 100-tab limit. Close tabs you no longer need (tabs, close) and try again."
     var willRemoveBrowser: ((UUID) -> Void)?
     private var server: BrowserConnectionServer?
     private var activeDownloads: [ObjectIdentifier: (download: WKDownload?, browserID: UUID, record: BrowserDownloadInfo)] = [:]
@@ -133,7 +136,7 @@ import WebKit
     @discardableResult func makeTab(browserID: UUID, configuration: WKWebViewConfiguration? = nil, restoring: BrowserTabInfo? = nil) throws -> BrowserTab {
         guard !deleting.contains(browserID) else { throw BrowserError("This browser is being deleted.") }
         var profile = try library.profile(browserID)
-        guard profile.tabs.count < 100 || restoring != nil else { throw BrowserError("This browser has reached its 100-tab limit.") }
+        guard profile.tabs.count < Self.tabLimit || restoring != nil else { throw BrowserError("This browser has reached its 100-tab limit.") }
         let info = restoring ?? BrowserTabInfo(lastUsed: Date())
         if let tab = tabs[info.id] { return tab }
         let tab = BrowserTab(browserID: browserID, info: info, runtime: self, configuration: configuration)
@@ -434,6 +437,7 @@ import WebKit
         default: break
         }
         if request.operation == .open {
+            guard profile.tabs.count < Self.tabLimit else { throw BrowserError(Self.botTabLimit) }
             let tab = try makeTab(browserID: id)
             tab.attend(for: agentAttention)
             if let url = request.url { tab.navigate(try BrowserRequest.navigationURL(url)) }

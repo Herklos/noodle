@@ -5,6 +5,7 @@
 ### Fixed
 
 - A window no longer flashes on screen when a bot finishes with a tab, closes one, or a person starts watching a browser live.
+- A bot opening a tab, or a popup from a bot's page, past the 100-tab limit no longer shows you an alert. The bot is told to close tabs it no longer needs and try again.
 
 ## [0.21.1] - 2026-10-21
 

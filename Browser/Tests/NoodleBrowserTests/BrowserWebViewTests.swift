@@ -144,6 +144,46 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(shown, [], "the tab's window was on screen while opaque")
     }
 
+    /// A bot that fills a browser with tabs is told how to make room, and nothing is shown to the person.
+    @MainActor func testABotAtTheTabLimitIsToldToCloseTabs() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        var profile = try library.profile(browser)
+        profile.tabs = (0..<100).map { _ in BrowserTabInfo(lastUsed: Date()) }
+        try library.update(profile)
+        do {
+            _ = try await runtime.perform(.init(.open, browserID: browser))
+            XCTFail("a bot opened a tab past the limit")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("(tabs, close)"), error.localizedDescription)
+        }
+        XCTAssertNil(runtime.failure, "the person was alerted to a bot's tab")
+    }
+
+    /// A page a bot drives that opens a window past the tab limit tells the bot on its tab, not the person.
+    @MainActor func testAPopupPastTheTabLimitInABotsTabTellsTheBot() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let opened = try await runtime.perform(.init(.open, browserID: browser))
+        let tabID = try XCTUnwrap(opened.tabID)
+        var profile = try library.profile(browser)
+        profile.tabs += (0..<99).map { _ in BrowserTabInfo(lastUsed: Date()) }
+        try library.update(profile)
+        var popup = BrowserRequest(.eval, browserID: browser, tabID: tabID)
+        popup.text = "return window.open('about:blank') === null;"
+        let response = try await runtime.perform(popup)
+        XCTAssertEqual(response.text, "true")
+        XCTAssertNil(runtime.failure, "the person was alerted to a bot's popup")
+        let tab = try runtime.tab(browserID: browser, tabID: tabID)
+        XCTAssertTrue(tab.info.error?.contains("(tabs, close)") == true, tab.info.error ?? "no note on the tab")
+    }
+
     /// A bot's script or click that fails in the page says why, in the page's words, instead of
     /// WebKit's "A JavaScript exception occurred".
     @MainActor func testFailedPageScriptsSayWhy() async throws {

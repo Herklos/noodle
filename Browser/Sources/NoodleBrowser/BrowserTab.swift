@@ -325,7 +325,14 @@ import WebKit
             if attended, let popup, let runtime { popup.attend(for: runtime.agentAttention) }
             return popup?.web
         }
-        catch { runtime?.failure = error.localizedDescription; return nil }
+        catch {
+            // Only a person looking at the tab in a browser window is alerted; otherwise it is a bot's
+            // page, and the bot finds out from its tab.
+            guard web.window === surface, let runtime else { runtime?.failure = error.localizedDescription; return nil }
+            let full = (try? runtime.library.profile(browserID).tabs.count >= BrowserRuntime.tabLimit) == true
+            info.error = full ? BrowserRuntime.botTabLimit : error.localizedDescription; runtime.saveTab(self)
+            return nil
+        }
     }
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) { decisionHandler(.deny) }
     func webViewDidClose(_ webView: WKWebView) { try? runtime?.closeTab(browserID: browserID, tabID: id) }
