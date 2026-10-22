@@ -18,6 +18,9 @@ extension LinkChannel: CallChannel {}
 /// call's channel.
 @MainActor protocol CallAudio: AnyObject {
     var onFailure: ((String) -> Void)? { get set }
+    /// The call screen moved the call to the loudspeaker (true) or the earpiece (false); the
+    /// audio switches when told with `setSpeaker`.
+    var onSpeaker: ((Bool) -> Void)? { get set }
     /// Where the bot's voice waits to be played.
     var playout: LinkCallPlayout { get }
     /// Asks for the microphone and starts listening and playing; what the person says goes to
@@ -166,6 +169,11 @@ extension LinkChannel: CallChannel {}
         self.call = call
         self.audio = audio
         audio.onFailure = { [weak self] in self?.end(call.id, problem: $0) }
+        audio.onSpeaker = { [weak self] on in
+            guard let self, self.call?.id == call.id else { return }
+            self.call?.isSpeaker = on
+            self.audio?.setSpeaker(on)
+        }
         let speaking = SpokenAudio()
         task = Task { [weak self, system] in
             do {
@@ -245,6 +253,7 @@ extension LinkChannel: CallChannel {}
         channel?.cancel()
         channel = nil
         audio?.onFailure = nil
+        audio?.onSpeaker = nil
         audio?.close()
         audio = nil
         call = nil
@@ -509,6 +518,7 @@ final class SpokenAudio: @unchecked Sendable {
 /// cancellation, which comes with call voice processing and narrows the voice to a phone line.
 @MainActor final class EngineCallAudio: CallAudio {
     var onFailure: ((String) -> Void)?
+    var onSpeaker: ((Bool) -> Void)?
     let playout = LinkCallPlayout()
     private let microphone = MicrophoneTap()
     private var engine: AVAudioEngine?
@@ -517,6 +527,7 @@ final class SpokenAudio: @unchecked Sendable {
     private var routeTask: Task<Void, Never>?
     private var interruption: NSObjectProtocol?
     private var configuration: NSObjectProtocol?
+    private var route: NSObjectProtocol?
     private var closed = false
 
     func start(sessionActive: Bool, hear: @escaping @Sendable ([Int16]) -> Void) async throws {
@@ -538,9 +549,14 @@ final class SpokenAudio: @unchecked Sendable {
             forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] note in
             let changed = ObjectIdentifier(note.object as AnyObject)
             Task { @MainActor in
-                guard let self, let engine = self.engine, ObjectIdentifier(engine) == changed, self.routeTask == nil else { return }
+                guard let self, let engine = self.engine, ObjectIdentifier(engine) == changed, self.routeTask == nil,
+                      !self.followCallScreen() else { return }
                 do { try self.resume(engine) } catch { self.onFailure?("The call's audio stopped.") }
             }
+        }
+        route = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in _ = self?.followCallScreen() }
         }
         if requestedSpeaker { setSpeaker(true) }
     }
@@ -610,6 +626,24 @@ final class SpokenAudio: @unchecked Sendable {
         try AVAudioSession.sharedInstance().overrideOutputAudioPort(speaker ? .speaker : .none)
     }
 
+    /// The call screen's speaker button routes the call without the app, and resuming would
+    /// route it back. The person's choice is followed instead, with echo cancellation on the
+    /// loudspeaker. Routes the app sets itself arrive while it switches, or match it after.
+    private func followCallScreen() -> Bool {
+        guard !closed, routeTask == nil,
+              let on = Self.speakerChosen(by: AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType)),
+              on != speaker else { return false }
+        onSpeaker?(on)
+        return true
+    }
+
+    /// Nil for outputs other than the phone's own, such as AirPods.
+    nonisolated static func speakerChosen(by outputs: [AVAudioSession.Port]) -> Bool? {
+        if outputs.contains(.builtInSpeaker) { return true }
+        if outputs.contains(.builtInReceiver) { return false }
+        return nil
+    }
+
     func setMuted(_ muted: Bool) { microphone.isMuted = muted }
 
     func setSpeaker(_ on: Bool) {
@@ -642,9 +676,10 @@ final class SpokenAudio: @unchecked Sendable {
         routeTask?.cancel()
         routeTask = nil
         microphone.hear = nil
-        [interruption, configuration].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver)
+        [interruption, configuration, route].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver)
         interruption = nil
         configuration = nil
+        route = nil
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil

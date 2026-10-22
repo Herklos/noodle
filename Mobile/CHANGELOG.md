@@ -6,9 +6,14 @@
 
 - Calls from your bots show in the Phone app's Recents, so you can see a bot tried to reach you even when a Focus silenced the call.
 
+### Fixed
+
+- The speaker button on the lock screen's call screen keeps a bot's call on the loudspeaker instead of switching back to the earpiece a moment later.
+
 ### What to Test
 
 - Turn on a Focus that doesn't allow Noodle, lock the phone and have a bot call you: check the call shows as missed in the Phone app's Recents with the bot's name.
+- Have a bot call you while the phone is locked, answer and tap Speaker on the call screen: the voice stays on the loudspeaker, the bot doesn't hear itself, and Speaker in the app matches. Tap it again to go back to the earpiece.
 
 ## [0.42.0] - 2026-10-21
 

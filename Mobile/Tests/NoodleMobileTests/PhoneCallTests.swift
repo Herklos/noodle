@@ -20,6 +20,7 @@ final class CallChannelFake: CallChannel, @unchecked Sendable {
 
 @MainActor final class CallAudioFake: CallAudio {
     var onFailure: ((String) -> Void)?
+    var onSpeaker: ((Bool) -> Void)?
     let playout = LinkCallPlayout(cushion: 1)
     var startError: Error?
     var hear: (@Sendable ([Int16]) -> Void)?
@@ -138,6 +139,13 @@ private struct Failure: LocalizedError {
         calls.toggleSpeaker()
         #expect(calls.call?.isSpeaker == false)
         #expect(audio.speaker == [true, false])
+
+        // The lock screen's speaker button routes the call itself; the call follows it.
+        audio.onSpeaker?(true)
+        #expect(calls.call?.isSpeaker == true)
+        #expect(audio.speaker == [true, false, true], "The speaker needs the echo cancellation only the app turns on")
+        calls.toggleSpeaker()
+        #expect(audio.speaker == [true, false, true, false])
 
         let id = try #require(calls.call?.id)
         calls.hangUp()
