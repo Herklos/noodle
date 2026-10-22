@@ -202,7 +202,7 @@ struct ChatSettingsView: View {
             Section {
                 Picker("Microphone", selection: $microphoneUID) {
                     Text(microphones.first(where: { $0.audioID == defaultMicrophoneID })
-                        .map { "System Default â \($0.name)" } ?? "System Default").tag("")
+                        .map { "System Default — \($0.name)" } ?? "System Default").tag("")
                     ForEach(microphones) { microphone in
                         Text(microphone.name).tag(microphone.id)
                     }
