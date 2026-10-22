@@ -148,6 +148,7 @@ struct SidebarView: View {
 
 private struct ConversationRow: View {
     @Environment(NoodleStore.self) private var store
+    @AppStorage(SidebarRowDetail.key) private var rowDetail = SidebarRowDetail.standard.rawValue
     let conversation: BotConversation
 
     var body: some View {
@@ -186,7 +187,7 @@ private struct ConversationRow: View {
                         .lineLimit(1)
                 }
 
-                Text(store.preview(for: conversation))
+                Text(detail)
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(pause == nil ? 2 : 1)
@@ -222,10 +223,14 @@ private struct ConversationRow: View {
 
     private var pause: String? { store.pauseSummary(for: conversation) }
 
+    private var detail: String {
+        store.sidebarDetail(for: conversation, showing: SidebarRowDetail(rawValue: rowDetail) ?? .standard)
+    }
+
     private var accessibilityLabel: String {
         let unread = store.hasUnreadMessages(in: conversation) ? "Unread, " : ""
         let paused = pause.map { "\($0), " } ?? ""
-        return "\(unread)\(store.title(for: conversation)), \(paused)\(store.preview(for: conversation))"
+        return "\(unread)\(store.title(for: conversation)), \(paused)\(detail)"
     }
 }
 
@@ -241,5 +246,21 @@ enum SidebarTimestamp {
         style = style.day().month(.abbreviated)
         if !calendar.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
         return date.formatted(style)
+    }
+}
+
+/// What the line under each sidebar row's name shows.
+enum SidebarRowDetail: String, CaseIterable, Identifiable {
+    case latestMessage, description
+
+    static let key = "sidebarRowDetail"
+    static let standard = Self.latestMessage
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .latestMessage: "Latest Message"
+        case .description: "Description"
+        }
     }
 }

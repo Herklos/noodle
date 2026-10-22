@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Settings → General → Sidebar shows chooses what the line under each name in the sidebar says: Latest Message, as before, or Description, what the bot or group is for. A bot or group without a description keeps showing its latest message.
+
 ### Fixed
 
 - Settings → Bots and Settings → Groups open straight away with dozens of bots and groups. Each bot’s picture is shrunk once for the size it is shown at instead of on every redraw, and each row is built once instead of up to four times.
