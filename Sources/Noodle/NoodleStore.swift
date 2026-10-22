@@ -171,6 +171,7 @@ final class NoodleStore {
     var pendingHubInvitation: String?
     /// This Mac's copy of the bots it keeps on each joined Hub.
     private(set) var hubMirrors: [HubMirror] = []
+    private var hubSpaceOrder = HubSpaceOrder(stored: UserDefaults.standard.string(forKey: HubSpaceOrder.key) ?? "")
     /// Live views of what Hub bots' links point at.
     @ObservationIgnored let surfacePanels = HubSurfacePanels()
     /// Patches open for review.
@@ -440,6 +441,17 @@ final class NoodleStore {
     }
 
     private static func spaceKey(of mirror: HubMirror) -> String? { mirror.pairing.hub?.key.x963.base64EncodedString() }
+
+    /// The joined Hubs in the order the person put their spaces in, after All.
+    var spaceMirrors: [HubMirror] {
+        hubSpaceOrder.sorted(hubMirrors) { Self.spaceKey(of: $0) ?? $0.pairing.directory.path }
+    }
+
+    func moveHubSpaces(fromOffsets source: IndexSet, toOffset destination: Int) {
+        hubSpaceOrder.move(spaceMirrors.map { Self.spaceKey(of: $0) ?? $0.pairing.directory.path },
+                           fromOffsets: source, toOffset: destination)
+        UserDefaults.standard.set(hubSpaceOrder.stored, forKey: HubSpaceOrder.key)
+    }
 
     /// Makes a space and shows it.
     @discardableResult
@@ -2417,6 +2429,20 @@ final class NoodleStore {
     func preview(for conversation: BotConversation) -> String {
         guard let body = messages(for: conversation).last?.body else { return "No messages yet" }
         return MarkdownPlainText.convert(MessageSegment.previewText(body))
+    }
+
+    /// The line under a sidebar row's name. A bot or group with no description keeps its latest message.
+    func sidebarDetail(for conversation: BotConversation, showing detail: SidebarRowDetail) -> String {
+        if detail == .description {
+            let conversation = current(conversation)
+            let description = conversation.kind == .direct
+                ? participants(for: conversation).first?.publicDescription
+                : conversation.publicDescription
+            if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+                return description
+            }
+        }
+        return preview(for: conversation)
     }
 
     func revealWorkspace(for agent: AgentRecord) {

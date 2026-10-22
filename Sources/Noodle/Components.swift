@@ -124,56 +124,58 @@ extension NoodleStore {
     }
 }
 
-extension AgentRuntimeSnapshot {
-    /// Why a bot waits for Kick, in a few words for its sidebar row and conversation; nil while it does not.
-    var pauseSummary: String? {
-        guard phase == .failed else { return nil }
-        switch failure {
-        case .recoveryFailed: return "Paused: recovery interrupted"
-        case .missingSession: return "Paused: session missing"
-        case .usageLimit: return "Paused: usage limit reached"
-        case .authenticationRequired: return "Paused: sign-in needed"
-        case .safetyStop: return "Paused: safety stop"
-        case nil: return "Stopped"
-        }
-    }
-}
-
 extension NoodleStore {
     /// The conversation's bots that run on this Mac and wait for Kick.
     func agentsWaitingForKick(in conversation: BotConversation) -> [AgentRecord] {
         shownParticipants(for: conversation).filter { runsHere($0.id) && runtime.snapshot(for: $0.id).phase == .failed }
     }
 
+    /// Why a bot on a Noodle Hub does not answer for now, such as its plan's token limit, as the Hub last
+    /// said while it is reachable.
+    func hubPause(ofAgent id: UUID) -> LinkBotPause? {
+        guard let mirror = hubMirror(forAgent: id), mirror.isConnected else { return nil }
+        return mirror.pause(ofAgent: id)
+    }
+
     /// A bot's own conversation says why it waits; a group names the bots that wait.
     func pauseSummary(for conversation: BotConversation) -> String? {
-        let waiting = agentsWaitingForKick(in: conversation)
-        guard let first = waiting.first else { return nil }
-        guard conversation.kind == .group else { return runtime.snapshot(for: first.id).pauseSummary }
-        return "Paused: " + waiting.map(\.displayName).joined(separator: ", ")
+        let waiting = Set(agentsWaitingForKick(in: conversation).map(\.id))
+        let paused = shownParticipants(for: conversation).filter { waiting.contains($0.id) || hubPause(ofAgent: $0.id) != nil }
+        guard let first = paused.first else { return nil }
+        guard conversation.kind == .group else {
+            return waiting.contains(first.id) ? runtime.snapshot(for: first.id).pauseSummary : hubPause(ofAgent: first.id)?.shown()
+        }
+        return "Paused: " + paused.map(\.displayName).joined(separator: ", ")
+    }
+
+    /// The full message behind the pause shown over a conversation.
+    func pauseDetail(for conversation: BotConversation) -> String? {
+        if let agent = agentsWaitingForKick(in: conversation).first { return runtime.snapshot(for: agent.id).detail }
+        return shownParticipants(for: conversation).lazy.compactMap { self.hubPause(ofAgent: $0.id)?.detail }.first
     }
 }
 
-/// Over a conversation while one of its bots waits for Kick: why, in a few words, and Kick.
-/// In a group, Kick starts the first bot that waits; the next one shows once it is back.
+/// Over a conversation while one of its bots waits for Kick or a Hub's limit holds it: why, in a few words,
+/// and Kick for one on this Mac. In a group, Kick starts the first bot that waits; the next one shows once it is back.
 struct ConversationPauseControl: View {
     @Environment(NoodleStore.self) private var store
     let conversation: BotConversation
     @State private var kickRequest: AgentKickRequest?
 
     var body: some View {
-        if let summary = store.pauseSummary(for: conversation),
-           let agent = store.agentsWaitingForKick(in: conversation).first {
+        if let summary = store.pauseSummary(for: conversation) {
             HStack(spacing: 8) {
                 Text(summary)
                     .foregroundStyle(.red)
                     .lineLimit(1)
-                    .help(store.runtime.snapshot(for: agent.id).detail)
-                Button("Kick") {
-                    kickRequest = store.runtime.kick(agent: agent, repository: store.repository)
+                    .help(store.pauseDetail(for: conversation) ?? summary)
+                if let agent = store.agentsWaitingForKick(in: conversation).first {
+                    Button("Kick") {
+                        kickRequest = store.runtime.kick(agent: agent, repository: store.repository)
+                    }
+                    .disabled(store.runtime.changingAccess.contains(agent.id))
+                    .help("Kick \(agent.displayName)")
                 }
-                .disabled(store.runtime.changingAccess.contains(agent.id))
-                .help("Kick \(agent.displayName)")
             }
             .padding(.horizontal, 6)
             .modifier(AgentKickConfirmation(store: store, request: $kickRequest))

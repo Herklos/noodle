@@ -28,6 +28,18 @@ final class IconAppearanceTests: XCTestCase {
         XCTAssertEqual([small.width, small.height], [64, 64], "A small picture is not enlarged")
     }
 
+    /// A list of badges redraws often; each picture is decoded once per size, not on every redraw.
+    func testKeepsEachBadgeCopyInsteadOfDecodingAgain() throws {
+        let picture = try image(width: 512, height: 512)
+        let first = try XCTUnwrap(IconImage.thumbnail(picture, pixels: 64))
+        XCTAssertTrue(first === IconImage.thumbnail(picture, pixels: 64), "the same picture at the same size is decoded once")
+        XCTAssertTrue(first === IconImage.thumbnail(Data(picture), pixels: 64), "an equal copy of the picture finds it too")
+        let larger = try XCTUnwrap(IconImage.thumbnail(picture, pixels: 128))
+        XCTAssertEqual([larger.width, larger.height], [128, 128])
+        let other = try XCTUnwrap(IconImage.thumbnail(try image(width: 256, height: 256), pixels: 64))
+        XCTAssertFalse(first === other)
+    }
+
     func testPNGEncodingScalesToFitAndRefusesOversizeOutput() throws {
         let prepared = try IconImage.prepare(image(width: 2048, height: 1024), encoding: .png(maxBytes: 2 * 1024 * 1024))
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: prepared))

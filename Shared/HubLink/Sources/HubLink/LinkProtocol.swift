@@ -1090,12 +1090,14 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     /// When the grant the Hub keeps for this device runs out. Nil while it keeps none, as before the first or
     /// after Push said the phone must register again; the device sends a new one then, or once this nears.
     public var callPushExpiresAt: Date?
+    /// Whether the Hub says why a bot does not answer for now, as each `LinkBot.pause`, so a bot it lists without one runs.
+    public var explainsPauses: Bool
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
                 canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
                 keepsAnnotations: Bool = false, signsInToBrowsers: Bool = false, ringsThroughPush: Bool = false,
-                callPushExpiresAt: Date? = nil) {
+                callPushExpiresAt: Date? = nil, explainsPauses: Bool = false) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1112,11 +1114,12 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.signsInToBrowsers = signsInToBrowsers
         self.ringsThroughPush = ringsThroughPush
         self.callPushExpiresAt = callPushExpiresAt
+        self.explainsPauses = explainsPauses
     }
 
     private enum CodingKeys: String, CodingKey {
         case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
-             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt
+             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt, explainsPauses
     }
 
     public init(from decoder: Decoder) throws {
@@ -1137,6 +1140,7 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         signsInToBrowsers = try c.decode(.signsInToBrowsers, or: false)
         ringsThroughPush = try c.decode(.ringsThroughPush, or: false)
         callPushExpiresAt = try c.decodeIfPresent(Date.self, forKey: .callPushExpiresAt)
+        explainsPauses = try c.decode(.explainsPauses, or: false)
     }
 }
 
@@ -1330,10 +1334,13 @@ public struct LinkBot: Codable, Equatable, Identifiable, Sendable {
     public var canCall: Bool
     /// When its user pinned its conversation, which orders pins. Nil when not pinned, or from a Hub without pins.
     public var pinnedAt: Date?
+    /// Why it does not answer for now, while a limit holds it or it waits for Kick. Nil while it runs, and always
+    /// from a Hub whose status does not say `explainsPauses`.
+    public var pause: LinkBotPause?
 
     public init(id: UUID, conversationID: UUID, draft: LinkBotDraft, createdAt: Date, phase: LinkBotPhase? = nil,
                 readUpTo: Date? = nil, status: String? = nil, archivedAt: Date? = nil, background: LinkBackground? = nil,
-                sharedWith: [UUID] = [], owner: String? = nil, canCall: Bool = false, pinnedAt: Date? = nil) {
+                sharedWith: [UUID] = [], owner: String? = nil, canCall: Bool = false, pinnedAt: Date? = nil, pause: LinkBotPause? = nil) {
         self.id = id
         self.conversationID = conversationID
         self.draft = draft
@@ -1347,10 +1354,11 @@ public struct LinkBot: Codable, Equatable, Identifiable, Sendable {
         self.owner = owner
         self.canCall = canCall
         self.pinnedAt = pinnedAt
+        self.pause = pause
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, conversationID, draft, createdAt, phase, readUpTo, status, archivedAt, background, sharedWith, owner, canCall, pinnedAt
+        case id, conversationID, draft, createdAt, phase, readUpTo, status, archivedAt, background, sharedWith, owner, canCall, pinnedAt, pause
     }
 
     public init(from decoder: Decoder) throws {
@@ -1368,6 +1376,7 @@ public struct LinkBot: Codable, Equatable, Identifiable, Sendable {
         owner = try c.decodeIfPresent(String.self, forKey: .owner)
         canCall = try c.decode(.canCall, or: false)
         pinnedAt = try c.decodeIfPresent(Date.self, forKey: .pinnedAt)
+        pause = (try? c.decodeIfPresent(LinkBotPause.self, forKey: .pause)) ?? nil
     }
 }
 
@@ -1497,6 +1506,46 @@ public struct LinkKickConfirmation: Codable, Equatable, Sendable {
 
 public enum LinkBotPhase: String, Codable, Sendable {
     case offline, starting, ready, working, failed
+}
+
+/// Why a bot does not answer for now: a limit holds it, or it waits for Kick.
+public struct LinkBotPause: Codable, Equatable, Sendable {
+    /// In a few words, such as "Paused: plan limit" or "Paused: recovery interrupted".
+    public var summary: String
+    /// When it continues by itself. Nil when it waits for Kick, or nobody can tell.
+    public var until: Date?
+    /// The full message, for its owner.
+    public var detail: String?
+    /// Whether Kick may start it again; not while a limit holds it.
+    public var kickable: Bool
+
+    public init(summary: String, until: Date? = nil, detail: String? = nil, kickable: Bool = false) {
+        self.summary = summary
+        self.until = until
+        self.detail = detail
+        self.kickable = kickable
+    }
+
+    private enum CodingKeys: String, CodingKey { case summary, until, detail, kickable }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try c.decode(.summary, or: "Paused")
+        until = try c.decodeIfPresent(Date.self, forKey: .until)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        kickable = try c.decode(.kickable, or: false)
+    }
+
+    /// The summary and when it continues, in the device's time zone: "Paused: plan limit, resumes at 14:20",
+    /// or with the day when that is not today.
+    public func shown(now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
+        guard let until, until > now else { return summary }
+        let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        if calendar.isDate(until, inSameDayAs: now) {
+            return "\(summary), resumes at \(until.formatted(style.hour().minute()))"
+        }
+        return "\(summary), resumes \(until.formatted(style.day().month(.abbreviated).hour().minute()))"
+    }
 }
 
 /// One person's or bot's reaction to a message.

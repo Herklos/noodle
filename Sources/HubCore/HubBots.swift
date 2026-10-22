@@ -69,6 +69,8 @@ import NoodleVoicePeer
     private var phases: [UUID: AgentRuntimePhase] = [:]
     /// Each bot's status when last checked; an absent bot has not been checked yet.
     private var statuses: [UUID: String?] = [:]
+    /// Why each bot was last reported paused; an absent bot has not been checked yet.
+    private var pauses: [UUID: LinkBotPause?] = [:]
     /// How many checks have been applied, so a check read in the background yields to one made meanwhile.
     private var checks = 0
     /// The latest Kick a device was asked to confirm, per bot. The runtime refuses it once stale.
@@ -834,6 +836,25 @@ import NoodleVoicePeer
         return AgentRuntimePhase(rawValue: phase.rawValue) ?? .offline
     }
 
+    /// Why a bot here does not answer for now, as its owner's devices show it, or someone's it is shared with:
+    /// its owner's plan holds it, or it waits for Kick. Nil while it runs, and for one a device hosts.
+    public func pause(of agent: AgentRecord, forOwner: Bool = true) -> LinkBotPause? {
+        guard access.host(ofBot: agent.id) == nil,
+              let owner = access.owner(ofBot: agent.id).flatMap({ id in access.users.first { $0.id == id } }) else { return nil }
+        if let tokenLimits, let until = tokenLimits.holds[owner.id] {
+            let detail = forOwner ? tokenLimits.refusal(for: owner) : tokenLimits.refusal(forGuestOf: agent.displayName, ownedBy: owner.id)
+            return LinkBotPause(summary: "Paused: plan limit", until: until, detail: detail)
+        }
+        if !lendsBot(agent, to: owner) {
+            return LinkBotPause(summary: "Paused: not in plan",
+                                detail: forOwner ? "Your plan no longer lends this bot’s harness or model." : nil)
+        }
+        let snapshot = runtime.snapshot(for: agent.id)
+        guard let summary = snapshot.pauseSummary else { return nil }
+        // Only its owner can Kick it; the people it is shared with see that it waits.
+        return forOwner ? LinkBotPause(summary: summary, detail: snapshot.detail, kickable: true) : LinkBotPause(summary: "Paused")
+    }
+
     /// Keeps a bot that runs on the user's device here, or changes its name, description and picture.
     /// The people it is shared with talk to it here; nothing of it runs here.
     public func publish(_ id: UUID, _ draft: LinkBotDraft, for user: HubUser, on device: HubDevice) throws -> LinkHostedBot {
@@ -1327,6 +1348,15 @@ import NoodleVoicePeer
             // A bot sets its status through Messenger; devices list the bots again to see it.
             if let known = statuses[agent.id], known != agent.status { restated.insert(owner) }
             statuses[agent.id] = .some(agent.status)
+            // Devices list the bots again to see why one paused, or that it no longer is; its guests too.
+            // Its detail may say "in 5 hours", which changes by itself.
+            var pause = self.pause(of: agent)
+            pause?.detail = nil
+            if let known = pauses[agent.id], known != pause {
+                restated.insert(owner)
+                restated.formUnion(conversations.filter { $0.participantIDs == [agent.id] }.compactMap(\.guest?.id))
+            }
+            pauses[agent.id] = .some(pause)
         }
         restated.forEach { onChange?($0, .botsChanged) }
     }
@@ -1640,7 +1670,7 @@ import NoodleVoicePeer
                        // On the owner's own Mac, those are people on another Hub.
                        sharedWith: access.isPersonal ? [] : direct.compactMap(\.guest?.id),
                        canCall: agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.voices.isEmpty == false,
-                       pinnedAt: pins[conversation.id])
+                       pinnedAt: pins[conversation.id], pause: pause(of: agent))
     }
 
     /// A bot as someone it is shared with sees it: whose it is and whether it is working, nothing of how it works.
@@ -1654,7 +1684,7 @@ import NoodleVoicePeer
                        phase: LinkBotPhase(rawValue: phase(of: agent).rawValue),
                        readUpTo: readMarks[conversation.id], background: background(of: conversation.id), owner: owner.name,
                        canCall: agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))?.voices.isEmpty == false,
-                       pinnedAt: pins[conversation.id])
+                       pinnedAt: pins[conversation.id], pause: pause(of: agent, forOwner: false))
     }
 
     /// Pictures' sizes, read once each: a stored file never changes.

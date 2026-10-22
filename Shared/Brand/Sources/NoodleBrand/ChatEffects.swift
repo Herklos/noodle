@@ -5,6 +5,7 @@ import SwiftUI
 public enum ChatEffect: String, CaseIterable, Sendable {
     case confetti
     case fireworks
+    case pasta
 
     /// How long one plays.
     public static let duration: TimeInterval = 4
@@ -14,6 +15,7 @@ public enum ChatEffect: String, CaseIterable, Sendable {
         switch self {
         case .confetti: "🎉"
         case .fireworks: "🎆"
+        case .pasta: "🍝"
         }
     }
 }
@@ -51,6 +53,7 @@ public struct ChatEffectView: View {
                 switch effect {
                 case .confetti: ConfettiCanvas(seed: seed, startedAt: startedAt, frozenAt: frozenAt)
                 case .fireworks: FireworksCanvas(seed: seed, startedAt: startedAt, frozenAt: frozenAt)
+                case .pasta: PastaCanvas(seed: seed, startedAt: startedAt, frozenAt: frozenAt)
                 }
             }
         }
@@ -176,7 +179,116 @@ private struct FireworksCanvas: View {
     }
 }
 
-/// How long an effect has played: by the display's clock, or at a fixed moment for a still frame.
+/// Pasta tumbles down from above, swaying as it falls, for a moment nobody is quite sure about.
+/// Fits the 4 s playback window.
+private struct PastaCanvas: View {
+    let seed: UUID
+    let startedAt: Date
+    let frozenAt: TimeInterval?
+    private let pieces = 72, fall = 2.6
+    // Durum wheat in its shades, with the odd tomato and spinach piece.
+    private let colors: [Color] = [
+        Color(red: 0.98, green: 0.84, blue: 0.47), Color(red: 0.95, green: 0.74, blue: 0.33),
+        Color(red: 0.99, green: 0.9, blue: 0.62), Color(red: 0.89, green: 0.62, blue: 0.27),
+        Color(red: 0.98, green: 0.84, blue: 0.47), Color(red: 0.95, green: 0.74, blue: 0.33),
+        Color(red: 0.86, green: 0.38, blue: 0.24), Color(red: 0.52, green: 0.66, blue: 0.29)
+    ]
+
+    var body: some View {
+        EffectClock(startedAt: startedAt, frozenAt: frozenAt) { elapsed in
+            Canvas { context, size in
+                let seedValue = effectSeed(seed)
+                let scale = max(0.8, min(1.4, min(size.width, size.height) / 400))
+                for index in 0..<pieces {
+                    let time = elapsed - sample(seedValue, index, 1) * 1.3
+                    let duration = fall * (0.8 + sample(seedValue, index, 2) * 0.4)
+                    guard time >= 0, time < duration else { continue }
+                    let progress = time / duration
+                    let sway = sin(time * (1.5 + sample(seedValue, index, 3) * 2) + Double(index)) * 18 * scale
+                    // From just above the top edge to just below the bottom, gathering speed.
+                    let y = -30 * scale + (size.height + 60 * scale) * (progress * 0.55 + progress * progress * 0.45)
+                    var piece = context
+                    piece.opacity = min(1, (duration - time) / 0.4)
+                    piece.translateBy(x: sample(seedValue, index, 4) * size.width + sway, y: y)
+                    piece.rotate(by: .radians(sample(seedValue, index, 5) * 2 * .pi
+                        + time * (sample(seedValue, index, 6) - 0.5) * 6))
+                    piece.scaleBy(x: scale, y: scale)
+                    let color = colors[Int(sample(seedValue, index, 7) * Double(colors.count)) % colors.count]
+                    Self.draw(PastaShape.allCases[index % PastaShape.allCases.count], in: piece, color: color)
+                }
+            }
+        }
+    }
+
+    private enum PastaShape: CaseIterable { case penne, farfalle, fusilli, macaroni }
+
+    /// One piece about 24 points long, centred on the origin. Ridges and openings are a shade darker.
+    private static func draw(_ shape: PastaShape, in context: GraphicsContext, color: Color) {
+        let shade = GraphicsContext.Shading.color(Color(red: 0.45, green: 0.27, blue: 0.08).opacity(0.4))
+        switch shape {
+        case .penne:
+            var tube = Path()
+            tube.move(to: CGPoint(x: -12, y: -4))
+            tube.addLine(to: CGPoint(x: 8, y: -4))
+            tube.addLine(to: CGPoint(x: 12, y: 4))
+            tube.addLine(to: CGPoint(x: -8, y: 4))
+            tube.closeSubpath()
+            context.fill(tube, with: .color(color))
+            var ridges = Path()
+            for offset in [-1.5, 1.5] {
+                ridges.move(to: CGPoint(x: -9 + offset, y: offset))
+                ridges.addLine(to: CGPoint(x: 9 + offset, y: offset))
+            }
+            context.stroke(ridges, with: shade, lineWidth: 0.8)
+            var opening = Path()
+            opening.move(to: CGPoint(x: 8, y: -4))
+            opening.addLine(to: CGPoint(x: 12, y: 4))
+            context.stroke(opening, with: shade, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+        case .farfalle:
+            var wings = Path()
+            for side in [-1.0, 1.0] {
+                wings.move(to: .zero)
+                wings.addLine(to: CGPoint(x: side * 11, y: -8))
+                wings.addQuadCurve(to: CGPoint(x: side * 11, y: 0), control: CGPoint(x: side * 13.5, y: -4))
+                wings.addQuadCurve(to: CGPoint(x: side * 11, y: 8), control: CGPoint(x: side * 8.5, y: 4))
+                wings.closeSubpath()
+            }
+            context.fill(wings, with: .color(color))
+            var ridges = Path()
+            for side in [-1.0, 1.0] {
+                for y in [-4.0, 0, 4] {
+                    ridges.move(to: CGPoint(x: side * 3, y: y * 0.3))
+                    ridges.addLine(to: CGPoint(x: side * 9.5, y: y))
+                }
+            }
+            context.stroke(ridges, with: shade, lineWidth: 0.7)
+            let knot = Path(roundedRect: CGRect(x: -2.5, y: -3.5, width: 5, height: 7), cornerRadius: 2)
+            context.fill(knot, with: .color(color))
+            context.fill(knot, with: shade)
+        case .fusilli:
+            func twist(_ phase: Double) -> Path {
+                var path = Path()
+                for step in 0...24 {
+                    let x = -11 + Double(step) * 22 / 24
+                    let point = CGPoint(x: x, y: sin(x * 0.85 + phase) * 2.6)
+                    if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                }
+                return path
+            }
+            context.stroke(twist(0), with: .color(color), style: StrokeStyle(lineWidth: 5.5, lineCap: .round))
+            context.stroke(twist(.pi / 2), with: shade, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+        case .macaroni:
+            var elbow = Path()
+            elbow.addArc(center: CGPoint(x: 0, y: 6), radius: 9, startAngle: .degrees(200), endAngle: .degrees(340),
+                         clockwise: false)
+            context.stroke(elbow, with: .color(color), style: StrokeStyle(lineWidth: 6.5, lineCap: .butt))
+            let end = CGPoint(x: 9 * cos(340 * Double.pi / 180), y: 6 + 9 * sin(340 * Double.pi / 180))
+            context.fill(Path(ellipseIn: CGRect(x: end.x - 1.6, y: end.y - 3.2, width: 3.2, height: 6.4)), with: shade)
+        }
+    }
+}
+
+/// How long an effect has played:by the display's clock, or at a fixed moment for a still frame.
 private struct EffectClock<Content: View>: View {
     let startedAt: Date
     let frozenAt: TimeInterval?

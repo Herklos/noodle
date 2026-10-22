@@ -86,6 +86,29 @@ final class HubHarnessChoiceTests: XCTestCase {
         again.showSpace(nil)
         XCTAssertEqual(again.pinnedConversations.map(\.id), [f.directB.id])
     }
+
+    /// The joined Hubs' spaces follow All in the order the person drags them into, kept for the next launch.
+    func testHubSpacesKeepThePersonsOrder() throws {
+        let f = try StoreFixture()
+        defer { f.cleanUp() }
+        UserDefaults.standard.removeObject(forKey: HubSpaceOrder.key)
+        addTeardownBlock { UserDefaults.standard.removeObject(forKey: HubSpaceOrder.key) }
+        for name in ["Mac mini", "Studio"] {
+            let folder = f.repository.rootURL.appendingPathComponent("Hubs/\(UUID())", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let hub: [String: Any] = ["name": name, "key": LinkIdentity().publicKey.x963.base64EncodedString(),
+                                      "endpoints": [], "userName": "Ada"]
+            try JSONSerialization.data(withJSONObject: hub).write(to: folder.appendingPathComponent("hub.json"))
+        }
+        let store = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
+        let joined = store.spaceMirrors.compactMap(\.pairing.hub?.name)
+        XCTAssertEqual(Set(joined), ["Mac mini", "Studio"])
+
+        store.moveHubSpaces(fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        XCTAssertEqual(store.spaceMirrors.compactMap(\.pairing.hub?.name), joined.reversed())
+        let again = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
+        XCTAssertEqual(again.spaceMirrors.compactMap(\.pairing.hub?.name), joined.reversed())
+    }
 }
 
 /// A space the person makes gathers bots and groups from any Hub and this Mac, with pins of its own.
