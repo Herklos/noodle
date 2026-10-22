@@ -95,6 +95,27 @@ import XCTest
         }
     }
 
+    func testOnlyPublicHTTPSSignInPagesOpen() async {
+        let browser = MCPBrowserAuthorization { url in XCTFail("\(url) must not open"); return true }
+        for page in [
+            "file:///Applications/Calculator.app?state=a",
+            "smb://attacker.example/share?state=a",
+            "x-apple.systempreferences:com.apple.preference.security?state=a",
+            "javascript:alert(1)?state=a",
+            "http://example.com/authorize?state=a",
+            "https://127.0.0.1/authorize?state=a",
+            "https://localhost/authorize?state=a",
+            "https://user:password@example.com/authorize?state=a",
+            "https://example.com/authorize?state=a#fragment"
+        ] {
+            do {
+                _ = try await browser.authorize(url: URL(string: page)!, callbackURL: redirect)
+                XCTFail("Expected \(page) to be refused")
+            } catch MCPServiceError.invalidCallback { }
+            catch { XCTFail("Unexpected error for \(page): \(error)") }
+        }
+    }
+
     func testSecondAuthorizationCannotReplacePendingLogin() async throws {
         let opened = expectation(description: "Browser opened once")
         let browser = MCPBrowserAuthorization { _ in opened.fulfill(); return true }

@@ -231,7 +231,9 @@ public final class MCPController {
     }
     func authorize(url: URL, callbackURL: URL) async throws -> URL {
         let states = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.filter { $0.name == "state" } ?? []
-        guard pendingID == nil, states.count == 1, let state = states.first?.value, !state.isEmpty else {
+        // Callers validate the page already; a server-supplied file, app or local address must never open even if one misses it.
+        guard (try? MCPConnectionRecord.validatedEndpoint(url)) != nil,
+              pendingID == nil, states.count == 1, let state = states.first?.value, !state.isEmpty else {
             throw MCPServiceError.invalidCallback
         }
         let id = UUID()
