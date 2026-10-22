@@ -846,6 +846,8 @@ import XCTest
         let bot = try await createBot(f)
         guard case .status(let status) = try await f.device.request(.status) else { return XCTFail("no status") }
         XCTAssertTrue(status.keepsAnnotations)
+        // It says why a bot is paused, so a device trusts a bot listed without a pause to run.
+        XCTAssertTrue(status.explainsPauses)
         let photo = LinkAttachment(id: UUID(), filename: "Photo.png", mediaType: "image/png", byteCount: 3)
         let region = LinkAnnotation.Region(x: 0.25, y: 0.5, width: 0.5, height: 0.25)
         let comment = LinkAnnotation(version: 2, sourceAttachmentID: photo.id, sourceFilename: "Photo.png", comment: "Crop here", region: region)

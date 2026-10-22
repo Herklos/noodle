@@ -1089,7 +1089,7 @@ import os
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
                           userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil,
                           signsInToBrowsers: browsers != nil, ringsThroughPush: callPusher != nil && bots != nil,
-                          callPushExpiresAt: device.callPush?.expiresAt)
+                          callPushExpiresAt: device.callPush?.expiresAt, explainsPauses: bots != nil)
     }
 
     /// Opens the port on the router, then keeps it open.

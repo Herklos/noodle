@@ -7,6 +7,8 @@
 - The pasta effect: penne, farfalle, fusilli and macaroni fall over a chat when a bot sends it for a moment nobody is quite sure about. Needs the Hub updated.
 - Put your Hubs' spaces in order: open the space menu, choose Edit Spaces… and drag them. All stays first. The order is kept on this phone.
 - Call a bot or open its chat from Shortcuts, Control Center or the Action Button: Shortcuts has Call Agent and Open Chat with Agent, which ask for the bot when it runs unless you choose one, and the Agent control calls the bot or opens its chat, as you choose when adding it. Calling a bot that can't take calls opens its chat instead.
+- A bot on your Hub that waits for Kick says why at the top of its conversation and in its row, such as "Paused: recovery interrupted", with a Kick button for your own bots. Needs the Hub updated.
+- A bot on your Hub that a limit holds says so the same way, with when it continues, such as "Paused: plan limit, resumes at 14:20" once you used the tokens your plan allows. Needs the Hub updated.
 
 ### Fixed
 
@@ -20,6 +22,8 @@
 - In Settings › Action Button choose Controls, then Noodle's Agent: pick a bot that takes calls and Call. Press the Action Button, also with Noodle closed: check its chat opens and the call starts. Change the control to a bot that can't take calls: check it shows a chat bubble and pressing it opens the chat only.
 - Add the Agent control to Control Center with Open Chat: check pressing it opens that bot's chat.
 - In Shortcuts, add Call Agent with no bot chosen and run it: check it asks which bot, then calls it. Add Open Chat with Agent with a bot chosen: check it opens that chat without asking. Leave the bot's Hub, run it again: check it says the agent is no longer available.
+- Make a bot on the Hub wait for Kick, for example by interrupting a Grok Build recovery: check its row and the top of its conversation say why, and Kick there starts it again.
+- On a Hub plan with a small token limit, use it up: check the bot's row and the top of its conversation say "Paused: plan limit" with the time it resumes, and nothing is written in the conversation.
 
 ## [0.42.1] - 2026-10-22
 

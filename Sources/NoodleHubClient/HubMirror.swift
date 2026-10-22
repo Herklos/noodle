@@ -72,6 +72,8 @@ import Observation
     public private(set) var usersChanges = 0
     /// What each bot is doing on the Hub, by its stand-in here.
     private var phases: [UUID: AgentRuntimePhase] = [:]
+    /// Why each bot on the Hub does not answer for now, by its stand-in here, as the Hub last listed it.
+    private var pauses: [UUID: LinkBotPause] = [:]
     /// Computers being made, waiting for the Hub to say they are done.
     @ObservationIgnored private var making: [UUID: CheckedContinuation<LinkComputer, Error>] = [:]
     /// Opens a connection's sign-in page in the browser and returns the address it came back to.
@@ -140,6 +142,10 @@ import Observation
 
     /// What the bot a stand-in here keeps on the Hub is doing there, as last heard.
     public func phase(ofAgent id: UUID) -> AgentRuntimePhase? { phases[id] }
+
+    /// Why the bot a stand-in here keeps on the Hub does not answer for now, as the Hub last listed it. Nil while it runs,
+    /// and from a Hub that does not say.
+    public func pause(ofAgent id: UUID) -> LinkBotPause? { pairing.status?.explainsPauses == true ? pauses[id] : nil }
 
     private func record(_ phase: LinkBotPhase?, ofBot remote: UUID) {
         guard let agent = entries.first(where: { $0.remote == remote })?.agent else { return }
@@ -694,6 +700,9 @@ import Observation
             changed = true
         }
         for bot in bots { record(bot.phase, ofBot: bot.id) }
+        pauses = Dictionary(bots.compactMap { bot in
+            entries.first { $0.remote == bot.id }.flatMap { entry in bot.pause.map { (entry.agent, $0) } }
+        }, uniquingKeysWith: { first, _ in first })
         await listPeople()
         if changed { onChange?() }
         for bot in bots { if let background = bot.background { try? await copyBackground(background, of: bot.conversationID) } }
