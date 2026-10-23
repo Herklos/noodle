@@ -2016,11 +2016,23 @@ final class NoodleStore {
     }
 
     func revealAttachment(_ attachment: ConversationAttachment) {
-        NSWorkspace.shared.activateFileViewerSelecting([attachmentFileURL(attachment)])
+        withDownloadedFile(attachment) { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
     }
 
     func copyAttachment(_ attachment: ConversationAttachment) {
-        let url = attachmentFileURL(attachment)
+        withDownloadedFile(attachment) { [weak self] in self?.copyAttachment(attachment, at: $0) }
+    }
+
+    /// Runs `action` with an attachment's file at once, or once it has come down from its Hub.
+    func withDownloadedFile(_ attachment: ConversationAttachment, _ action: @escaping @MainActor (URL) -> Void) {
+        guard hubKeeping(attachment) != nil else { return action(attachmentFileURL(attachment)) }
+        Task {
+            guard let url = await downloadedFile(attachment) else { return }
+            action(url)
+        }
+    }
+
+    private func copyAttachment(_ attachment: ConversationAttachment, at url: URL) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
@@ -2046,6 +2058,27 @@ final class NoodleStore {
 
     func attachmentFileURL(_ attachment: ConversationAttachment) -> URL {
         repository.attachmentFileURL(attachment)
+    }
+
+    /// The Hub a file here waits on, when this Mac has not downloaded it yet.
+    func hubKeeping(_ attachment: ConversationAttachment) -> HubMirror? {
+        guard attachment.url == nil, let mirror = hubMirror(forConversation: attachment.conversationID),
+              mirror.isOnHubOnly(attachment) else { return nil }
+        return mirror
+    }
+
+    /// The file of an attachment, downloaded from its Hub first when only the Hub has it. Nil, with the
+    /// error shown, when it cannot be.
+    func downloadedFile(_ attachment: ConversationAttachment) async -> URL? {
+        guard attachment.url == nil, let mirror = hubMirror(forConversation: attachment.conversationID) else {
+            return attachmentFileURL(attachment)
+        }
+        do {
+            return try await mirror.file(for: attachment)
+        } catch {
+            errorMessage = "\(attachment.originalFilename) could not be downloaded from the Hub: \(error.localizedDescription)"
+            return nil
+        }
     }
 
     func refreshTranscripts() {
@@ -2279,6 +2312,7 @@ final class NoodleStore {
     }
 
     func useAttachmentAsBackground(_ attachment: ConversationAttachment) async {
+        guard await downloadedFile(attachment) != nil else { return }
         let repository = repository
         do {
             let saved = try await Task.detached {
@@ -2291,6 +2325,7 @@ final class NoodleStore {
     }
 
     func useAttachmentAsIcon(_ attachment: ConversationAttachment) async {
+        guard await downloadedFile(attachment) != nil else { return }
         let repository = repository
         do {
             let updated = try await Task.detached {

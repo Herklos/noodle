@@ -3026,23 +3026,28 @@ struct AgentEditor: View {
                                                                   avatarColorIndex: Int.random(in: 0..<AgentAvatar.colourCount)))
     }
 
-    /// What the plan lends, plus the agent's current harness if the plan no longer lends it.
+    /// The harnesses the editor offers, under the Hub that lends them.
+    private var harnessChoices: [HubHarnesses] {
+        let offered = agent == nil && !hubs.isEmpty ? hubs : [chats]
+        return HubHarnesses.choices(offered.map { hub in
+            HubHarnesses(hub: CurrentHub.name(of: hub.pairing), name: hub.pairing.hubName,
+                         harnesses: hub.pairing.status?.harnesses ?? [])
+        }, botOn: CurrentHub.name(of: chats.pairing), existing: agent?.draft)
+    }
+
+    /// What the agent's Hub lends, plus the agent's current harness if the plan no longer lends it.
     private var harnesses: [LinkHarness] {
-        var lent = chats.pairing.status?.harnesses ?? []
-        if let agent, !lent.contains(where: { $0.provider == agent.draft.provider && $0.profile == agent.draft.profile }) {
-            // Named as the Hub names it, when it still lends the harness under another profile.
-            let name = lent.first { $0.provider == agent.draft.provider }?.providerName ?? agent.draft.provider
-            lent.insert(LinkHarness(provider: agent.draft.provider, providerName: name,
-                                    profile: agent.draft.profile, profileName: nil), at: 0)
-        }
-        return lent
+        harnessChoices.first { $0.hub == CurrentHub.name(of: chats.pairing) }?.harnesses ?? []
     }
 
     private var hub: Binding<String> {
         Binding {
             CurrentHub.name(of: chats.pairing)
         } set: { name in
-            if let hub = hubs.first(where: { CurrentHub.name(of: $0.pairing) == name }) { chats = hub }
+            guard let hub = hubs.first(where: { CurrentHub.name(of: $0.pairing) == name }) else { return }
+            chats = hub
+            // A harness another Hub lends can't be taken along.
+            if !harnesses.contains(where: { $0.provider == draft.provider && $0.profile == draft.profile }) { harness.wrappedValue = nil }
         }
     }
 
@@ -3127,25 +3132,21 @@ struct AgentEditor: View {
                             }
                         }
                     }
-                    if harnesses.isEmpty {
+                    if harnessChoices.isEmpty {
                         Text("Your plan lends no harnesses").foregroundStyle(.secondary)
                     } else {
-                        Picker(selection: harness) {
-                            if harness.wrappedValue == nil { Text("Choose").tag(LinkHarness?.none) }
-                            ForEach(harnesses, id: \.self) { harness in
-                                // The menu shows a second text as a subtitle, so a long profile name keeps its own line.
-                                VStack {
-                                    Text(harness.providerName)
-                                    if let profile = harness.profileName { Text(profile) }
-                                }
-                                .tag(LinkHarness?.some(harness))
+                        NavigationLink {
+                            HarnessList(choices: harnessChoices, hub: CurrentHub.name(of: chats.pairing),
+                                        chosen: harness.wrappedValue) { hub, chosen in
+                                if let other = hubs.first(where: { CurrentHub.name(of: $0.pairing) == hub }) { chats = other }
+                                harness.wrappedValue = chosen
                             }
                         } label: {
-                            Text("Harness")
-                        } currentValueLabel: {
-                            Text(harness.wrappedValue?.chosenName ?? "Choose")
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                            LabeledContent("Harness") {
+                                Text(harness.wrappedValue?.chosenName ?? "Choose")
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
                         }
                         if let lent = harness.wrappedValue, !models.isEmpty {
                             Picker("Model", selection: model) {
@@ -3258,6 +3259,10 @@ struct AgentEditor: View {
             }
             .task(id: CurrentHub.name(of: chats.pairing)) {
                 if chats.pairing.status == nil { await chats.pairing.refresh(quietly: true) }
+                // A new bot can start on any Hub, so the harness list shows what each lends.
+                if agent == nil {
+                    for hub in hubs where hub.pairing.status == nil { await hub.pairing.refresh(quietly: true) }
+                }
             }
             // A new bot starts with a generated name and, until a picture is chosen, a face that suits its name.
             .onChange(of: draft.name) {
@@ -3550,6 +3555,68 @@ extension LinkHarness {
     /// One line for the chosen harness: the provider, then the profile when it is not the harness's own login.
     var chosenName: String {
         profileName.map { "\(providerName) · \($0)" } ?? providerName
+    }
+}
+
+/// The harnesses one Hub lends, which the bot editor lists under the Hub's name, as the Mac does.
+struct HubHarnesses: Equatable {
+    /// The Hub, as `CurrentHub.name(of:)` names it.
+    let hub: String
+    let name: String
+    var harnesses: [LinkHarness]
+
+    /// What the bot editor offers. A new bot can start on any Hub that lends a harness; one already made keeps
+    /// to its own Hub, since its workspace and history stay there, and keeps its harness if the plan no longer lends it.
+    static func choices(_ hubs: [HubHarnesses], botOn hub: String, existing draft: LinkBotDraft?) -> [HubHarnesses] {
+        guard let draft else { return hubs.filter { !$0.harnesses.isEmpty } }
+        guard var own = hubs.first(where: { $0.hub == hub }) else { return [] }
+        if !own.harnesses.contains(where: { $0.provider == draft.provider && $0.profile == draft.profile }) {
+            // Named as the Hub names it, when it still lends the harness under another profile.
+            let name = own.harnesses.first { $0.provider == draft.provider }?.providerName ?? draft.provider
+            own.harnesses.insert(LinkHarness(provider: draft.provider, providerName: name,
+                                             profile: draft.profile, profileName: nil), at: 0)
+        }
+        return [own]
+    }
+}
+
+/// The bot editor's harnesses, under the Hub that lends each, with a profile's name below its harness.
+private struct HarnessList: View {
+    let choices: [HubHarnesses]
+    /// The Hub the bot is on, or is made on.
+    let hub: String
+    let chosen: LinkHarness?
+    let choose: (String, LinkHarness) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(choices, id: \.hub) { section in
+                Section(section.name) {
+                    ForEach(section.harnesses, id: \.self) { harness in
+                        let selected = section.hub == hub && harness == chosen
+                        Button {
+                            choose(section.hub, harness)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(harness.providerName).foregroundStyle(.primary)
+                                    if let profile = harness.profileName {
+                                        Text(profile).font(.subheadline).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if selected { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                            }
+                        }
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                    }
+                }
+            }
+        }
+        .navigationTitle("Harness")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

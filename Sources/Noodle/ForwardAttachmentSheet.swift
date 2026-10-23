@@ -109,6 +109,14 @@ struct ForwardAttachmentSheet: View {
 
     private func send() {
         guard let chosenID else { return }
+        // A file only its Hub has comes down first, to go up again with the forwarded copy.
+        guard store.hubKeeping(attachment) == nil else {
+            Task {
+                guard await store.downloadedFile(attachment) != nil else { return }
+                send()
+            }
+            return
+        }
         do {
             try store.forward(attachment, to: chosenID, comment: comment)
             dismiss()

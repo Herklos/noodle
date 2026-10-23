@@ -116,3 +116,36 @@ public struct LinkSignInFill: Codable, Equatable, Sendable, CustomStringConverti
                displayStyle: .struct)
     }
 }
+
+/// What a person types or picks from their passwords to sign in to a page they watch live, on the
+/// iPhone and on the Mac alike. Only the fields the page has are offered, and only what was entered goes to it.
+public struct LinkSignInEntry: Equatable, Sendable {
+    public var username = ""
+    public var password = ""
+    public var newPassword = ""
+    public var oneTimeCode = ""
+    public var submit = false
+
+    public init() {}
+
+    public func fill(_ form: LinkSignInForm, conversationID: UUID, attachmentID: UUID) -> LinkSignInFill {
+        let kinds = Set(form.fields.map(\.kind))
+        func value(_ text: String, _ wanted: LinkSignInField.Kind...) -> String? {
+            !text.isEmpty && !kinds.isDisjoint(with: wanted) ? text : nil
+        }
+        return LinkSignInFill(conversationID: conversationID, attachmentID: attachmentID, token: form.token,
+                              username: value(username, .username, .email), password: value(password, .password),
+                              newPassword: value(newPassword, .newPassword),
+                              oneTimeCode: value(oneTimeCode.trimmingCharacters(in: .whitespaces), .oneTimeCode), submit: submit)
+    }
+
+    public var isEmpty: Bool { username.isEmpty && password.isEmpty && newPassword.isEmpty && oneTimeCode.isEmpty }
+}
+
+extension LinkSignInForm {
+    /// Whether the page has a field of any of `kinds`.
+    public func has(_ kinds: LinkSignInField.Kind...) -> Bool { fields.contains { kinds.contains($0.kind) } }
+
+    /// The field to type in first: the username for an email field, as both go in one.
+    public var firstField: LinkSignInField.Kind? { fields.first.map { $0.kind == .email ? .username : $0.kind } }
+}

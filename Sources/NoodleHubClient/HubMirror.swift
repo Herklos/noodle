@@ -159,6 +159,24 @@ import Observation
         return try await pairing.channel(.openSurface(conversationID: thread.remote, attachmentID: attachment))
     }
 
+    /// Whether the Hub finds and fills the sign-in fields of a browser watched live.
+    public var signsInToBrowsers: Bool { pairing.status?.signsInToBrowsers == true }
+
+    /// The sign-in fields of the page a browser card in a conversation here shows, while this Mac watches it live.
+    public func signInForm(attachment: UUID, in conversation: UUID) async throws -> LinkSignInForm {
+        guard let thread = thread(local: conversation) else { throw LinkError("That conversation is not on this Hub.") }
+        guard case .signInForm(let form) = try await pairing.request(.signInForm(conversationID: thread.remote, attachmentID: attachment)) else {
+            throw LinkError("The Hub did not answer. Try again.")
+        }
+        return form
+    }
+
+    /// Fills the form `signInForm` found with what the person entered, once.
+    public func fillSignIn(_ entry: LinkSignInEntry, form: LinkSignInForm, attachment: UUID, in conversation: UUID) async throws {
+        guard let thread = thread(local: conversation) else { throw LinkError("That conversation is not on this Hub.") }
+        _ = try await pairing.request(.fillSignIn(entry.fill(form, conversationID: thread.remote, attachmentID: attachment)))
+    }
+
     /// Whether the Hub takes calls with a bot here, as it said when it last listed it.
     public func canCall(agent: UUID) -> Bool { entries.first { $0.agent == agent }?.canCall == true }
 
@@ -591,6 +609,8 @@ import Observation
             try await syncComputers()
             try await syncBrowsers()
             for thread in threads { try await syncMessages(thread.remote) }
+            // Files earlier versions downloaded with every message go too, past the limit.
+            dropOldFiles()
             try await sendPending()
             error = nil
         } catch {
@@ -897,7 +917,8 @@ import Observation
         }
     }
 
-    /// Downloads the files of an incoming message that this copy lacks, keeping their IDs.
+    /// Lists the files of an incoming message that this copy lacks, keeping their IDs. Files come down
+    /// when opened; voice messages and comments on files come at once, as their bubbles need them.
     private func fetchMissing(_ attachments: [LinkAttachment], into thread: Thread) async throws {
         guard !attachments.isEmpty else { return }
         let present = Set(try repository.loadAttachments(conversationID: thread.local).map(\.id))
@@ -917,6 +938,11 @@ import Observation
                 }, id: attachment.id)
                 continue
             }
+            if attachment.voice == nil, attachment.annotation == nil {
+                _ = try repository.recordAttachment(id: attachment.id, originalFilename: attachment.filename, into: thread.local,
+                                                    mediaType: attachment.mediaType, byteCount: Int64(attachment.byteCount))
+                continue
+            }
             let staging = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-\(attachment.id.uuidString)")
             defer { try? FileManager.default.removeItem(at: staging) }
             try await pairing.download(attachment, from: thread.remote, to: staging)
@@ -929,6 +955,107 @@ import Observation
                                                 voice: voice, annotation: attachment.annotation.map { AttachmentAnnotation($0) },
                                                 id: attachment.id, originalFilename: filename)
         }
+    }
+
+    /// Pixels on the long side of the Hub's pictures of files, enough for a bubble in a large window.
+    nonisolated public static let previewPixels = 1440
+    /// How much room files downloaded from each Hub take on this Mac before the least recently opened go.
+    nonisolated public static let keptFilesLimit: Int64 = 2 << 30
+
+    /// Downloads and pictures under way, which everyone asking meanwhile waits for.
+    @ObservationIgnored private var downloading: [UUID: Task<URL, Error>] = [:]
+    @ObservationIgnored private var previewing: [UUID: Task<URL?, Error>] = [:]
+
+    /// The file of an attachment here, downloaded from the Hub the first time it is opened. Files downloaded
+    /// before go past `keptFilesLimit`, the least recently opened first; the Hub still has them.
+    public func file(for attachment: ConversationAttachment) async throws -> URL {
+        let url = repository.attachmentFileURL(attachment)
+        if FileManager.default.fileExists(atPath: url.path) {
+            // Notes it as just opened, so it is among the last to go past the limit.
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+            return url
+        }
+        guard let thread = thread(local: attachment.conversationID) else { throw LinkError("That conversation is not on this Hub.") }
+        if let download = downloading[attachment.id] { return try await download.value }
+        let pairing = pairing, repository = repository, remote = thread.remote
+        let download = Task<URL, Error> {
+            let staging = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: staging) }
+            try await pairing.download(LinkAttachment(id: attachment.id, filename: attachment.originalFilename,
+                                                      mediaType: attachment.mediaType, byteCount: Int(attachment.byteCount)),
+                                       from: remote, to: staging)
+            return try repository.keepAttachmentFile(attachment, from: staging)
+        }
+        downloading[attachment.id] = download
+        defer { downloading[attachment.id] = nil }
+        let kept = try await download.value
+        dropOldFiles(keeping: attachment.id)
+        return kept
+    }
+
+    /// Whether an attachment here waits on the Hub to be opened, its contents not downloaded yet.
+    public func isOnHubOnly(_ attachment: ConversationAttachment) -> Bool {
+        Self.comesWhenOpened(attachment) && thread(local: attachment.conversationID) != nil
+            && !FileManager.default.fileExists(atPath: repository.attachmentFileURL(attachment).path)
+    }
+
+    /// The Hub's picture of a picture, video or PDF here, so its bubble shows without the file coming down;
+    /// kept beside the conversation's files. Nil when the Hub has nothing to show for it.
+    public func preview(of attachment: ConversationAttachment) async throws -> URL? {
+        if let kept = keptPreview(of: attachment) { return kept }
+        guard Self.hasPreview(attachment), let thread = thread(local: attachment.conversationID) else { return nil }
+        if let asking = previewing[attachment.id] { return try await asking.value }
+        let pairing = pairing, remote = thread.remote, url = repository.attachmentPreviewURL(attachment, pixels: Self.previewPixels)
+        let asking = Task<URL?, Error> {
+            let request = LinkRequest.attachmentPreview(conversationID: remote, attachmentID: attachment.id, pixels: Self.previewPixels)
+            guard case .picture(let data) = try await pairing.request(request) else { throw LinkError("The Hub sent an unexpected answer.") }
+            guard let data else { return nil }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            return url
+        }
+        previewing[attachment.id] = asking
+        defer { previewing[attachment.id] = nil }
+        return try await asking.value
+    }
+
+    /// The Hub's picture of a file here, when it was fetched before.
+    public func keptPreview(of attachment: ConversationAttachment) -> URL? {
+        let url = repository.attachmentPreviewURL(attachment, pixels: Self.previewPixels)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Drops the least recently opened files downloaded from the Hub past the limit; they come down
+    /// again when opened. Files of messages the bot has not taken yet, and those still being written, stay.
+    public func dropOldFiles(over limit: Int64 = HubMirror.keptFilesLimit, keeping kept: UUID? = nil) {
+        var files: [(url: URL, size: Int64, opened: Date)] = []
+        for thread in threads {
+            guard let messages = try? repository.loadMessages(conversationID: thread.local),
+                  let attachments = try? repository.loadAttachments(conversationID: thread.local) else { continue }
+            let waiting = Set(messages.filter { $0.author == .user && $0.delivery == .queued }.flatMap { $0.attachmentIDs ?? [] })
+            let sent = Set(messages.flatMap { $0.attachmentIDs ?? [] }).subtracting(waiting)
+            for attachment in attachments where attachment.id != kept && sent.contains(attachment.id) && Self.comesWhenOpened(attachment) {
+                let url = repository.attachmentFileURL(attachment)
+                guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+                      let size = values.fileSize else { continue }
+                files.append((url, Int64(size), values.contentModificationDate ?? .distantPast))
+            }
+        }
+        var total = files.reduce(0) { $0 + $1.size }
+        for file in files.sorted(by: { $0.opened < $1.opened }) where total > limit {
+            try? FileManager.default.removeItem(at: file.url)
+            total -= file.size
+        }
+    }
+
+    /// Files, not links, voice messages or comments on files, which come with their messages.
+    private static func comesWhenOpened(_ attachment: ConversationAttachment) -> Bool {
+        attachment.url == nil && attachment.voice == nil && attachment.annotation == nil
+    }
+
+    /// What the Hub makes pictures of.
+    private static func hasPreview(_ attachment: ConversationAttachment) -> Bool {
+        attachment.mediaType.hasPrefix("image/") || attachment.mediaType.hasPrefix("video/") || attachment.mediaType == "application/pdf"
     }
 
     /// Makes the local stand-in for a bot on the Hub.

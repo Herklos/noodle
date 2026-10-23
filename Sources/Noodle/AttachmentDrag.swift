@@ -52,6 +52,32 @@ enum AttachmentDrag {
         return (provider, exportedURL)
     }
 
+    /// A file that is not on this Mac yet, offered under its name and fetched by `download` once it is dropped.
+    static func promisedProvider(for attachment: ConversationAttachment,
+                                 download: @escaping @MainActor @Sendable () async throws -> URL) -> NSItemProvider {
+        let filename = (attachment.originalFilename as NSString).lastPathComponent
+        let provider = NSItemProvider()
+        provider.suggestedName = filename
+        let contentType = UTType(mimeType: attachment.mediaType).flatMap { $0 == .data || $0.isDynamic ? nil : $0 }
+            ?? UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data
+        provider.registerFileRepresentation(forTypeIdentifier: contentType.identifier, fileOptions: [], visibility: .all) { completion in
+            Task { @MainActor in
+                do {
+                    let file = try await download()
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NoodleAttachmentDrag-\(UUID())", isDirectory: true)
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let exported = directory.appendingPathComponent(filename.isEmpty ? file.lastPathComponent : filename)
+                    try FileManager.default.copyItem(at: file, to: exported)
+                    completion(exported, false, nil)
+                } catch {
+                    completion(nil, false, error)
+                }
+            }
+            return nil
+        }
+        return provider
+    }
+
     /// Files recently dragged out of a conversation, by the copy each drag offered, so a drop on another
     /// conversation can tell them from files dragged in from elsewhere. Only the latest drags are kept.
     @MainActor private static var dragged: [(file: URL, attachment: ConversationAttachment)] = []
@@ -120,6 +146,13 @@ extension ConversationAttachment {
 
 extension NoodleStore {
     func attachmentDragProvider(_ attachment: ConversationAttachment) -> NSItemProvider {
+        if hubKeeping(attachment) != nil {
+            // Promised, and downloaded from the Hub when dropped.
+            return AttachmentDrag.promisedProvider(for: attachment) { [weak self] in
+                guard let url = await self?.downloadedFile(attachment) else { throw WorkspaceError.invalidAttachment }
+                return url
+            }
+        }
         do {
             let export = try AttachmentDrag.exportedProvider(for: attachment, fileURL: attachmentFileURL(attachment))
             AttachmentDrag.remember(attachment, exportedAs: export.file)
@@ -148,6 +181,7 @@ extension NoodleStore {
                     others.append(provider)
                     continue
                 }
+                guard await downloadedFile(attachment) != nil else { continue }
                 do {
                     try forward(attachment, to: conversationID, comment: "")
                 } catch {
@@ -162,7 +196,10 @@ extension NoodleStore {
     }
 
     func saveAttachment(_ attachment: ConversationAttachment) {
-        let fileURL = attachmentFileURL(attachment)
+        withDownloadedFile(attachment) { [weak self] in self?.saveAttachment(attachment, from: $0) }
+    }
+
+    private func saveAttachment(_ attachment: ConversationAttachment, from fileURL: URL) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = (attachment.originalFilename as NSString).lastPathComponent
         let save = { [weak self] (response: NSApplication.ModalResponse) in

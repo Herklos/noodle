@@ -959,6 +959,46 @@ public struct WorkspaceRepository: Sendable {
         return attachment
     }
 
+    /// A file kept elsewhere, as on a Noodle Hub, listed here without its contents until
+    /// `keepAttachmentFile` puts them in place.
+    public func recordAttachment(
+        id: UUID,
+        originalFilename: String,
+        into conversationID: UUID,
+        mediaType: String,
+        byteCount: Int64,
+        now: Date = Date()
+    ) throws -> ConversationAttachment {
+        guard try loadConversations().contains(where: { $0.id == conversationID }) else {
+            throw WorkspaceError.missingConversation(conversationID)
+        }
+        let name = URL(fileURLWithPath: originalFilename).lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filename = name.isEmpty ? "Attachment" : name
+        let attachment = ConversationAttachment(
+            id: id,
+            conversationID: conversationID,
+            originalFilename: filename,
+            storedFilename: storedAttachmentName(id: id, originalFilename: filename),
+            mediaType: mediaType,
+            byteCount: byteCount,
+            createdAt: now
+        )
+        let directory = attachmentsDirectory(conversationID: conversationID)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try write(attachment, to: directory.appendingPathComponent("\(attachment.id.uuidString.lowercased()).json"))
+        return attachment
+    }
+
+    /// Moves the contents of a file listed without them into place. A file already there stays.
+    @discardableResult
+    public func keepAttachmentFile(_ attachment: ConversationAttachment, from source: URL) throws -> URL {
+        let destination = attachmentFileURL(attachment)
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return destination }
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: source, to: destination)
+        return destination
+    }
+
     public func importAttachment(
         data: Data,
         originalFilename: String,

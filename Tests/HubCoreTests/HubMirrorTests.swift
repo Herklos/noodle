@@ -19,13 +19,18 @@ import XCTest
         @MainActor func mirror() -> HubMirror { HubMirror(pairing: device, repository: local, directory: folder) }
     }
 
-    /// `browser` stands in for Noodle Browser on the Hub's Mac.
-    private func fixture(browser: HubBrowsersTests.FakeBrowser? = nil) async throws -> Fixture {
+    /// `browser` stands in for Noodle Browser on the Hub's Mac, and `surfaces` for the live views of its tabs.
+    private func fixture(browser: HubBrowsersTests.FakeBrowser? = nil, surfaces: FakeSurfaces? = nil) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-mirror-\(UUID())")
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let hub: Hub
-        if let browser { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil, browser: { try browser.call($0) }) }
-        else { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil) }
+        if let browser {
+            let opener: (@Sendable (BrowserRequest) async throws -> SurfaceSocket)? = surfaces.map { surfaces in
+                { try surfaces.open("\($0.browserID!) \($0.tabID!)") }
+            }
+            hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil, browser: { try browser.call($0) },
+                      surfaces: SurfaceOpeners(browser: opener))
+        } else { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil) }
         try hub.repository.prepare()
         let link = HubLinkService(hubName: "Mac mini", directory: root.appendingPathComponent("Hub/Link"),
                                   access: hub.access, profiles: hub.harnessProfiles, bots: hub.bots,
@@ -536,9 +541,99 @@ import XCTest
                                                    attachmentIDs: [answer.id])
         await mirror.sync()
         let arrived = try XCTUnwrap(f.local.loadAttachments(conversationID: local.id).first { $0.id == answer.id })
-        XCTAssertEqual(try Data(contentsOf: f.local.attachmentFileURL(arrived)), Data("Summary".utf8))
+        let opened = try await mirror.file(for: arrived)
+        XCTAssertEqual(try Data(contentsOf: opened), Data("Summary".utf8))
         XCTAssertEqual(arrived.originalFilename, answer.originalFilename)
         XCTAssertEqual(try f.local.loadMessages(conversationID: local.id).last?.attachmentIDs, [answer.id])
+    }
+
+    /// A file from the Hub shows from the Hub's picture of it and comes down only when it is opened.
+    func testFilesFromTheHubComeDownOnlyWhenOpened() async throws {
+        let f = try await fixture()
+        let mirror = f.mirror()
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code"))
+        let local = try conversation(of: agent.id, in: f.local)
+        let remoteBot = try XCTUnwrap(f.hub.repository.loadAgents().first)
+        let remote = try conversation(of: remoteBot.id, in: f.hub.repository)
+        let photo = try redPicture(width: 2000, height: 1000)
+        let sent = try f.hub.repository.importAttachment(data: photo, originalFilename: "Red.png", into: remote.id, mediaType: "image/png")
+        _ = try f.hub.repository.sendAgentMessage(agentID: remoteBot.id, conversationID: remote.id, body: "Here.", attachmentIDs: [sent.id])
+        await mirror.sync()
+        XCTAssertNil(mirror.error)
+
+        let arrived = try XCTUnwrap(f.local.loadAttachments(conversationID: local.id).first { $0.id == sent.id })
+        XCTAssertEqual(arrived.originalFilename, "Red.png")
+        XCTAssertEqual(arrived.mediaType, "image/png")
+        XCTAssertEqual(arrived.byteCount, Int64(photo.count))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.local.attachmentFileURL(arrived).path),
+                       "The file came down before it was opened")
+        XCTAssertTrue(mirror.isOnHubOnly(arrived))
+
+        let fetched = try await mirror.preview(of: arrived)
+        let preview = try XCTUnwrap(fetched)
+        let image = try XCTUnwrap(CGImageSourceCreateWithURL(preview as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        XCTAssertEqual(image.width, HubMirror.previewPixels)
+        XCTAssertEqual(image.height, HubMirror.previewPixels / 2)
+        XCTAssertEqual(mirror.keptPreview(of: arrived), preview)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.local.attachmentFileURL(arrived).path))
+
+        let opened = try await mirror.file(for: arrived)
+        XCTAssertEqual(try Data(contentsOf: opened), photo)
+        XCTAssertFalse(mirror.isOnHubOnly(arrived))
+    }
+
+    /// Files downloaded from the Hub past the limit go, the least recently opened first, and come down again
+    /// when opened. Files of messages not sent yet stay.
+    func testDownloadedFilesPastTheLimitGoLeastRecentlyOpenedFirst() async throws {
+        let f = try await fixture()
+        let mirror = f.mirror()
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code"))
+        let local = try conversation(of: agent.id, in: f.local)
+        let remoteBot = try XCTUnwrap(f.hub.repository.loadAgents().first)
+        let remote = try conversation(of: remoteBot.id, in: f.hub.repository)
+        let sent = try ["One", "Two", "Three"].map { name in
+            try f.hub.repository.importAttachment(data: Data(repeating: 1, count: 1000), originalFilename: "\(name).bin",
+                                                  into: remote.id, mediaType: "application/octet-stream")
+        }
+        _ = try f.hub.repository.sendAgentMessage(agentID: remoteBot.id, conversationID: remote.id, body: "Files.",
+                                                   attachmentIDs: sent.map(\.id))
+        await mirror.sync()
+        let files = try f.local.loadAttachments(conversationID: local.id)
+        let one = try XCTUnwrap(files.first { $0.id == sent[0].id })
+        let two = try XCTUnwrap(files.first { $0.id == sent[1].id })
+        let three = try XCTUnwrap(files.first { $0.id == sent[2].id })
+        for file in [one, two, three] { _ = try await mirror.file(for: file) }
+        let unsent = try f.local.importAttachment(data: Data(repeating: 2, count: 1000), originalFilename: "Mine.bin", into: local.id,
+                                                  mediaType: "application/octet-stream")
+        _ = try f.local.sendUserMessage(conversationID: local.id, body: "Mine", attachmentIDs: [unsent.id])
+        let earlier = Date().addingTimeInterval(-60)
+        for (index, file) in [one, two, three].enumerated() {
+            try FileManager.default.setAttributes([.modificationDate: earlier.addingTimeInterval(Double(index))],
+                                                  ofItemAtPath: f.local.attachmentFileURL(file).path)
+        }
+        // Opened again, the first is now the most recent.
+        _ = try await mirror.file(for: one)
+
+        mirror.dropOldFiles(over: 2000)
+        XCTAssertTrue(mirror.isOnHubOnly(two))
+        XCTAssertFalse(mirror.isOnHubOnly(one))
+        XCTAssertFalse(mirror.isOnHubOnly(three))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: f.local.attachmentFileURL(unsent).path))
+
+        let again = try await mirror.file(for: two)
+        XCTAssertEqual(try Data(contentsOf: again), Data(repeating: 1, count: 1000))
+    }
+
+    private func redPicture(width: Int, height: Int) throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
     }
 
     /// A comment on a file reaches the bot on the Hub with what it refers to, and the bot's own comments arrive here.
@@ -703,6 +798,41 @@ import XCTest
         let bot = try XCTUnwrap(mirror.browsers.first?.botIDs.first)
         XCTAssertEqual(mirror.localAgentID(remote: bot), agent.id)
         XCTAssertNil(mirror.localAgentID(remote: UUID()))
+    }
+
+    /// Someone watching a Hub bot's browser live from this Mac signs in with its own fields: the Hub finds the
+    /// form of the page the card here shows and fills it in the browser they watch, with only what they entered.
+    func testAPersonWatchingABrowserFromHereSignsInToIt() async throws {
+        let browser = HubBrowsersTests.FakeBrowser()
+        browser.features = [SurfaceSocket.feature, BrowserSignInForm.feature]
+        let f = try await fixture(browser: browser, surfaces: FakeSurfaces(width: 800))
+        let mirror = f.mirror()
+        XCTAssertTrue(mirror.signsInToBrowsers)
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code"))
+        let local = try conversation(of: agent.id, in: f.local)
+        let remoteBot = try XCTUnwrap(f.hub.repository.loadAgents().first)
+        let remote = try conversation(of: remoteBot.id, in: f.hub.repository)
+        let made = try await f.hub.browsers.create(BrowserDraft(name: "Work"), for: f.ada)
+        let card = try f.hub.repository.importLinkAttachment(BrowserLink.url(browser: made.id, tab: UUID()), into: remote.id,
+                                                             card: LinkCard(title: "Shop", detail: "https://shop.example.test"))
+        _ = try f.hub.repository.sendAgentMessage(agentID: remoteBot.id, conversationID: remote.id, body: "Sign in here.",
+                                                   attachmentIDs: [card.id])
+        await mirror.sync()
+
+        let channel = try await mirror.openSurface(attachment: card.id, in: local.id)
+        defer { channel.cancel() }
+        for try await frame in channel.frames { if case .packets? = LinkSurface.message(frame) { break } }
+        let form = try await mirror.signInForm(attachment: card.id, in: local.id)
+        XCTAssertEqual(form.token, HubBrowsersTests.FakeBrowser.signInToken)
+        XCTAssertEqual(form.fields.map(\.kind), [.username, .password])
+        var entry = LinkSignInEntry()
+        entry.username = "ada@example.com"
+        entry.password = "correct horse"
+        entry.oneTimeCode = "482913"
+        try await mirror.fillSignIn(entry, form: form, attachment: card.id, in: local.id)
+        XCTAssertEqual(browser.filled.map(\.browser), [made.id])
+        XCTAssertEqual(browser.filled.map(\.values), [BrowserSignInValues(token: HubBrowsersTests.FakeBrowser.signInToken,
+                                                                          username: "ada@example.com", password: "correct horse")])
     }
 
     /// A connected mirror, one of its connections, and the pages it asked the browser to open.

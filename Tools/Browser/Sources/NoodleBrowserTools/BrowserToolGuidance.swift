@@ -102,6 +102,7 @@ enum BrowserToolGuidance {
         """
         Commands return JSON; errors exit 1. list needs no browser ID. Tab operations
         require the ID returned by open or tabs. Keep the browser and tab IDs together.
+        A browser holds at most 100 tabs; close the ones you no longer need (tabs, close).
         Browser metadata may include description, the user's note on what that
         browser is for, and icon, a base64 PNG thumbnail for display only. When
         several browsers are assigned, choose by name and description; ask the
