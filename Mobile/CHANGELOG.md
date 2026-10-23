@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- Send to Agent in Shortcuts sends a message, files or both to a bot or group, straight to its Hub as the share sheet does, and can open the chat after sending. The message can be left out when files are attached.
+- Siri knows Noodle's Shortcuts actions, with the same phrases as on the Mac, such as "Call Scout with Noodle", "Open chat with House in Noodle" or "Send to Scout with Noodle".
+
+### Changed
+
+- Shortcuts' Open Chat with Agent is now Open Chat, as on the Mac, and opens a group's chat too.
+
+### What to Test
+
+- In Shortcuts, add Send to Agent, choose a group, leave Message empty and add a file: check it arrives in the group as "Sent 1 attachment" with the file. Run it to a bot with a message and Open Chat on: check the message arrives and the bot's chat opens. Run it with neither a message nor files: check it asks what to send.
+- Add Open Chat and choose a group: check the group's chat opens. Run a Shortcut made with Open Chat with Agent before updating: check it still opens its bot's chat, or asks for the bot if it lost it.
+- Ask Siri "Call <bot> with Noodle", "Open chat with <group> in Noodle" and "Send to <bot> with Noodle": check each works. Check Call Agent and the Agent control on the Action Button still call the bot.
+
 ## [0.44.0] - 2026-10-23
 
 ### Added

@@ -60,7 +60,8 @@ let project = Project(
                 // Conversations told to iOS, which the share sheet suggests and reply notifications show as messages.
                 "NSUserActivityTypes": ["INSendMessageIntent"],
             ]),
-            sources: ["Sources/NoodleMobile/**", "Sources/Shared/**"],
+            // The widgets' bot entity too, for the Shortcuts actions that take a bot.
+            sources: ["Sources/NoodleMobile/**", "Sources/Shared/**", "Sources/NoodleMobileWidgets/BotEntity.swift"],
             // The Mac's samples of each harness voice, to hear before choosing one.
             resources: ["Support/Assets.xcassets", .folderReference(path: "../Support/VoicePreviews")],
             entitlements: .file(path: "Support/NoodleMobile.entitlements"),

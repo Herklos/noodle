@@ -1,3 +1,4 @@
+import AppIntents
 import HubLink
 import NoodleBrand
 import NoodlePatch
@@ -428,6 +429,8 @@ enum HubThread: HubConversation {
         let targets = shareTargets
         guard targets != savedShareTargets else { return }
         ShareTargets.save(targets, in: pairing.directory)
+        // Siri hears the names Shortcuts actions offer.
+        NoodleShortcuts.updateAppShortcutParameters()
         savedShareTargets = targets
     }
 

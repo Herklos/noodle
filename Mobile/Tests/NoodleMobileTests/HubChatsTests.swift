@@ -1,3 +1,4 @@
+import AppIntents
 import CloudKit
 import Foundation
 import HubLink
@@ -7,6 +8,7 @@ import UIKit
 import SwiftUI
 import Synchronization
 import Testing
+import UniformTypeIdentifiers
 
 /// A Hub with one bot that answers every message, reached over QUIC like the real one.
 private actor FakeHub {
@@ -1129,6 +1131,37 @@ private actor RecordedSubscriptions: PushSubscriptions {
         // A picture alone says what was sent, as the app's own composer does.
         try await SharedSend.send("", files: [try PickedFiles.store(data, named: "Again.png", type: .png)], to: target, hubs: hubs)
         #expect(await hub.bodies(saying: "Sent 1 attachment") == 1)
+    }
+
+    /// Shortcuts offer the bots and groups the share sheet does. Open Chat opens either, and Send to Agent sends
+    /// straight to the Hub, files alone saying what was sent.
+    @Test func shortcutsOpenAndSendToBotsAndGroups() async throws {
+        let hub = FakeHub()
+        let house = await hub.addGroup(named: "House", saying: "Hi all")
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let key = CurrentHub.space(of: chats.pairing)
+
+        let offered = ShortcutConversations.all(in: hubs)
+        #expect(Set(offered.map(\.name)) == ["Scout", "House"])
+        #expect(ShortcutConversations.all(in: hubs, matching: " hou ").map(\.name) == ["House"])
+        // A bot keeps the ID its widgets and Call Agent know it by.
+        let bot = try #require(offered.first { !$0.isGroup })
+        #expect(bot.id == WidgetBot.id(hub: key, conversationID: scout.conversationID))
+        let group = try #require(offered.first { $0.isGroup })
+        let route = CurrentHub.route(to: try ShortcutConversations.link(to: group.id, in: hubs), in: [chats.pairing])
+        #expect(route == NotificationRoute(topic: PushTopic.topic(for: chats.pairing), conversation: house.id))
+        #expect(throws: ConversationGone.self) { try ShortcutConversations.link(to: "gone", in: hubs) }
+
+        try await ShortcutConversations.send("", files: [IntentFile(data: Data("notes".utf8), filename: "notes.txt", type: .plainText)],
+                                             to: group.id, in: hubs)
+        #expect(await hub.bodies(saying: "Sent 1 attachment") == 1)
+        try await ShortcutConversations.send("Look at this", files: [], to: bot.id, in: hubs)
+        try await chats.reload()
+        #expect(chats.messages(of: scout).contains { $0.body == "Look at this" && $0.attachments.isEmpty })
     }
 
     @Test func aBotsFileIsDownloadedOnceAndKept() async throws {

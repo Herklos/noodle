@@ -2,66 +2,8 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-// Actions for Shortcuts, Siri, Control Center and the Action Button, named as the Mac's Send to Agent is. Each opens
-// the app by the link a widget uses, so the app does the calling; a Shortcut may leave the bot to be picked when it runs.
-
-/// Calls a bot, opening its chat; one that takes no calls just has its chat opened.
-struct CallAgentIntent: AppIntent {
-    static let title: LocalizedStringResource = "Call Agent"
-    static let description = IntentDescription("Call a Noodle agent. If it can't take calls, your chat with it opens instead.",
-                                               searchKeywords: ["Call Bot", "Call a Bot", "Bot"])
-
-    @Parameter(title: "Agent", requestValueDialog: "Which agent should Noodle call?")
-    var bot: BotEntity?
-
-    init() {}
-
-    init(bot: BotEntity?) { self.bot = bot }
-
-    static var parameterSummary: some ParameterSummary { Summary("Call \(\.$bot)") }
-
-    func perform() async throws -> some IntentResult & OpensIntent {
-        guard let bot else { throw $bot.needsValueError() }
-        return .result(opensIntent: OpenURLIntent(WidgetLink(calling: try AgentIntents.shelved(bot)).url))
-    }
-}
-
-/// Opens the chat with a bot.
-struct OpenAgentChatIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open Chat with Agent"
-    static let description = IntentDescription("Open your chat with a Noodle agent.",
-                                               searchKeywords: ["Open Chat with Bot", "Chat with Bot", "Bot"])
-
-    @Parameter(title: "Agent", requestValueDialog: "Which agent's chat should Noodle open?")
-    var bot: BotEntity?
-
-    init() {}
-
-    init(bot: BotEntity?) { self.bot = bot }
-
-    static var parameterSummary: some ParameterSummary { Summary("Open chat with \(\.$bot)") }
-
-    func perform() async throws -> some IntentResult & OpensIntent {
-        guard let bot else { throw $bot.needsValueError() }
-        return .result(opensIntent: OpenURLIntent(WidgetLink(try AgentIntents.shelved(bot)).url))
-    }
-}
-
-private enum AgentIntents {
-    /// The bot as the app last left it, so a call goes only to one that takes calls.
-    static func shelved(_ bot: BotEntity) throws -> WidgetBot {
-        guard let shelved = Shelf.load().bot(bot.id) else { throw AgentIntentError.gone }
-        return shelved
-    }
-}
-
-private enum AgentIntentError: LocalizedError {
-    case gone
-
-    var errorDescription: String? { "That agent is no longer available. Open Noodle to see your agents." }
-}
-
-// MARK: - Control
+// The Agent control, for Control Center and the Action Button. It opens the app by the link a widget uses, so the app
+// does the calling. The Shortcuts actions are the app's own.
 
 enum AgentAction: String, AppEnum {
     case call, chat
@@ -87,7 +29,7 @@ struct AgentControlIntent: ControlConfigurationIntent {
     init() {}
 }
 
-/// What the control does when pressed, as it was set up. Shortcuts offer Call Agent and Open Chat with Agent instead.
+/// What the control does when pressed, as it was set up. Shortcuts offer Call Agent and Open Chat instead.
 struct AgentControlAction: AppIntent {
     static let title: LocalizedStringResource = "Call or Open Chat with Agent"
     static var isDiscoverable: Bool { false }
@@ -107,7 +49,7 @@ struct AgentControlAction: AppIntent {
 
     func perform() async throws -> some IntentResult & OpensIntent {
         guard let bot else { throw $bot.needsValueError() }
-        let shelved = try AgentIntents.shelved(bot)
+        let shelved = try Shelf.bot(bot)
         return .result(opensIntent: OpenURLIntent((action == .call ? WidgetLink(calling: shelved) : WidgetLink(shelved)).url))
     }
 }

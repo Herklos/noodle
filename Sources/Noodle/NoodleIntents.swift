@@ -122,7 +122,7 @@ struct SendNoodleCommandIntent: AppIntent {
     @Parameter(title: "Files", description: "Files to send with the message.")
     var files: [IntentFile]?
 
-    @Parameter(title: "Open Conversation", description: "Open the conversation in Noodle after sending.", default: false)
+    @Parameter(title: "Open Chat", description: "Open the chat in Noodle after sending.", default: false)
     var opensConversation: Bool
 
     static var parameterSummary: some ParameterSummary {
@@ -152,15 +152,16 @@ struct SendNoodleCommandIntent: AppIntent {
     }
 }
 
-/// Opens a bot's or group's conversation, as clicking its notification does.
-struct OpenConversationIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open Conversation"
+/// Opens a bot's or group's chat, as clicking its notification does.
+struct OpenChatIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open Chat"
     static let description = IntentDescription(
-        "Open your conversation with a Noodle agent or group of agents.",
-        searchKeywords: ["Open Chat with Agent", "Open Chat with Bot", "Chat with Bot", "Bot", "Group"]
+        "Open your chat with a Noodle agent or group of agents.",
+        searchKeywords: ["Open Chat with Agent", "Open Chat with Bot", "Open Conversation", "Conversation", "Chat with Bot",
+                         "Bot", "Group"]
     )
 
-    @Parameter(title: "Agent or Group", requestValueDialog: "Which conversation should Noodle open?")
+    @Parameter(title: "Agent or Group", requestValueDialog: "Which chat should Noodle open?")
     var conversation: NoodleConversationEntity
 
     static var parameterSummary: some ParameterSummary {
@@ -218,13 +219,14 @@ struct NoodleShortcuts: AppShortcutsProvider {
             systemImageName: "paperplane.fill"
         )
         AppShortcut(
-            intent: OpenConversationIntent(),
+            intent: OpenChatIntent(),
             phrases: [
-                "Open a conversation in \(.applicationName)",
+                "Open a chat in \(.applicationName)",
+                "Open chat with \(\.$conversation) in \(.applicationName)",
                 "Open \(\.$conversation) in \(.applicationName)",
                 "Open my chat with \(\.$conversation) in \(.applicationName)"
             ],
-            shortTitle: "Open Conversation",
+            shortTitle: "Open Chat",
             systemImageName: "bubble.left.and.bubble.right.fill"
         )
         AppShortcut(
