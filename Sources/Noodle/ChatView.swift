@@ -326,6 +326,14 @@ struct ChatView: View {
             NSWorkspace.shared.open(link)
             return
         }
+        // A file only its Hub has opens once it has come down.
+        if store.hubKeeping(attachment) != nil {
+            attachmentOpenTask = Task { @MainActor in
+                guard await store.downloadedFile(attachment) != nil, !Task.isCancelled else { return }
+                showPreview(attachment, among: group)
+            }
+            return
+        }
         // Annotations stay in Quick Look, where their note is shown and edited.
         if attachment.url == nil, attachment.annotation == nil, QuickLookBypass.isHeld() {
             attachmentPreview.close()
@@ -343,7 +351,9 @@ struct ChatView: View {
             guard let store else { throw WorkspaceError.missingConversation(attachment.conversationID) }
             return try store.reviseAnnotationComment(attachment, comment: comment)
         } : nil
-        let gallery = ConversationAttachment.previewGallery(opening: attachment, among: group).items
+        // Files only their Hub has stay out of the gallery; each comes down when opened.
+        let gallery = ConversationAttachment.previewGallery(opening: attachment,
+                                                            among: group.filter { store.hubKeeping($0) == nil }).items
         attachmentPreview.show(attachment, url: store.attachmentFileURL(attachment),
             gallery: gallery.map { ($0, store.attachmentFileURL($0)) }, edit: edit,
             canEdit: { [weak store] in store?.canEditAnnotation($0) == true }) { [weak store] note, content, source in

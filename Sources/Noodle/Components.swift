@@ -3,6 +3,7 @@ import NoodleCore
 import NoodleRuntime
 import NoodleRuntimeSettings
 import HubLink
+import NoodleHubClient
 
 struct ConversationAvatar: View {
     let participants: [AgentRecord]
@@ -439,9 +440,11 @@ struct MessageBubble: View {
     }
 
     private func attachmentPreview(_ attachment: ConversationAttachment) -> some View {
-        AttachmentInlinePreview(
+        let hub = store.hubKeeping(attachment)
+        return AttachmentInlinePreview(
             attachment: attachment,
             fileURL: store.attachmentFileURL(attachment),
+            hubPreview: hub.map { hub in { try? await hub.preview(of: attachment) } },
             shouldLoad: isVisible,
             isSelected: selectedAttachmentID == attachment.id,
             select: { selectedAttachmentID = attachment.id },
@@ -509,7 +512,11 @@ struct MessageBubble: View {
             preview: attachment.map { item in { previewAttachment(item, store.attachments(for: message)) } },
             reveal: attachment.map { item in { store.revealAttachment(item) } },
             save: attachment.flatMap { item in item.isSavable ? { store.saveAttachment(item) } : nil },
-            backgroundImageURL: attachment.map { store.attachmentFileURL($0) },
+            // A picture only its Hub has is told by the Hub's picture of it, and comes down when used.
+            backgroundImageURL: attachment.flatMap { item -> URL? in
+                guard let hub = store.hubKeeping(item) else { return store.attachmentFileURL(item) }
+                return item.mediaType.hasPrefix("image/") ? hub.keptPreview(of: item) : nil
+            },
             useAsBackground: attachment.map { item in
                 { Task { await store.useAttachmentAsBackground(item) } }
             },

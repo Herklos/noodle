@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Files in conversations with bots on a Noodle Hub no longer all download to this Mac. Pictures, videos and PDFs show the Hub's preview, and a file downloads when you open, share, save or drag it, or use it as a background. Downloaded files take up to 2 GB for each Hub; past that, the ones you opened least recently are removed from this Mac and download again when you open them. Files sent to bots this Mac hosts still download, as the bots read them.
+
 ### Fixed
 
 - On mobile, tapping the padding around the message text focuses the input, including near the top and bottom of the visible field.
