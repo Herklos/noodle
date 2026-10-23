@@ -6,10 +6,15 @@
 
 - A bot's Harness opens a list of the harnesses under the Hub that lends them, with a profile's name under its harness, as on the Mac, instead of a menu of bare names. A bot already made lists only its own Hub's harnesses; a new bot lists every Hub's, and choosing one makes it on that Hub.
 
+### Fixed
+
+- Mark Up on a PDF or a document such as a Word file shows its page to mark instead of a black screen. A PDF opened on its own shows in a viewer that marks the page you scrolled to; other documents mark their first page.
+
 ### What to Test
 
 - Open a bot's info and tap Harness: check the harnesses are listed under the bot's Hub name, each profile's name shows under its harness, the current one has a checkmark, and only that Hub's harnesses are offered. Choose another: check the row shows it.
 - With two Hubs joined, tap New Bot, then Harness: check each Hub's harnesses are under its name. Choose one on the other Hub: check the Hub row follows, and the bot is made there.
+- Open a PDF a bot sent, scroll to its second page and tap Mark Up: check that page shows, not a black screen, and a box dragged on it goes with the comment. Do the same with a .docx: check its first page shows. Check Mark Up on a picture still works as before.
 
 ## [0.43.1] - 2026-10-23
 

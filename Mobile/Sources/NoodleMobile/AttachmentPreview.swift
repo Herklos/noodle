@@ -1,4 +1,5 @@
 import HubLink
+import PDFKit
 import QuickLook
 import SwiftUI
 import UIKit
@@ -47,6 +48,7 @@ struct AttachmentPreviewScreen: View {
     /// Whether the comment last open was saved, which ends Mark Up.
     @State private var saved = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.displayScale) private var displayScale
 
     init(request: AttachmentPreviewRequest, annotating: Annotating) {
         self.request = request
@@ -56,6 +58,8 @@ struct AttachmentPreviewScreen: View {
 
     private var item: AttachmentPreviewRequest.Item { request.items[min(current, request.items.count - 1)] }
     private var showsText: Bool { request.items.count == 1 && AttachmentPreviewRequest.isText(item) }
+    /// A PDF on its own shows in PDFKit, which tells the page showing for Mark Up, as Quick Look does not.
+    private var showsPDF: Bool { request.items.count == 1 && MarkUpStill.kind(of: item.attachment, at: item.url) == .pdf }
 
     var body: some View {
         NavigationStack {
@@ -72,6 +76,8 @@ struct AttachmentPreviewScreen: View {
                     } else {
                         ProgressView()
                     }
+                } else if showsPDF {
+                    PDFContent(url: item.url, content: content)
                 } else {
                     QuickLookContent(urls: request.items.map(\.url), start: request.start, content: content)
                 }
@@ -142,17 +148,73 @@ struct AttachmentPreviewScreen: View {
                 selection = nil
             } else {
                 current = content.currentIndex ?? current
-                snapshot = still()
+                Task { snapshot = await still() }
             }
         }
         .tint(snapshot == nil ? nil : .accentColor)
         .accessibilityValue(snapshot == nil ? "Off" : "On")
     }
 
-    /// A picture is marked on itself, as it shows before zooming; anything else on what the preview shows.
-    private func still() -> UIImage? {
-        if item.attachment.mediaType.hasPrefix("image/"), let image = DecodedImages.downsampled(item.url, to: 2400) { return image }
-        return content.snapshot()
+    /// A picture is marked on itself, as it shows before zooming, and a PDF on the page showing. Quick Look draws
+    /// in another process, so a snapshot of it is black: any other file is marked on the page Quick Look renders of it.
+    private func still() async -> UIImage? {
+        if showsText { return content.snapshot() }
+        let item = item
+        switch MarkUpStill.kind(of: item.attachment, at: item.url) {
+        case .image:
+            return DecodedImages.downsampled(item.url, to: 2400)
+        case .pdf:
+            // Among other files Quick Look shows the PDF and tells no page, so its first.
+            guard let page = content.pdf?.currentPage ?? PDFDocument(url: item.url)?.page(at: 0) else { return nil }
+            return MarkUpStill.page(page)
+        case .document:
+            let size = content.view?.bounds.size ?? .zero
+            return await MarkUpStill.document(item.url, fitting: size.width > 0 ? size : CGSize(width: 1024, height: 1024),
+                                              scale: displayScale)
+        }
+    }
+}
+
+/// What Mark Up freezes of a file to drag a box on.
+enum MarkUpStill {
+    enum Kind { case image, pdf, document }
+
+    static func kind(of attachment: LinkAttachment, at url: URL) -> Kind {
+        let type = UTType(mimeType: attachment.mediaType).flatMap { $0 == .data ? nil : $0 }
+            ?? UTType(filenameExtension: url.pathExtension)
+        if type?.conforms(to: .image) == true { return .image }
+        if type?.conforms(to: .pdf) == true { return .pdf }
+        return .document
+    }
+
+    /// A PDF page as it prints, on white, at most `longest` pixels on its longer side.
+    static func page(_ page: PDFPage, longest: CGFloat = 2400) -> UIImage {
+        var bounds = page.bounds(for: .cropBox).size
+        if page.rotation % 180 != 0 { bounds = CGSize(width: bounds.height, height: bounds.width) }
+        let scale = longest / max(bounds.width, bounds.height, 1)
+        let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            guard let pdf = page.pageRef else { return }
+            // PDF space runs up from the bottom left; the drawing transform turns and moves the box into place.
+            let cg = context.cgContext
+            cg.translateBy(x: 0, y: size.height)
+            cg.scaleBy(x: scale, y: -scale)
+            let box = CGRect(origin: .zero, size: bounds)
+            cg.clip(to: box)
+            cg.concatenate(pdf.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: true))
+            cg.drawPDFPage(pdf)
+        }
+    }
+
+    /// The page Quick Look renders of a document, as large as the preview shows it.
+    static func document(_ url: URL, fitting size: CGSize, scale: CGFloat) async -> UIImage? {
+        let request = QLThumbnailGenerator.Request(fileAt: url, size: size, scale: scale, representationTypes: .thumbnail)
+        return try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).uiImage
     }
 }
 
@@ -160,6 +222,7 @@ struct AttachmentPreviewScreen: View {
 @MainActor final class PreviewContent {
     weak var view: UIView?
     weak var quickLook: QLPreviewController?
+    weak var pdf: PDFView?
 
     var currentIndex: Int? { quickLook?.currentPreviewItemIndex }
 
@@ -201,6 +264,25 @@ private struct QuickLookContent: UIViewControllerRepresentable {
             urls[index] as NSURL
         }
     }
+}
+
+/// A PDF on its own, scrolled through as in Quick Look.
+private struct PDFContent: UIViewRepresentable {
+    let url: URL
+    let content: PreviewContent
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.document = PDFDocument(url: url)
+        content.view = view
+        content.pdf = view
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {}
 }
 
 /// A text or code file as its text, selectable, with Comment… beside Copy for what is selected.
