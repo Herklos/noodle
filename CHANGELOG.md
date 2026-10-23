@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - Bots can continue on another harness when theirs runs out of usage. Turn it on in Settings → Harnesses and put the harnesses in order. A bot whose harness runs out moves to the next one that is on, installed and has usage left, with that harness's default model, and says so in its conversation, such as "Codex is out of usage, continuing on Claude Code". It goes back once its own harness has usage again, at a moment it is not working, or when you choose Kick. Bot settings are not changed. If every harness is out of usage, the bot pauses as before.
+- Sign in to a page in a Hub bot's browser you watch live with this Mac's own fields: click Sign In… at the top of the live view, pick your login from Passwords or type it, and click Fill. Codes from Messages are offered too. Turn on Submit to send the form as well. Needs a Hub and Noodle Browser that offer it.
 
 ### Changed
 
@@ -20,6 +21,7 @@ All notable changes to Noodle are documented here, following
 
 - On mobile, tapping the padding around the message text focuses the input, including near the top and bottom of the visible field.
 - Mobile conversations stay aligned as the input grows, keep their end in view as the keyboard moves, and stop following new messages immediately when you scroll up to read older ones.
+- Link previews use far less memory: a page's picture is read at the size its card shows, and the full-size picture and icon are no longer kept.
 
 ## [0.73.0] - 2026-10-22
 

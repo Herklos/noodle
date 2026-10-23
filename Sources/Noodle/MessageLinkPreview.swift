@@ -3,6 +3,7 @@ import CryptoKit
 import MapKit
 import NoodleCore
 import SwiftUI
+import UniformTypeIdentifiers
 @preconcurrency import LinkPresentation
 
 struct MessageLinkPreview: View {
@@ -283,14 +284,7 @@ final class LinkPreviewMetadataCache {
             try? FileManager.default.removeItem(at: file)
             return nil
         }
-        var metadata: LPLinkMetadata?
-        if saved.fetched {
-            metadata = LPLinkMetadata()
-            metadata?.originalURL = url
-            metadata?.url = url
-            metadata?.title = saved.title
-        }
-        let result = Result(metadata: metadata, image: saved.image.flatMap(NSImage.init(data:)).map(Self.cardPicture),
+        let result = Result(metadata: saved.fetched ? Self.titled(url, saved.title) : nil, image: saved.image.flatMap(NSImage.init(data:)).map(Self.cardPicture),
                             savedAt: saved.savedAt)
         cache.setObject(result, forKey: url as NSURL)
         return result
@@ -347,7 +341,8 @@ final class LinkPreviewMetadataCache {
         pending[url] = nil
         request.deadline?.cancel()
         request.cancellations.forEach { $0() }
-        let result = Result(metadata: request.metadata, image: image.map(Self.cardPicture), savedAt: now())
+        let result = Result(metadata: request.metadata.map { Self.titled(url, $0.title) }, image: image.map(Self.cardPicture),
+                            savedAt: now())
         // Cache failures too, for this launch: rebuilding visible rows must not start retry loops.
         cache.setObject(result, forKey: url as NSURL)
         if request.metadata != nil || image != nil, let file = file(for: url) {
@@ -374,6 +369,30 @@ final class LinkPreviewMetadataCache {
         context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage().map { NSImage(cgImage: $0, size: NSSize(width: width, height: height)) } ?? image
     }
+    /// A page's picture decoded straight at the size `cardPicture` would scale it to. Decoding it whole
+    /// first took hundreds of megabytes, if only briefly, for a large one.
+    nonisolated static func cardPicture(from data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0 else { return nil }
+        let scale = min(1, max(LinkPreviewCard.cardWidth * 2 / width, LinkPreviewCard.imageHeight * 2 / height))
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int((max(width, height) * scale).rounded(.up)),
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ] as CFDictionary) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+    }
+    /// What a card shows of a page. The page's own metadata also holds its full picture and icon.
+    private static func titled(_ url: URL, _ title: String?) -> LPLinkMetadata {
+        let metadata = LPLinkMetadata()
+        metadata.originalURL = url
+        metadata.url = url
+        metadata.title = title
+        return metadata
+    }
     private func isFresh(_ savedAt: Date) -> Bool { now().timeIntervalSince(savedAt) < Self.lifetime }
     private func file(for url: URL) -> URL? {
         let name = SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -391,8 +410,10 @@ final class LinkPreviewMetadataCache {
         return { provider.cancel() }
     }
     nonisolated static func nativeImage(_ provider: NSItemProvider, completion: @escaping (NSImage?) -> Void) -> (() -> Void) {
-        let progress = provider.loadObject(ofClass: NSImage.self) { object, _ in
-            completion(object as? NSImage)
+        let progress = provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+            if let picture = data.flatMap(cardPicture(from:)) { return completion(picture) }
+            // A picture ImageIO cannot read, such as a vector icon, is drawn by AppKit.
+            _ = provider.loadObject(ofClass: NSImage.self) { object, _ in completion(object as? NSImage) }
         }
         return { progress.cancel() }
     }
