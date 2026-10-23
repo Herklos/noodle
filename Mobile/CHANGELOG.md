@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- A call answered in the car stays on the car's speakers. If the call was on the iPhone speaker, connecting CarPlay, Bluetooth in the car, AirPods or other headphones now moves it there, and it no longer jumps back to the phone speaker.
 - Mark Up on a PDF or a document such as a Word file shows its page to mark instead of a black screen. A PDF opened on its own shows in a viewer that marks the page you scrolled to; other documents mark their first page.
 
 ### What to Test
@@ -20,6 +21,7 @@
 - With two Hubs joined, tap New Bot, then Harness: check each Hub's harnesses are under its name. Choose one on the other Hub: check the Hub row follows, and the bot is made there.
 - Open a PDF a bot sent, scroll to its second page and tap Mark Up: check that page shows, not a black screen, and a box dragged on it goes with the comment. Do the same with a .docx: check its first page shows. Check Mark Up on a picture still works as before.
 - Touch and hold a group and choose Mute. Have a bot reply there while Noodle is closed: check no notification arrives, the app icon doesn't count it, and the group isn't under Unread but shows a grey dot. Check the group shows as muted on your Mac too. Choose Unmute: check the next reply notifies again.
+- In a car with CarPlay or Bluetooth, have a bot call you and answer on the car's screen: check you hear the bot through the car's speakers, never the phone speaker. Call a bot with Speaker on, then connect CarPlay or AirPods during the call: check the call moves there and stays there.
 
 ## [0.43.1] - 2026-10-23
 

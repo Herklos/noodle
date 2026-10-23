@@ -647,17 +647,24 @@ final class SpokenAudio: @unchecked Sendable {
     /// loudspeaker. Routes the app sets itself arrive while it switches, or match it after.
     private func followCallScreen() -> Bool {
         guard !closed, routeTask == nil,
-              let on = Self.speakerChosen(by: AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType)),
-              on != speaker else { return false }
+              let on = Self.speaker(afterRouteTo: AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType), speaker: speaker)
+        else { return false }
         onSpeaker?(on)
         return true
     }
 
-    /// Nil for outputs other than the phone's own, such as AirPods.
+    /// Where the call goes once the route changed: nil to stay as it is. A car, AirPods or other headphones
+    /// connecting end the loudspeaker override, and resuming with it would take the call off them onto the
+    /// phone; so any output but the loudspeaker turns the speaker off, and the call stays where iOS put it.
+    nonisolated static func speaker(afterRouteTo outputs: [AVAudioSession.Port], speaker: Bool) -> Bool? {
+        guard let on = speakerChosen(by: outputs), on != speaker else { return nil }
+        return on
+    }
+
+    /// Whether the call is on the phone's loudspeaker. Nil while there is no output, as between routes.
     nonisolated static func speakerChosen(by outputs: [AVAudioSession.Port]) -> Bool? {
         if outputs.contains(.builtInSpeaker) { return true }
-        if outputs.contains(.builtInReceiver) { return false }
-        return nil
+        return outputs.isEmpty ? nil : false
     }
 
     func setMuted(_ muted: Bool) { microphone.isMuted = muted }
