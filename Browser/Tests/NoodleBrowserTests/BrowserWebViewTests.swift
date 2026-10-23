@@ -47,7 +47,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.surface.ignoresMouseEvents)
         tab.watched = false
         XCTAssertFalse(tab.surface.isVisible)
-        XCTAssertEqual(tab.surface.alphaValue, 1)
+        XCTAssertEqual(tab.surface.alphaValue, 0, "the window turned opaque off screen")
     }
 
     /// A tab a bot uses keeps drawing and getting animation frames with no browser window open,

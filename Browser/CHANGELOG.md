@@ -5,6 +5,7 @@
 ### Fixed
 
 - A popup from a bot's page past the 100-tab limit no longer shows you an alert when the browser window shows the bot's tab. The bot is told to close tabs it no longer needs and try again.
+- Nothing flashes on screen anymore while a bot uses a tab, such as a page's note about a form field the bot left empty. Tabs bots use stay fully out of sight.
 
 ## [0.21.4] - 2026-10-22
 

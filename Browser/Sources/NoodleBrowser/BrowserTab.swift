@@ -211,16 +211,16 @@ import WebKit
         }
     }
     func endAttention() { attention?.cancel(); attention = nil; attended = false }
+    /// The tab's own window is on screen, out of sight, for a bot or a live view.
+    private var shownUnseen = false
     private func showUnseen() {
         let unseen = (watched || attended) && !stopped && web.window === surface
-        guard unseen != (surface.alphaValue == 0) else { return }
-        // Alpha reaches the screen at once, so the window turns opaque only once it is off screen.
-        if !unseen { surface.orderOut(nil) }
-        surface.alphaValue = unseen ? 0 : 1
-        surface.ignoresMouseEvents = unseen
+        guard unseen != shownUnseen else { return }
+        shownUnseen = unseen
+        // The window is transparent and takes no clicks for good, so going on screen or off never shows it.
         // A transparent window at the back counts as occluded, which WebKit reports to the page as hidden.
         setOcclusionDetection(!unseen)
-        if unseen { surface.showUnseen() }
+        if unseen { surface.showUnseen() } else { surface.orderOut(nil) }
     }
     private func setOcclusionDetection(_ enabled: Bool) {
         let selector = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
@@ -775,6 +775,24 @@ struct BrowserPageFailure: Equatable {
 final class BrowserSurfacePanel: NSPanel {
     private static let log = Logger(subsystem: "com.pdparchitect.noodle.browser", category: "surface")
     private var showing = false
+
+    override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
+        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+        super.alphaValue = 0
+        ignoresMouseEvents = true
+    }
+    /// Transparent for good, so no order of going on or off screen, or of the window server applying
+    /// it, can ever show the page, as a window turned opaque whenever it was off screen could.
+    override var alphaValue: CGFloat {
+        get { super.alphaValue }
+        set { super.alphaValue = 0 }
+    }
+    /// Windows a page puts up beside itself, such as a form's validation message, are as transparent and
+    /// take no clicks: on screen with this window, they would show a bot's page on the desktop.
+    override func addChildWindow(_ child: NSWindow, ordered place: NSWindow.OrderingMode) {
+        child.alphaValue = 0; child.ignoresMouseEvents = true
+        super.addChildWindow(child, ordered: place)
+    }
 
     func showUnseen() {
         showing = true; defer { showing = false }
