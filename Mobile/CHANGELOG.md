@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Taps in the padding around the message text now focus the input, so the visible message field responds above and below its text too.
+- Conversations keep their horizontal alignment and their last message in place as the message field grows or the keyboard moves.
+- Scrolling up to read older messages stops following the newest ones immediately, instead of sometimes jumping back down.
+
+### What to Test
+
+- Open an empty, short or long conversation and tap near the top, bottom and left of the message field before scrolling: check the keyboard opens. Type more than six lines and check the draft scrolls inside the field.
+- Scroll up through older messages, including while earlier messages load or a reply arrives: check the conversation stays where you are reading. Scroll back to the bottom and check new replies follow again. Check a long reply opens at its beginning and a message you send stays visible at the end.
+- Open a long conversation and type a multiline draft, then show and hide the keyboard: check the messages stay aligned and the conversation does not scroll beyond its last message.
+
 ## [0.43.0] - 2026-10-22
 
 ### Added

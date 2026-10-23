@@ -1872,6 +1872,44 @@ private struct NoteBubble: View {
 
 /// Where a conversation moves when a message lands at its end.
 enum ConversationScroll {
+    /// Follows new messages until the person starts reading further up. Layout can report a temporary
+    /// gap at the bottom while lazy rows are measured, even before a drag starts.
+    struct Following {
+        var atBottom = true
+        private(set) var scrolling = false
+        private var bottom = true
+
+        mutating func phaseChanged(_ phase: ScrollPhase) {
+            scrolling = phase != .idle
+            // A lazy layout may already have reported false, so waiting for another geometry
+            // change can leave following enabled throughout a drag towards older messages.
+            if phase == .interacting { atBottom = false }
+            if phase == .idle { atBottom = bottom }
+        }
+
+        mutating func bottomChanged(_ bottom: Bool) {
+            self.bottom = bottom
+            if scrolling || bottom { atBottom = bottom }
+        }
+    }
+
+    /// Measured together so a correction never uses an offset from the previous layout pass.
+    struct Bounds: Equatable {
+        let content: CGSize
+        let viewport: CGSize
+        let insets: EdgeInsets
+
+        init(_ geometry: ScrollGeometry) {
+            content = geometry.contentSize
+            viewport = geometry.containerSize
+            insets = geometry.contentInsets
+        }
+
+        var end: CGPoint {
+            CGPoint(x: -insets.leading, y: max(content.height + insets.bottom - viewport.height, -insets.top))
+        }
+    }
+
     /// Your own message always shows, down at the bottom. Anyone else's shows from its top, so a
     /// long reply reads from its start, and only when you were at the bottom: reading further up,
     /// you stay where you are.
@@ -1903,32 +1941,33 @@ struct ConversationScrolling: ViewModifier {
     /// at the bottom edge lands past the end and to the side, until first scrolled.
     @State private var position = ScrollPosition(idType: UUID.self)
     /// Whether the end of the conversation shows. Only then does it keep to the end as it grows.
-    @State private var atBottom = true
-    /// Whether the person is scrolling. Only they move it off the end: rows measured as they come
-    /// into view change the conversation's height for a moment, which must not.
-    @State private var scrolling = false
+    @State private var following = ConversationScroll.Following()
     /// Whether the conversation sits beyond its end, with nothing showing above the composer.
     @State private var pastEnd = false
     /// Whether it is on its way back from beyond the end.
     @State private var returning = false
     /// Whether it is on its way to the end after your own message, aimed while the new row's height was a guess.
     @State private var settling = false
+    @State private var end: CGPoint?
 
     func body(content: Content) -> some View {
         content
             .scrollPosition($position, anchor: .top)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
+            .defaultScrollAnchor(following.atBottom ? .bottom : .top, for: .sizeChanges)
             .onScrollPhaseChange { _, phase in
-                scrolling = phase != .idle
-                if phase == .interacting { settling = false }
+                following.phaseChanged(phase)
+                if phase == .interacting {
+                    settling = false
+                    returning = false
+                }
                 if phase == .idle, pastEnd {
                     backToEnd()
                 } else if phase == .idle, settling {
                     // The row is laid out by now, so the end is where it really is: on iOS 27.1 the scroll
                     // to it stopped a couple of points short, by how far the guess was out.
                     settling = false
-                    if #available(iOS 27, *) { position.scrollTo(edge: .bottom) }
+                    scrollToEnd()
                 }
             }
             // A scroll worked out before the conversation's height and the keyboard's room settle can stop
@@ -1939,46 +1978,54 @@ struct ConversationScrolling: ViewModifier {
                                              bottomInset: geometry.contentInsets.bottom)
             } action: { _, past in
                 pastEnd = past
-                if past, !scrolling {
+                if past, !following.scrolling {
                     backToEnd()
                 } else if !past, returning {
                     // Back at the last row, which sits just short of the end: the bottom edge is a new place now.
                     returning = false
                     // Asked for in the same update as the scroll back to the row, iOS 27.1 drops it, leaving
                     // the conversation short of its end by the padding under the row: it waits for the next.
-                    if #available(iOS 27, *) { Task { position.scrollTo(edge: .bottom) } }
+                    Task { if following.atBottom { scrollToEnd() } }
                 }
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 ConversationScroll.isAtBottom(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
                                               viewportHeight: geometry.containerSize.height, bottomInset: geometry.contentInsets.bottom)
-            } action: { _, bottom in if scrolling || bottom { atBottom = bottom } }
-            // The bars and the composer's room settle as the conversation is pushed, which moves its end
-            // without changing its size. On iOS 26 scrolling to the bottom edge lands short and to the side,
-            // and the initial-offset anchor already opens at the end there.
-            .onScrollGeometryChange(for: [CGFloat].self) { [$0.containerSize.height, $0.contentInsets.bottom] } action: { _, _ in
-                if #available(iOS 27, *), atBottom { position.scrollTo(edge: .bottom) }
+            } action: { _, bottom in following.bottomChanged(bottom) }
+            // The edge-based scroll can count the composer's inset twice on iOS 27.1. Use the actual
+            // bounds instead, and follow changes in lazy row measurements only while following the end.
+            .onScrollGeometryChange(for: ConversationScroll.Bounds.self) { ConversationScroll.Bounds($0) } action: { _, bounds in
+                guard bounds.viewport.height > 0, bounds.content.height > 0 else { return }
+                end = bounds.end
+                if following.atBottom { scrollToEnd() }
             }
             // Read before the new row is laid out, so atBottom still says where the person was.
             .onChange(of: latest?.id) { _, _ in
-                guard let latest, let anchor = ConversationScroll.target(for: latest, wasAtBottom: atBottom) else { return }
+                guard let latest, let anchor = ConversationScroll.target(for: latest, wasAtBottom: following.atBottom) else { return }
                 // A new row's height is a guess until it is laid out, so going to its bottom lands short or
                 // past the end; the end itself is where your own message is.
                 if #available(iOS 27, *), anchor == .bottom {
-                    atBottom = true
+                    following.atBottom = true
                     settling = true
-                    withAnimation { position.scrollTo(edge: .bottom) }
+                    withAnimation { scrollToEnd() }
                 } else {
+                    // A long reply should stay at its beginning as its rows are measured.
+                    if anchor == .top { following.atBottom = false }
                     withAnimation { position.scrollTo(id: latest.id, anchor: anchor) }
                 }
             }
+    }
+
+    private func scrollToEnd() {
+        // iOS 26's initial and size-change anchors already keep the end in view.
+        if #available(iOS 27, *), let end { position.scrollTo(point: end) }
     }
 
     /// By then the last row is laid out. Going to it always moves the conversation, where the bottom edge
     /// may be the place it holds already, having stopped past it.
     private func backToEnd() {
         guard let latest else { return }
-        atBottom = true
+        following.atBottom = true
         returning = true
         position.scrollTo(id: latest.id, anchor: .bottom)
     }
@@ -2181,12 +2228,14 @@ struct ChatView: View {
                         // What was said on a call after this message and before the next.
                         if let block = blocks[message.id] { CallBlockRow(name: thread.name, block: block) }
                     }
+                    // Keep each scroll target as wide as the viewport. Padding the target layout itself
+                    // lets a programmatic scroll adopt its 12-point horizontal origin until the next drag.
+                    .padding(.horizontal, 12)
                     .id(message.id)
                 }
             }
             // Rows keep their place by ID, so earlier messages loading above do not move the one being read.
             .scrollTargetLayout()
-            .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
         .modifier(ConversationScrolling(latest: messages.last))
@@ -2547,7 +2596,6 @@ struct ChatView: View {
     private var messageField: some View {
         HStack(alignment: .bottom, spacing: 6) {
             ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message") { attachPasted($0) }
-            .padding(.vertical, 13)
             // As in Messages: the microphone until there is something to send.
             if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty && notes.isEmpty {
                 Button { recorder.start() } label: {
@@ -2566,7 +2614,7 @@ struct ChatView: View {
                 .accessibilityLabel("Send")
             }
         }
-        .padding(.leading, 16).padding(.trailing, 5)
+        .padding(.trailing, 5)
         .frame(minHeight: Self.controlHeight)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Self.controlHeight / 2, style: .continuous))
         // Tapping the field while the panel is open closes the panel first.

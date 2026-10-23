@@ -758,7 +758,6 @@ struct ComposerField: UIViewRepresentable {
         view.font = .preferredFont(forTextStyle: .body)
         view.adjustsFontForContentSizeCategory = true
         view.backgroundColor = .clear
-        view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.isScrollEnabled = false
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -782,7 +781,7 @@ struct ComposerField: UIViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: PastingTextView, context: Context) -> CGSize? {
         let width = proposal.width ?? 240
         let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
-        let limit = ceil((uiView.font?.lineHeight ?? 22) * 6)
+        let limit = ceil((uiView.font?.lineHeight ?? 22) * 6) + uiView.textContainerInset.top + uiView.textContainerInset.bottom
         uiView.isScrollEnabled = fitting > limit
         return CGSize(width: width, height: min(fitting, limit))
     }
@@ -819,14 +818,17 @@ final class PastingTextView: UITextView {
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
+        // Keep the field's spacing inside the editor: SwiftUI padding draws as part of the glass
+        // capsule but does not forward its taps to this native view.
+        textContainerInset = UIEdgeInsets(top: 13, left: 16, bottom: 13, right: 0)
         placeholder.font = .preferredFont(forTextStyle: .body)
         placeholder.adjustsFontForContentSizeCategory = true
         placeholder.textColor = .placeholderText
         placeholder.translatesAutoresizingMaskIntoConstraints = false
         addSubview(placeholder)
         NSLayoutConstraint.activate([
-            placeholder.leadingAnchor.constraint(equalTo: leadingAnchor),
-            placeholder.topAnchor.constraint(equalTo: topAnchor),
+            placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: textContainerInset.left),
+            placeholder.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top),
         ])
     }
 

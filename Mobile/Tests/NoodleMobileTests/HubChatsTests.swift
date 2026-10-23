@@ -2134,8 +2134,8 @@ private actor RecordedSubscriptions: PushSubscriptions {
         try await Task.sleep(for: .seconds(1))
         let conversation = try #require(Self.view(UIScrollView.self, in: window) { !($0 is UITextView) && $0.contentSize.height > window.bounds.height })
         let field = try #require(Self.view(PastingTextView.self, in: window) { _ in true })
-        // The text sits 13 points inside the glass around it.
-        let fieldBottom = field.convert(field.bounds, to: window).maxY + 13
+        // The editor includes the padding inside the glass around its text.
+        let fieldBottom = field.convert(field.bounds, to: window).maxY
         let end = conversation.convert(conversation.bounds, to: window).maxY - conversation.adjustedContentInset.bottom
 
         #expect(abs(fieldBottom - searchBottom) < 1, "The field ends at \(fieldBottom), search at \(searchBottom)")
@@ -2211,8 +2211,8 @@ private actor RecordedSubscriptions: PushSubscriptions {
 
         let keyboardTop = window.bounds.maxY - window.safeAreaInsets.bottom
         let conversation = try #require(Self.view(UIScrollView.self, in: window) { !($0 is UITextView) && $0.contentSize.height > window.bounds.height })
-        // The text sits 13 points inside the glass around it.
-        let fieldBottom = field.convert(field.bounds, to: window).maxY + 13
+        // The editor includes the padding inside the glass around its text.
+        let fieldBottom = field.convert(field.bounds, to: window).maxY
         let end = conversation.convert(conversation.bounds, to: window).maxY - conversation.adjustedContentInset.bottom
 
         #expect(abs(keyboardTop - fieldBottom - 8) < 1)
