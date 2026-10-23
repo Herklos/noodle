@@ -51,7 +51,7 @@ import XCTest
         let metadata = f.result("Shared result")
         f.metadata[0].1(metadata)
         try await wait { results.count == 2 }
-        XCTAssertTrue(results[0] === results[1]); XCTAssertTrue(results[0].metadata === metadata)
+        XCTAssertTrue(results[0] === results[1]); XCTAssertEqual(results[0].metadata?.title, "Shared result")
         f.cache.load(first) { results.append($0) }
         XCTAssertEqual(results.count, 3); XCTAssertTrue(results[0] === results[2])
         XCTAssertEqual(f.metadata.count, 1); XCTAssertEqual(f.metadataCancellations, 1)
@@ -82,7 +82,7 @@ import XCTest
         XCTAssertTrue(f.images[0].0 === metadata.iconProvider)
         f.images[0].1(nil)
         try await wait { result != nil }
-        XCTAssertTrue(result?.metadata === metadata); XCTAssertNil(result?.image)
+        XCTAssertEqual(result?.metadata?.title, "Icon only"); XCTAssertNil(result?.image)
     }
 
     /// Previews are kept on disk for a week: a relaunch shows them at once, and after a week they are fetched again.
@@ -165,6 +165,37 @@ import XCTest
         }
     }
 
+    /// The page's own metadata holds its full picture and icon; a remembered preview kept them for the whole launch.
+    func testARememberedPreviewKeepsNoneOfThePagesPictures() async throws {
+        let f = loader(); var result: LinkPreviewMetadataCache.Result?
+        f.cache.load(first) { result = $0 }
+        f.metadata[0].1(f.result("Kept small", image: true, icon: true))
+        try await wait { f.images.count == 1 }
+        f.images[0].1(NSImage(size: .init(width: 20, height: 20)))
+        try await wait { result != nil }
+        for remembered in [result, f.cache.cachedResult(for: first)] {
+            XCTAssertEqual(remembered?.metadata?.title, "Kept small")
+            XCTAssertNil(remembered?.metadata?.imageProvider, "The page's full picture is still held")
+            XCTAssertNil(remembered?.metadata?.iconProvider, "The page's icon is still held")
+        }
+    }
+
+    /// A page's picture used to be decoded at full size before it was scaled to its card, briefly taking
+    /// hundreds of megabytes for a large one.
+    func testAPagePictureIsDecodedAtTheSizeItsCardShowsIt() throws {
+        let card = CGSize(width: LinkPreviewCard.cardWidth * 2, height: LinkPreviewCard.imageHeight * 2)
+        for (width, height) in [(4000, 2100), (3000, 300), (200, 100)] {
+            let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            let picture = try XCTUnwrap(LinkPreviewMetadataCache.cardPicture(from: data)?
+                .cgImage(forProposedRect: nil, context: nil, hints: nil), "The \(width)×\(height) picture was lost")
+            let fit = min(CGFloat(width), max(card.width, CGFloat(width) * card.height / CGFloat(height)))
+            XCTAssertEqual(CGFloat(picture.width), fit, accuracy: 2, "The \(width)×\(height) picture is not decoded at its card's size")
+            XCTAssertEqual(CGFloat(picture.width) / CGFloat(picture.height), CGFloat(width) / CGFloat(height), accuracy: 0.05)
+        }
+    }
+
     func testFailedMetadataIsCachedWithoutStartingARetryLoop() async throws {
         let f = loader(); var results: [LinkPreviewMetadataCache.Result] = []
         f.cache.load(first) { results.append($0) }; f.metadata[0].1(nil)
@@ -196,7 +227,7 @@ import XCTest
         f.metadata[0].1(metadata); try await wait { f.images.count == 1 }
         let deadline = try await f.clock.next(.seconds(5)); deadline.resolve(.success(()))
         try await wait { results.count == 1 }
-        XCTAssertTrue(results[0].metadata === metadata); XCTAssertNil(results[0].image)
+        XCTAssertEqual(results[0].metadata?.title, "Image timed out"); XCTAssertNil(results[0].image)
         XCTAssertEqual(f.metadataCancellations, 1); XCTAssertEqual(f.imageCancellations, 1)
         f.images[0].1(NSImage(size: .init(width: 20, height: 20)))
         for _ in 0..<5 { await Task.yield() }

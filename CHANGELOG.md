@@ -10,6 +10,7 @@ All notable changes to Noodle are documented here, following
 
 - On mobile, tapping the padding around the message text focuses the input, including near the top and bottom of the visible field.
 - Mobile conversations stay aligned as the input grows, keep their end in view as the keyboard moves, and stop following new messages immediately when you scroll up to read older ones.
+- Link previews use far less memory: a page's picture is read at the size its card shows, and the full-size picture and icon are no longer kept.
 
 ## [0.73.0] - 2026-10-22
 
