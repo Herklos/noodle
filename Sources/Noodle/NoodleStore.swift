@@ -1861,14 +1861,20 @@ final class NoodleStore {
         return message
     }
 
+    /// Sends a message from outside the conversation, such as a Shortcut's. Its files are copied into the
+    /// conversation as dropped ones are, but go with this message alone: what is being written there stays as it is.
     @discardableResult
-    func sendCommand(_ command: String, to conversationID: UUID) throws -> ChatMessage {
+    func sendCommand(_ command: String, files: [AttachmentTransferPayload] = [], to conversationID: UUID) throws -> ChatMessage {
         guard let conversation = conversations.first(where: { $0.id == conversationID }) else {
             throw WorkspaceError.missingConversation(conversationID)
         }
+        let attachments = try files.map { try storeAttachment($0, in: conversationID) }
+        let worded = !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let message = try repository.sendUserMessage(
             conversationID: conversation.id,
-            body: command
+            body: worded || attachments.isEmpty ? command
+                : "Sent \(attachments.count) attachment\(attachments.count == 1 ? "" : "s")",
+            attachmentIDs: attachments.map(\.id)
         )
         markConversationRead(conversation.id)
         messagesByConversation[conversation.id, default: []].append(message)
@@ -2115,16 +2121,7 @@ final class NoodleStore {
     }
 
     private func importAttachmentFile(from url: URL, into conversationID: UUID) throws {
-        let accessed = url.startAccessingSecurityScopedResource()
-        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-        let mediaType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-        let attachment = try repository.importAttachment(
-            from: url,
-            into: conversationID,
-            mediaType: mediaType
-        )
-        attachmentsByConversation[conversationID, default: []].append(attachment)
-        drafts[conversationID].attachments.append(attachment)
+        drafts[conversationID].attachments.append(try storeAttachment(.file(url), in: conversationID))
     }
 
     private func importAttachment(
@@ -2133,14 +2130,25 @@ final class NoodleStore {
         mediaType: String,
         into conversationID: UUID
     ) throws {
-        let attachment = try repository.importAttachment(
-            data: data,
-            originalFilename: originalFilename,
-            into: conversationID,
-            mediaType: mediaType
-        )
+        let payload = AttachmentTransferPayload.data(data, originalFilename: originalFilename, mediaType: mediaType)
+        drafts[conversationID].attachments.append(try storeAttachment(payload, in: conversationID))
+    }
+
+    /// Copies a file into the conversation, ready to be sent there.
+    private func storeAttachment(_ payload: AttachmentTransferPayload, in conversationID: UUID) throws -> ConversationAttachment {
+        let attachment: ConversationAttachment
+        switch payload {
+        case .file(let url):
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let mediaType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+            attachment = try repository.importAttachment(from: url, into: conversationID, mediaType: mediaType)
+        case .data(let data, let originalFilename, let mediaType):
+            attachment = try repository.importAttachment(data: data, originalFilename: originalFilename,
+                                                         into: conversationID, mediaType: mediaType)
+        }
         attachmentsByConversation[conversationID, default: []].append(attachment)
-        drafts[conversationID].attachments.append(attachment)
+        return attachment
     }
 
     /// Save to the originating draft even if the selected conversation changed.
