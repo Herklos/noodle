@@ -73,7 +73,7 @@ import NoodleRuntime
         bots = HubBots(repository: repository, runtime: self.runtime, access: access, connections: connections, computers: computers, browsers: browsers,
                        applets: AppletController(connection: applet, surface: surfaces.applet),
                        uploads: root.appendingPathComponent("Uploads", isDirectory: true), readMarks: root.appendingPathComponent("read.json"),
-                       pins: root.appendingPathComponent("pins.json"))
+                       pins: root.appendingPathComponent("pins.json"), notifications: root.appendingPathComponent("notifications.json"))
         // The Hub's bots get the applet tool from its own controller. This Mac as a Hub shares
         // Noodle's, whose broker serves Noodle's bots, so the wiring is here and not in HubBots.
         let applets = bots.applets

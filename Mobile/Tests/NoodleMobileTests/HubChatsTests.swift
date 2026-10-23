@@ -1519,6 +1519,35 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(chats.badgedConversations == [])
     }
 
+    /// A group muted on any device leaves the icon's count, though its row still shows the reply unread.
+    @Test func aMutedGroupIsNotCountedOnTheIcon() async throws {
+        let hub = FakeHub()
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+        try await chats.reload()
+        let house = await hub.addGroup(named: "House", saying: "Dinner at eight.")
+        await hub.botSays("Done")
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let following = Task { await chats.follow() }
+        defer { following.cancel() }
+        for _ in 0..<100 where !chats.isConnected { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.badgedConversations == [scout.conversationID, house.id])
+
+        try await chats.apply(.notificationsChanged(conversationID: house.id, notifications: .muted))
+        #expect(chats.isMuted(HubThread.group(house)))
+        #expect(chats.isUnread(HubThread.group(house)))
+        #expect(!chats.countsAsUnread(HubThread.group(house)))
+        #expect(chats.badgedConversations == [scout.conversationID])
+        // Bots' own conversations always notify.
+        try await chats.apply(.notificationsChanged(conversationID: scout.conversationID, notifications: .muted))
+        #expect(!chats.isMuted(scout))
+
+        try await chats.apply(.notificationsChanged(conversationID: house.id, notifications: .all))
+        #expect(chats.badgedConversations == [scout.conversationID, house.id])
+    }
+
     @Test func aNotificationLeadsToItsConversation() {
         let conversation = UUID()
         let route = PushTopic.route(fields: [LinkPush.topicField: "abc", LinkPush.conversationField: conversation.uuidString])

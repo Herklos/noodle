@@ -93,6 +93,19 @@ enum NoodleNotifications {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: ringingIdentifier, content: content, trigger: nil))
     }
 
+    /// Takes back the replies shown from a conversation, as when its group is muted.
+    @MainActor
+    static func withdraw(conversation id: UUID) {
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let shown = await center.deliveredNotifications().filter {
+                $0.request.content.userInfo[conversationIDKey] as? String == id.uuidString
+                    && $0.request.content.userInfo[messageIDKey] != nil
+            }
+            center.removeDeliveredNotifications(withIdentifiers: shown.map(\.request.identifier))
+        }
+    }
+
     @MainActor
     static func stopRinging() {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [ringingIdentifier])

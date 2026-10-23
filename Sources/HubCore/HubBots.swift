@@ -96,13 +96,20 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
     private lazy var pins: [UUID: Date] = loadPins()
     /// Runs when a device changed pins kept in Noodle's own file, so Noodle reads them again.
     public var onPinsEdited: (() -> Void)?
+    /// How each group notifies its owner, when not with every reply. Nil for This Mac as a Hub, whose
+    /// muted groups are Noodle's own.
+    private let notificationsURL: URL?
+    private lazy var notifications: [UUID: LinkNotifications] = loadNotifications()
+    /// Runs when a device muted or unmuted a group kept in Noodle's own file, so Noodle reads them again.
+    public var onNotificationsEdited: (() -> Void)?
 
     public init(repository: WorkspaceRepository, runtime: AgentRuntimeCoordinator, access: HubAccess,
                 connections: HubConnections, computers: HubComputers, browsers: HubBrowsers,
-                applets: AppletController, uploads: URL, readMarks: URL, pins: URL?) {
+                applets: AppletController, uploads: URL, readMarks: URL, pins: URL?, notifications: URL?) {
         self.uploads = uploads
         readMarksURL = readMarks
         pinsURL = pins
+        notificationsURL = notifications
         self.repository = repository
         self.runtime = runtime
         self.access = access
@@ -1461,16 +1468,64 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
         try JSONEncoder().encode(pins).write(to: pinsURL, options: .atomic)
     }
 
-    /// Drops how far deleted conversations were read and whether they were pinned.
+    /// Mutes or unmutes one of the user's groups and tells their devices. Their bots' own conversations always notify.
+    public func setNotifications(_ level: LinkNotifications, conversation id: UUID, for user: HubUser) throws {
+        _ = try ownedGroup(id, by: user)
+        let kept: LinkNotifications? = level == .muted ? .muted : nil
+        guard notifications[id] != kept else { return }
+        guard notificationsURL != nil else {
+            var muted = try repository.loadMutedConversationIDs()
+            if kept == nil { muted.remove(id) } else { muted.insert(id) }
+            try repository.saveMutedConversationIDs(muted)
+            notificationsChanged(for: user)
+            onNotificationsEdited?()
+            return
+        }
+        notifications[id] = kept
+        try saveNotifications()
+        onChange?(user.id, .notificationsChanged(conversationID: id, notifications: kept ?? .all))
+    }
+
+    /// Whether a group's replies notify none of its owner's devices.
+    public func isMuted(_ conversationID: UUID) -> Bool { notifications[conversationID] == .muted }
+
+    /// Noodle's own muted groups changed: tells the user's devices each group that was muted or unmuted.
+    public func notificationsChanged(for user: HubUser) {
+        let before = notifications
+        notifications = loadNotifications()
+        for id in Set(before.keys).union(notifications.keys) where before[id] != notifications[id] {
+            onChange?(user.id, .notificationsChanged(conversationID: id, notifications: notifications[id] ?? .all))
+        }
+    }
+
+    private func loadNotifications() -> [UUID: LinkNotifications] {
+        guard let notificationsURL else {
+            let muted = (try? repository.loadMutedConversationIDs()) ?? []
+            return Dictionary(uniqueKeysWithValues: muted.map { ($0, .muted) })
+        }
+        return (try? JSONDecoder().decode([UUID: LinkNotifications].self, from: Data(contentsOf: notificationsURL))) ?? [:]
+    }
+
+    private func saveNotifications() throws {
+        guard let notificationsURL else { return }
+        try FileManager.default.createDirectory(at: notificationsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(notifications).write(to: notificationsURL, options: .atomic)
+    }
+
+    /// Drops how far deleted conversations were read, whether they were pinned and how they notified.
     private func forgetMarks(of conversations: [UUID]) {
         if conversations.contains(where: { readMarks[$0] != nil }) {
             conversations.forEach { readMarks[$0] = nil }
             try? saveReadMarks()
         }
-        // Noodle drops its own pins of conversations that are gone.
+        // Noodle drops its own pins and mutes of conversations that are gone.
         if pinsURL != nil, conversations.contains(where: { pins[$0] != nil }) {
             conversations.forEach { pins[$0] = nil }
             try? savePins()
+        }
+        if notificationsURL != nil, conversations.contains(where: { notifications[$0] != nil }) {
+            conversations.forEach { notifications[$0] = nil }
+            try? saveNotifications()
         }
     }
 
@@ -1705,7 +1760,8 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
                   draft: LinkGroupDraft(name: conversation.displayName, publicDescription: conversation.publicDescription ?? "",
                                         botIDs: conversation.participantIDs),
                   createdAt: conversation.createdAt, readUpTo: readMarks[conversation.id], archivedAt: conversation.archivedAt,
-                  background: background(of: conversation.id), pinnedAt: pins[conversation.id])
+                  background: background(of: conversation.id), pinnedAt: pins[conversation.id],
+                  notifications: notifications[conversation.id])
     }
 
     private func bot(_ agent: AgentRecord, conversations: [BotConversation]) throws -> LinkBot? {

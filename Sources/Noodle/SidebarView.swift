@@ -89,6 +89,13 @@ struct SidebarView: View {
         } else {
             Button("Pin") { store.setPinned(true, conversationID: conversation.id) }
         }
+        if store.canMute(conversation) {
+            if store.isMuted(conversation.id) {
+                Button("Unmute") { store.setMuted(false, conversationID: conversation.id) }
+            } else {
+                Button("Mute") { store.setMuted(true, conversationID: conversation.id) }
+            }
+        }
         Menu("Spaces") {
             ForEach(store.customSpaces) { space in
                 Toggle(space.name, isOn: Binding(get: { store.isMember(conversation.id, of: space.id) },
@@ -211,8 +218,9 @@ private struct ConversationRow: View {
         }
         .overlay(alignment: .leading) {
             if store.hasUnreadMessages(in: conversation) {
+                // A muted group's dot is dimmed: new replies show, but do not ask for attention.
                 Circle()
-                    .fill(Color.blue)
+                    .fill(store.isMuted(conversation.id) ? Color.secondary.opacity(0.5) : Color.blue)
                     .frame(width: 8, height: 8)
                     // Keep the dot in the leading inset, 5 points before the avatar.
                     .offset(x: -13)
@@ -243,8 +251,9 @@ private struct ConversationRow: View {
 
     private var accessibilityLabel: String {
         let unread = store.hasUnreadMessages(in: conversation) ? "Unread, " : ""
+        let muted = store.isMuted(conversation.id) ? "Muted, " : ""
         let paused = pause.map { "\($0), " } ?? ""
-        return "\(unread)\(store.title(for: conversation)), \(paused)\(detail)"
+        return "\(unread)\(muted)\(store.title(for: conversation)), \(paused)\(detail)"
     }
 }
 

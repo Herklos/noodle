@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Mute a group: touch and hold it and choose Mute. A muted group sends no notifications, stays out of Unread and isn't counted on the app icon. Its row shows a grey dot when there are new replies. The mute applies to all your devices. Hubs that can't mute groups don't show the option.
+
 ### Changed
 
 - A bot's Harness opens a list of the harnesses under the Hub that lends them, with a profile's name under its harness, as on the Mac, instead of a menu of bare names. A bot already made lists only its own Hub's harnesses; a new bot lists every Hub's, and choosing one makes it on that Hub.
@@ -15,6 +19,7 @@
 - Open a bot's info and tap Harness: check the harnesses are listed under the bot's Hub name, each profile's name shows under its harness, the current one has a checkmark, and only that Hub's harnesses are offered. Choose another: check the row shows it.
 - With two Hubs joined, tap New Bot, then Harness: check each Hub's harnesses are under its name. Choose one on the other Hub: check the Hub row follows, and the bot is made there.
 - Open a PDF a bot sent, scroll to its second page and tap Mark Up: check that page shows, not a black screen, and a box dragged on it goes with the comment. Do the same with a .docx: check its first page shows. Check Mark Up on a picture still works as before.
+- Touch and hold a group and choose Mute. Have a bot reply there while Noodle is closed: check no notification arrives, the app icon doesn't count it, and the group isn't under Unread but shows a grey dot. Check the group shows as muted on your Mac too. Choose Unmute: check the next reply notifies again.
 
 ## [0.43.1] - 2026-10-23
 

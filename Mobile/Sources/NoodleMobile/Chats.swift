@@ -296,10 +296,45 @@ enum HubThread: HubConversation {
         return seen[conversation.conversationID].map { reply.createdAt > $0 } ?? true
     }
 
-    /// The conversations the app's icon counts: those listed with a reply not read yet. Nil while
-    /// the live stream is down, since replies may have come that this phone has not heard of.
+    /// The conversations the app's icon counts: those listed with a reply not read yet, muted groups
+    /// left out. Nil while the live stream is down, since replies may have come that this phone has not heard of.
     var badgedConversations: Set<UUID>? {
-        isConnected ? Set(listedThreads.filter { isUnread($0) }.map(\.conversationID)) : nil
+        isConnected ? Set(listedThreads.filter { countsAsUnread($0) }.map(\.conversationID)) : nil
+    }
+
+    /// Whether a conversation shows in Unread and counts on the icon: unread, and not a muted group, whose row only dims its dot.
+    func countsAsUnread(_ conversation: some HubConversation) -> Bool {
+        isUnread(conversation) && !isMuted(conversation)
+    }
+
+    /// Whether a group notifies nothing, for all the user's devices. Bots' own conversations always notify.
+    func isMuted(_ conversation: some HubConversation) -> Bool {
+        groups.first { $0.id == conversation.conversationID }?.isMuted == true
+    }
+
+    /// Whether the Hub keeps mutes; an older one does not.
+    var mutesGroups: Bool { pairing.status?.mutesGroups == true }
+
+    /// Mutes or unmutes a group on the Hub, for every device. It shows at once, and goes back when the Hub refuses.
+    func toggleMute(_ conversation: some HubConversation) async throws {
+        let id = conversation.conversationID
+        guard let group = groups.first(where: { $0.id == id }) else { return }
+        let before = group.notifications ?? .all, level: LinkNotifications = group.isMuted ? .all : .muted
+        setNotifications(level, of: id)
+        // The Hub takes back what it showed too; this clears it at once.
+        if level == .muted { await HubNotifications.clearDelivered(conversation: id) }
+        do {
+            _ = try await pairing.request(.setNotifications(LinkNotificationsChange(conversationID: id, notifications: level)))
+        } catch {
+            setNotifications(before, of: id)
+            throw error
+        }
+    }
+
+    private func setNotifications(_ level: LinkNotifications, of conversationID: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == conversationID }) else { return }
+        groups[index].notifications = level == .all ? nil : level
+        saveCache()
     }
 
     /// Also tells the Hub, up to the latest message it has, so the person's other devices show it read.
@@ -843,6 +878,9 @@ enum HubThread: HubConversation {
         case .pinChanged(let id, let pinnedAt):
             setHubPin(pinnedAt, of: id)
             return
+        case .notificationsChanged(let id, let level):
+            setNotifications(level, of: id)
+            return
         case .backgroundChanged(let id, let background):
             keep(background, for: id)
             return
@@ -1369,7 +1407,7 @@ struct AgentsView: View {
             let pinned = searching ? [] : found.filter(isPinned)
             let others = searching ? found : found.filter { !isPinned($0) }
             let order = searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
-            let isUnread = { (row: Row) in row.chats.isUnread(row.thread) }
+            let isUnread = { (row: Row) in row.chats.countsAsUnread(row.thread) }
             let unread = order.unread(others, isUnread: isUnread)
             let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
             List {
@@ -1592,6 +1630,7 @@ struct AgentsView: View {
             NavigationLink(value: row.id) {
                 AgentRow(chats: row.chats, thread: row.thread, latest: row.chats.latestMessage(of: row.thread),
                          unread: row.chats.isUnread(row.thread),
+                         muted: row.chats.isMuted(row.thread),
                          hub: chats.count > 1 && spaceChats == nil ? row.chats.pairing.hubName : nil)
             }
             // As in Messages: dividers between rows, none above the first.
@@ -1633,6 +1672,13 @@ struct AgentsView: View {
         } else {
             Button { togglePin(row) } label: { Label("Pin", systemImage: "pin.fill") }
         }
+        if row.thread.group != nil, row.chats.mutesGroups {
+            if row.chats.isMuted(row.thread) {
+                Button { toggleMute(row) } label: { Label("Unmute", systemImage: "bell.fill") }
+            } else {
+                Button { toggleMute(row) } label: { Label("Mute", systemImage: "bell.slash.fill") }
+            }
+        }
         Menu {
             let member = row.chats.spaceMember(of: row.thread)
             ForEach(spaceList.spaces) { space in
@@ -1650,6 +1696,13 @@ struct AgentsView: View {
             Button { archive(row) } label: { Label(row.thread.group == nil ? "Archive Bot" : "Archive Group", systemImage: "archivebox") }
         } else {
             Button { editing = row } label: { Label("Change Background…", systemImage: "photo") }
+        }
+    }
+
+    private func toggleMute(_ row: Row) {
+        Task {
+            do { try await row.chats.toggleMute(row.thread) }
+            catch { row.chats.error = error.localizedDescription }
         }
     }
 
@@ -1777,6 +1830,8 @@ private struct AgentRow: View {
     let thread: HubThread
     let latest: LinkMessage?
     let unread: Bool
+    /// A muted group dims its dot: new replies show, but do not ask for attention.
+    var muted = false
     /// The conversation's Hub, when several are shown together.
     var hub: String?
     static let dotSize: CGFloat = 10, dotGap: CGFloat = 8
@@ -1787,8 +1842,9 @@ private struct AgentRow: View {
                 // In the margin left of the picture, as in Messages.
                 .overlay(alignment: .leading) {
                     if unread {
-                        Circle().fill(.tint).frame(width: Self.dotSize, height: Self.dotSize).offset(x: -(Self.dotSize + Self.dotGap))
-                            .accessibilityLabel("Unread")
+                        Circle().fill(muted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+                            .frame(width: Self.dotSize, height: Self.dotSize).offset(x: -(Self.dotSize + Self.dotGap))
+                            .accessibilityLabel(muted ? "Unread, muted" : "Unread")
                     }
                 }
             VStack(alignment: .leading, spacing: 2) {

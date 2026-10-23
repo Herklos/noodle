@@ -443,6 +443,64 @@ import XCTest
         XCTAssertEqual(whileConnected, 1)
     }
 
+    /// Muting a group on one device mutes it on all of them: what it showed on a device away is taken back,
+    /// and its replies notify nothing until it is unmuted. A bot's own conversation and other people's groups cannot be muted.
+    func testAMutedGroupNotifiesNoDevice() async throws {
+        let pushes = RecordedPushes()
+        let f = try await fixture(pushes: pushes)
+        let bot = try await createBot(f)
+        let group = try await createGroup(f, of: [bot])
+        XCTAssertNil(group.notifications)
+        _ = try f.hub.repository.sendAgentMessage(agentID: bot.id, conversationID: group.id, body: "Already here.")
+        _ = try await f.device.request(.pushTopic(LinkPushTopic(topic: "phone-topic")))
+        f.hub.bots.checkForChanges()
+        _ = try f.hub.repository.sendAgentMessage(agentID: bot.id, conversationID: group.id, body: "Dinner is served.")
+        f.hub.bots.checkForChanges()
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != 2 { try await Task.sleep(for: .milliseconds(100)) }
+        let shown = await pushes.unread("phone-topic", group.id)
+        XCTAssertEqual(shown, 2)
+
+        let answer = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .muted)))
+        XCTAssertEqual(answer, .done)
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != nil { try await Task.sleep(for: .milliseconds(100)) }
+        let afterMuting = await pushes.unread("phone-topic", group.id)
+        XCTAssertNil(afterMuting, "Muting takes back what the group showed")
+        guard case .groups(let listed) = try await f.device.request(.groups) else { return XCTFail("no groups") }
+        XCTAssertEqual(listed.first?.notifications, .muted)
+        XCTAssertTrue(f.hub.bots.isMuted(group.id))
+
+        _ = try f.hub.repository.sendAgentMessage(agentID: bot.id, conversationID: group.id, body: "The soup is cold.")
+        f.hub.bots.checkForChanges()
+        try await Task.sleep(for: .milliseconds(300))
+        let whileMuted = await pushes.published.count
+        XCTAssertEqual(whileMuted, 1, "A muted group notifies nothing")
+
+        // Unmuted, what waited is not news; the next reply is.
+        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .all)))
+        guard case .groups(let unmuted) = try await f.device.request(.groups) else { return XCTFail("no groups") }
+        XCTAssertNil(unmuted.first?.notifications)
+        _ = try f.hub.repository.sendAgentMessage(agentID: bot.id, conversationID: group.id, body: "Shall I warm it?")
+        f.hub.bots.checkForChanges()
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != 4 { try await Task.sleep(for: .milliseconds(100)) }
+        let afterUnmuting = await pushes.unread("phone-topic", group.id)
+        XCTAssertEqual(afterUnmuting, 4)
+        let publishedAgain = await pushes.published.count
+        XCTAssertEqual(publishedAgain, 2)
+
+        do {
+            _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: bot.conversationID, notifications: .muted)))
+            XCTFail("Muted a bot's own conversation")
+        } catch {}
+        let grace = try f.hub.access.addUser(named: "Grace")
+        let other = HubPairing(directory: FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-other-\(UUID())"),
+                               deviceName: "Other")
+        await other.join(f.link.invite(grace).url().absoluteString)
+        do {
+            _ = try await other.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .muted)))
+            XCTFail("Muted another user's group")
+        } catch {}
+    }
+
     func testReactionsTravelBothWays() async throws {
         let f = try await fixture()
         let bot = try await createBot(f)
