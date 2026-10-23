@@ -220,6 +220,8 @@ private struct CompanionRow: View {
 struct AttachmentInlinePreview: View {
     let attachment: ConversationAttachment
     let fileURL: URL
+    /// For a file only its Hub has, the Hub's picture of it, fetched when the bubble shows.
+    let hubPreview: (() async -> URL?)?
     let shouldLoad: Bool
     let isSelected: Bool
     let select: () -> Void
@@ -234,6 +236,8 @@ struct AttachmentInlinePreview: View {
 
     @State private var thumbnail: NSImage?
     @State private var thumbnailUnavailable = false
+    /// The shape of the Hub's picture, once it came.
+    @State private var hubPictureSize: CGSize?
     /// What a patch file reads as, once read; nil while it is read and for a file that is not one.
     @State private var patch: Patch?
     @State private var isNotAPatch = false
@@ -242,6 +246,7 @@ struct AttachmentInlinePreview: View {
     init(
         attachment: ConversationAttachment,
         fileURL: URL,
+        hubPreview: (() async -> URL?)? = nil,
         shouldLoad: Bool,
         isSelected: Bool,
         select: @escaping () -> Void,
@@ -250,13 +255,15 @@ struct AttachmentInlinePreview: View {
     ) {
         self.attachment = attachment
         self.fileURL = fileURL
+        self.hubPreview = hubPreview
         self.shouldLoad = shouldLoad
         self.isSelected = isSelected
         self.select = select
         self.preview = preview
         self.showsTranscript = showsTranscript
-        displaysAsImage = attachment.mediaType.hasPrefix("image/") || AttachmentThumbnailCache.isImage(fileURL)
-        imagePreviewSize = displaysAsImage
+        // A file not here yet is not read, so nothing is remembered of it once it comes.
+        displaysAsImage = attachment.mediaType.hasPrefix("image/") || (hubPreview == nil && AttachmentThumbnailCache.isImage(fileURL))
+        imagePreviewSize = displaysAsImage && hubPreview == nil
             ? AttachmentThumbnailCache.previewSize(for: fileURL)
             : CGSize(width: 300, height: 200)
     }
@@ -327,7 +334,7 @@ struct AttachmentInlinePreview: View {
             }
             guard attachment.url.flatMap(NoodletLink.id) == nil, webLink == nil,
                   attachment.annotation == nil || attachment.mediaType.hasPrefix("image/") else { return }
-            if attachment.isPatchFile, !isNotAPatch {
+            if attachment.isPatchFile, !isNotAPatch, hubPreview == nil {
                 if let read = await PatchCache.patch(at: fileURL) {
                     withAnimation(.easeOut(duration: 0.15)) { patch = read }
                     return
@@ -453,8 +460,8 @@ struct AttachmentInlinePreview: View {
                     .foregroundStyle(.secondary.opacity(thumbnailUnavailable ? 0.8 : 0.45))
             }
         }
-        .aspectRatio(imagePreviewSize, contentMode: .fit)
-        .frame(idealWidth: imagePreviewSize.width, maxWidth: imagePreviewSize.width)
+        .aspectRatio(hubPictureSize ?? imagePreviewSize, contentMode: .fit)
+        .frame(idealWidth: (hubPictureSize ?? imagePreviewSize).width, maxWidth: (hubPictureSize ?? imagePreviewSize).width)
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         .accessibilityHidden(true)
     }
@@ -503,6 +510,10 @@ struct AttachmentInlinePreview: View {
 
     @MainActor
     private func loadThumbnail() async {
+        if let hubPreview {
+            await loadHubPicture(hubPreview)
+            return
+        }
         let key = fileURL as NSURL
         if let cached = AttachmentThumbnailCache.shared.object(forKey: key) {
             thumbnail = cached
@@ -548,6 +559,27 @@ struct AttachmentInlinePreview: View {
         } catch {
             thumbnailUnavailable = true
         }
+    }
+
+    /// The Hub's picture of a file not downloaded yet, in place of one made from the file.
+    @MainActor
+    private func loadHubPicture(_ hubPreview: () async -> URL?) async {
+        guard let url = await hubPreview() else {
+            thumbnailUnavailable = true
+            return
+        }
+        let key = url as NSURL
+        let picture: NSImage?
+        if let cached = AttachmentThumbnailCache.shared.object(forKey: key) { picture = cached }
+        else { picture = await Task.detached(priority: .utility) { AttachmentThumbnailCache.thumbnail(for: url) }.value }
+        guard !Task.isCancelled else { return }
+        guard let picture else {
+            thumbnailUnavailable = true
+            return
+        }
+        AttachmentThumbnailCache.shared.setObject(picture, forKey: key)
+        if displaysAsImage { hubPictureSize = AttachmentThumbnailCache.previewSize(for: url) }
+        withAnimation(.easeOut(duration: 0.15)) { thumbnail = picture }
     }
 }
 
