@@ -159,6 +159,24 @@ import Observation
         return try await pairing.channel(.openSurface(conversationID: thread.remote, attachmentID: attachment))
     }
 
+    /// Whether the Hub finds and fills the sign-in fields of a browser watched live.
+    public var signsInToBrowsers: Bool { pairing.status?.signsInToBrowsers == true }
+
+    /// The sign-in fields of the page a browser card in a conversation here shows, while this Mac watches it live.
+    public func signInForm(attachment: UUID, in conversation: UUID) async throws -> LinkSignInForm {
+        guard let thread = thread(local: conversation) else { throw LinkError("That conversation is not on this Hub.") }
+        guard case .signInForm(let form) = try await pairing.request(.signInForm(conversationID: thread.remote, attachmentID: attachment)) else {
+            throw LinkError("The Hub did not answer. Try again.")
+        }
+        return form
+    }
+
+    /// Fills the form `signInForm` found with what the person entered, once.
+    public func fillSignIn(_ entry: LinkSignInEntry, form: LinkSignInForm, attachment: UUID, in conversation: UUID) async throws {
+        guard let thread = thread(local: conversation) else { throw LinkError("That conversation is not on this Hub.") }
+        _ = try await pairing.request(.fillSignIn(entry.fill(form, conversationID: thread.remote, attachmentID: attachment)))
+    }
+
     /// Whether the Hub takes calls with a bot here, as it said when it last listed it.
     public func canCall(agent: UUID) -> Bool { entries.first { $0.agent == agent }?.canCall == true }
 

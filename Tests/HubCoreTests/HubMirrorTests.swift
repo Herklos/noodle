@@ -19,13 +19,18 @@ import XCTest
         @MainActor func mirror() -> HubMirror { HubMirror(pairing: device, repository: local, directory: folder) }
     }
 
-    /// `browser` stands in for Noodle Browser on the Hub's Mac.
-    private func fixture(browser: HubBrowsersTests.FakeBrowser? = nil) async throws -> Fixture {
+    /// `browser` stands in for Noodle Browser on the Hub's Mac, and `surfaces` for the live views of its tabs.
+    private func fixture(browser: HubBrowsersTests.FakeBrowser? = nil, surfaces: FakeSurfaces? = nil) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-hub-mirror-\(UUID())")
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let hub: Hub
-        if let browser { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil, browser: { try browser.call($0) }) }
-        else { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil) }
+        if let browser {
+            let opener: (@Sendable (BrowserRequest) async throws -> SurfaceSocket)? = surfaces.map { surfaces in
+                { try surfaces.open("\($0.browserID!) \($0.tabID!)") }
+            }
+            hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil, browser: { try browser.call($0) },
+                      surfaces: SurfaceOpeners(browser: opener))
+        } else { hub = Hub(root: root.appendingPathComponent("Hub"), messenger: nil) }
         try hub.repository.prepare()
         let link = HubLinkService(hubName: "Mac mini", directory: root.appendingPathComponent("Hub/Link"),
                                   access: hub.access, profiles: hub.harnessProfiles, bots: hub.bots,
@@ -793,6 +798,41 @@ import XCTest
         let bot = try XCTUnwrap(mirror.browsers.first?.botIDs.first)
         XCTAssertEqual(mirror.localAgentID(remote: bot), agent.id)
         XCTAssertNil(mirror.localAgentID(remote: UUID()))
+    }
+
+    /// Someone watching a Hub bot's browser live from this Mac signs in with its own fields: the Hub finds the
+    /// form of the page the card here shows and fills it in the browser they watch, with only what they entered.
+    func testAPersonWatchingABrowserFromHereSignsInToIt() async throws {
+        let browser = HubBrowsersTests.FakeBrowser()
+        browser.features = [SurfaceSocket.feature, BrowserSignInForm.feature]
+        let f = try await fixture(browser: browser, surfaces: FakeSurfaces(width: 800))
+        let mirror = f.mirror()
+        XCTAssertTrue(mirror.signsInToBrowsers)
+        let agent = try await mirror.createBot(LinkBotDraft(name: "Alfred", provider: "claude-code"))
+        let local = try conversation(of: agent.id, in: f.local)
+        let remoteBot = try XCTUnwrap(f.hub.repository.loadAgents().first)
+        let remote = try conversation(of: remoteBot.id, in: f.hub.repository)
+        let made = try await f.hub.browsers.create(BrowserDraft(name: "Work"), for: f.ada)
+        let card = try f.hub.repository.importLinkAttachment(BrowserLink.url(browser: made.id, tab: UUID()), into: remote.id,
+                                                             card: LinkCard(title: "Shop", detail: "https://shop.example.test"))
+        _ = try f.hub.repository.sendAgentMessage(agentID: remoteBot.id, conversationID: remote.id, body: "Sign in here.",
+                                                   attachmentIDs: [card.id])
+        await mirror.sync()
+
+        let channel = try await mirror.openSurface(attachment: card.id, in: local.id)
+        defer { channel.cancel() }
+        for try await frame in channel.frames { if case .packets? = LinkSurface.message(frame) { break } }
+        let form = try await mirror.signInForm(attachment: card.id, in: local.id)
+        XCTAssertEqual(form.token, HubBrowsersTests.FakeBrowser.signInToken)
+        XCTAssertEqual(form.fields.map(\.kind), [.username, .password])
+        var entry = LinkSignInEntry()
+        entry.username = "ada@example.com"
+        entry.password = "correct horse"
+        entry.oneTimeCode = "482913"
+        try await mirror.fillSignIn(entry, form: form, attachment: card.id, in: local.id)
+        XCTAssertEqual(browser.filled.map(\.browser), [made.id])
+        XCTAssertEqual(browser.filled.map(\.values), [BrowserSignInValues(token: HubBrowsersTests.FakeBrowser.signInToken,
+                                                                          username: "ada@example.com", password: "correct horse")])
     }
 
     /// A connected mirror, one of its connections, and the pages it asked the browser to open.

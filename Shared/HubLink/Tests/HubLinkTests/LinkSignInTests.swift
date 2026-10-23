@@ -53,3 +53,49 @@ final class LinkSignInTests: XCTestCase {
         }
     }
 }
+
+/// What a person enters to sign in to a browser watched live: only what the page asks for and was
+/// entered goes to it, and the form is submitted only when asked.
+final class LinkSignInEntryTests: XCTestCase {
+    private let conversation = UUID(), attachment = UUID(), token = UUID()
+
+    private func form(_ kinds: LinkSignInField.Kind...) -> LinkSignInForm {
+        LinkSignInForm(token: token, host: "login.example.com", pageHost: "login.example.com", secure: true, crossOrigin: false,
+                       fields: kinds.map { LinkSignInField(kind: $0) })
+    }
+
+    func testOnlyWhatThePageAsksForAndWasEnteredIsSent() {
+        var entry = LinkSignInEntry()
+        entry.username = "ada@example.com"
+        entry.password = "correct horse"
+        entry.oneTimeCode = "482913"
+        XCTAssertEqual(entry.fill(form(.email, .password), conversationID: conversation, attachmentID: attachment),
+                       LinkSignInFill(conversationID: conversation, attachmentID: attachment, token: token,
+                                      username: "ada@example.com", password: "correct horse"),
+                       "a code went to a page without a code field")
+    }
+
+    func testACodeIsSentWithoutSpacesAndNothingEmptyIsSent() {
+        var entry = LinkSignInEntry()
+        entry.oneTimeCode = " 482913 "
+        XCTAssertEqual(entry.fill(form(.username, .oneTimeCode), conversationID: conversation, attachmentID: attachment),
+                       LinkSignInFill(conversationID: conversation, attachmentID: attachment, token: token, oneTimeCode: "482913"))
+    }
+
+    func testTheFormIsSubmittedOnlyWhenAsked() {
+        var entry = LinkSignInEntry()
+        entry.password = "correct horse"
+        XCTAssertFalse(entry.fill(form(.password), conversationID: conversation, attachmentID: attachment).submit)
+        entry.submit = true
+        XCTAssertTrue(entry.fill(form(.password), conversationID: conversation, attachmentID: attachment).submit)
+    }
+
+    func testNothingEnteredIsEmpty() {
+        var entry = LinkSignInEntry()
+        XCTAssertTrue(entry.isEmpty)
+        entry.submit = true
+        XCTAssertTrue(entry.isEmpty, "submitting alone fills nothing")
+        entry.oneTimeCode = "482913"
+        XCTAssertFalse(entry.isEmpty)
+    }
+}
