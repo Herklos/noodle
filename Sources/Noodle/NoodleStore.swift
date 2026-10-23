@@ -62,6 +62,10 @@ final class NoodleStore {
         }
     }
     private(set) var pinnedConversationIDs: [UUID] = []
+    /// This Mac's own groups that notify nothing and count as nothing unread. Those of a joined Hub are kept there.
+    private(set) var mutedConversationIDs: Set<UUID> = [] {
+        didSet { updateDockBadge() }
+    }
     /// The space the sidebar shows: a joined Hub's by its key, so it is kept when the Hub is left and joined again,
     /// or one the person made by its ID; nil shows All.
     private(set) var space: String? = UserDefaults.standard.string(forKey: NoodleStore.spaceKey)
@@ -328,6 +332,7 @@ final class NoodleStore {
         // A device changed this Mac's tools, computers or browsers, in the files these controllers keep.
         thisMac.onToolsEdited = { [weak self] in self?.reloadToolsEditedElsewhere() }
         thisMac.onPinsEdited = { [weak self] in self?.reloadPins() }
+        thisMac.onNotificationsEdited = { [weak self] in self?.reloadMutes() }
         // The owner's phone shares this Mac's bots through the Hubs it joined.
         thisMac.hubSharing = { [weak self] id in await self?.hubSharing(ofAgent: id) ?? [] }
         thisMac.shareOnHub = { [weak self] id, hub, people in
@@ -579,8 +584,8 @@ final class NoodleStore {
         let pinnedIDs = Set(shownPinnedIDs)
         let unpinned = filteredConversations.filter { !pinnedIDs.contains($0.id) }
         let newest = unpinned.sorted { lastMessageDate(of: $0) > lastMessageDate(of: $1) }
-        let unread = order.unread(newest, isUnread: hasUnreadMessages), unreadIDs = Set(unread.map(\.id))
-        let rest = order.arranged(newest.filter { !unreadIDs.contains($0.id) }, isUnread: hasUnreadMessages)
+        let unread = order.unread(newest, isUnread: countsAsUnread), unreadIDs = Set(unread.map(\.id))
+        let rest = order.arranged(newest.filter { !unreadIDs.contains($0.id) }, isUnread: countsAsUnread)
         let visible = Dictionary(uniqueKeysWithValues: filteredConversations.map { ($0.id, $0) })
         return SidebarSections(
             unread: unread,
@@ -632,6 +637,61 @@ final class NoodleStore {
     private func reloadPins() {
         let known = Set(conversations.map(\.id))
         pinnedConversationIDs = ((try? repository.loadPinnedConversationIDs()) ?? []).filter(known.contains)
+    }
+
+    /// Whether a group notifies nothing and counts as nothing unread: on a joined Hub as the Hub keeps it, for every
+    /// device. Bots' own conversations always notify.
+    func isMuted(_ conversationID: UUID) -> Bool {
+        if let mirror = hubMirror(forConversation: conversationID) { return mirror.mutedConversations.contains(conversationID) }
+        return mutedConversationIDs.contains(conversationID)
+    }
+
+    /// Groups only, and on a joined Hub only one that keeps mutes.
+    func canMute(_ conversation: BotConversation) -> Bool {
+        guard conversation.kind == .group else { return false }
+        return hubMirror(forConversation: conversation.id).map(\.mutesGroups) ?? true
+    }
+
+    func setMuted(_ muted: Bool, conversationID: UUID) {
+        guard muted != isMuted(conversationID),
+              let conversation = conversations.first(where: { $0.id == conversationID }), canMute(conversation) else { return }
+        // The mirror tells `onNotificationsChanged` at once, and again if the Hub refuses.
+        if let mirror = hubMirror(forConversation: conversationID) {
+            Task {
+                do { try await mirror.setMuted(muted, conversation: conversationID) }
+                catch { errorMessage = error.localizedDescription }
+            }
+            return
+        }
+        if muted { withdrawNotifications(of: conversationID) }
+        var updated = mutedConversationIDs
+        if muted { updated.insert(conversationID) } else { updated.remove(conversationID) }
+        do {
+            try repository.saveMutedConversationIDs(updated)
+            mutedConversationIDs = updated
+            thisMac.hub?.notificationsChanged()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// The owner muted or unmuted a group on another of their devices, through This Mac as a Hub.
+    private func reloadMutes() {
+        let known = Set(conversations.map(\.id))
+        let muted = ((try? repository.loadMutedConversationIDs()) ?? []).intersection(known)
+        muted.subtracting(mutedConversationIDs).forEach(withdrawNotifications)
+        mutedConversationIDs = muted
+    }
+
+    /// Takes back the replies a group showed in Notification Center.
+    private func withdrawNotifications(of conversationID: UUID) {
+        guard connectsServices else { return }
+        NoodleNotifications.withdraw(conversation: conversationID)
+    }
+
+    /// Whether a conversation shows in Unread and counts on the Dock: unread, and not a muted group, whose row only dims its dot.
+    func countsAsUnread(_ conversation: BotConversation) -> Bool {
+        hasUnreadMessages(in: conversation) && !isMuted(conversation.id)
     }
 
     func reload() {
@@ -692,6 +752,12 @@ final class NoodleStore {
             if pinnedConversationIDs != storedPinnedIDs {
                 try repository.savePinnedConversationIDs(pinnedConversationIDs)
                 thisMac.hub?.pinsChanged()
+            }
+            let storedMutedIDs = try repository.loadMutedConversationIDs()
+            mutedConversationIDs = storedMutedIDs.intersection(knownConversationIDs)
+            if mutedConversationIDs != storedMutedIDs {
+                try repository.saveMutedConversationIDs(mutedConversationIDs)
+                thisMac.hub?.notificationsChanged()
             }
             // Members out of reach stay stored, so a space is never pruned here.
             spaceList.reload()
@@ -837,6 +903,10 @@ final class NoodleStore {
                 mirror.onChange = { [weak self] in self?.hubBotsChanged() }
                 mirror.onRead = { [weak self] in self?.readElsewhere($0, upTo: $1) }
                 mirror.onBackgroundChanged = { [weak self] in self?.reloadBackground(of: $0) }
+                mirror.onNotificationsChanged = { [weak self, weak mirror] id in
+                    if mirror?.mutedConversations.contains(id) == true { self?.withdrawNotifications(of: id) }
+                    self?.updateDockBadge()
+                }
                 mirror.onCallRinging = { [weak self] in self?.ringHubCall($0) }
                 mirror.onCallStopped = { [weak self] in self?.stopRinging($0) }
                 // People on the Hub talk to this Mac's own bots there, which run here.
@@ -1758,10 +1828,12 @@ final class NoodleStore {
         unreadConversationIDs.contains(conversation.id)
     }
 
+    /// The unread conversations the Dock counts: muted groups are left out.
+    var badgedConversationIDs: Set<UUID> { unreadConversationIDs.filter { !isMuted($0) } }
+
     func updateDockBadge() {
-        NSApplication.shared.dockTile.badgeLabel = unreadConversationIDs.isEmpty
-            ? nil
-            : String(unreadConversationIDs.count)
+        let badged = badgedConversationIDs
+        NSApplication.shared.dockTile.badgeLabel = badged.isEmpty ? nil : String(badged.count)
     }
 
     func markConversationRead(_ conversationID: UUID?) {
@@ -2448,6 +2520,9 @@ final class NoodleStore {
 
     private func postNotifications(for messages: [ChatMessage]) {
         guard connectsServices else { return }
+        // A muted group is silent.
+        let messages = messages.filter { !isMuted($0.conversationID) }
+        guard !messages.isEmpty else { return }
         let presentsNotifications = NoodleNotifications.shouldPresentActivity
         if MessageReceivedSound.playsInApp(newMessages: messages.count,
                                            presentsNotifications: presentsNotifications) {

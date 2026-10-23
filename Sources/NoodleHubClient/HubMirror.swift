@@ -38,6 +38,8 @@ import Observation
         var synced: Int
         var background: LinkBackground?
         var pinnedAt: Date?
+        /// How it notifies this Mac's user, as the Hub last said. Nil for every reply.
+        var notifications: LinkNotifications?
     }
 
     /// A conversation on the Hub, a bot's own or a group's, and its local copy.
@@ -58,6 +60,8 @@ import Observation
     @ObservationIgnored public var onRead: ((_ conversation: UUID, _ upTo: Date) -> Void)?
     /// Runs with a conversation here whose background changed to the Hub's.
     @ObservationIgnored public var onBackgroundChanged: ((_ conversation: UUID) -> Void)?
+    /// Runs with a group here that was muted or unmuted, here or on another device.
+    @ObservationIgnored public var onNotificationsChanged: ((_ conversation: UUID) -> Void)?
     /// One of this Mac's user's bots on the Hub is calling them, with the bot and conversation here.
     @ObservationIgnored public var onCallRinging: ((AgentCallRequest) -> Void)?
     /// A call that rang was answered on some device, declined, or not answered in time.
@@ -386,6 +390,35 @@ import Observation
         }
     }
 
+    /// Whether the Hub can mute groups; an older one cannot.
+    public var mutesGroups: Bool { pairing.status?.mutesGroups == true }
+
+    /// The local copies of this Hub's groups its user muted.
+    public var mutedConversations: Set<UUID> { Set(groups.filter { $0.notifications == .muted }.map(\.conversation)) }
+
+    /// Mutes or unmutes a group on the Hub, for every device of its user. It shows here at once,
+    /// and goes back when the Hub refuses.
+    public func setMuted(_ muted: Bool, conversation: UUID) async throws {
+        guard let entry = groups.first(where: { $0.conversation == conversation }) else { throw LinkError("This group is not on the Hub.") }
+        let before = entry.notifications, level: LinkNotifications = muted ? .muted : .all
+        guard (before == .muted) != muted else { return }
+        setNotifications(level, remote: entry.remote)
+        do {
+            _ = try await pairing.request(.setNotifications(LinkNotificationsChange(conversationID: entry.remote, notifications: level)))
+        } catch {
+            setNotifications(before, remote: entry.remote)
+            throw error
+        }
+    }
+
+    private func setNotifications(_ level: LinkNotifications?, remote id: UUID) {
+        let kept = level == .all ? nil : level
+        guard let index = groups.firstIndex(where: { $0.remote == id }), groups[index].notifications != kept else { return }
+        groups[index].notifications = kept
+        saveGroups()
+        onNotificationsChanged?(groups[index].conversation)
+    }
+
     private func pinnedAt(remote id: UUID) -> Date? {
         entries.first { $0.remoteConversation == id }?.pinnedAt ?? groups.first { $0.remote == id }?.pinnedAt
     }
@@ -678,6 +711,8 @@ import Observation
                         if let thread = thread(remote: id) { onRead?(thread.local, upTo) }
                     case .pinChanged(let id, let pinnedAt):
                         setPinnedAt(pinnedAt, remote: id)
+                    case .notificationsChanged(let id, let level):
+                        setNotifications(level, remote: id)
                     case .backgroundChanged(let id, let background):
                         // One that cannot be fetched now is tried again at the next sync.
                         try? await copyBackground(background, of: id)
@@ -738,6 +773,7 @@ import Observation
             if let entry = groups.first(where: { $0.remote == group.id }) {
                 if try apply(group, to: entry) { changed = true }
                 setPinnedAt(group.pinnedAt, remote: group.id)
+                setNotifications(group.notifications, remote: group.id)
             } else {
                 _ = try adopt(group)
                 changed = true
@@ -1131,7 +1167,8 @@ import Observation
         let conversation = try repository.createGroup(named: group.draft.name, publicDescription: group.draft.publicDescription,
                                                       participantIDs: localAgents(group.draft.botIDs),
                                                       existingAgents: try repository.loadAgents())
-        groups.append(GroupEntry(remote: group.id, conversation: conversation.id, synced: 0, pinnedAt: group.pinnedAt))
+        groups.append(GroupEntry(remote: group.id, conversation: conversation.id, synced: 0, pinnedAt: group.pinnedAt,
+                                 notifications: group.isMuted ? .muted : nil))
         saveGroups()
         guard let archivedAt = group.archivedAt else { return conversation }
         return try repository.setConversationArchived(true, conversationID: conversation.id, now: archivedAt)

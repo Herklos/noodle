@@ -115,6 +115,21 @@ public struct WorkspaceRepository: Sendable {
         rootURL.appendingPathComponent("pinned-conversations.json")
     }
 
+    /// Groups whose replies notify nothing and count as nothing unread.
+    public func loadMutedConversationIDs() throws -> Set<UUID> {
+        guard FileManager.default.fileExists(atPath: mutedConversationsURL.path) else { return [] }
+        return try read(MutedConversations.self, from: mutedConversationsURL).conversationIDs
+    }
+
+    public func saveMutedConversationIDs(_ ids: Set<UUID>) throws {
+        try prepare()
+        try write(MutedConversations(conversationIDs: ids), to: mutedConversationsURL)
+    }
+
+    private var mutedConversationsURL: URL {
+        rootURL.appendingPathComponent("muted-conversations.json")
+    }
+
     public var harnessProfiles: HarnessProfileStore { HarnessProfileStore(root: rootURL) }
     public var managedHarnesses: ManagedHarnessStore { ManagedHarnessStore(root: rootURL) }
 
@@ -1687,6 +1702,11 @@ public struct WorkspaceRepository: Sendable {
 private struct PinnedConversations: Codable {
     var version = 1
     let conversationIDs: [UUID]
+}
+
+private struct MutedConversations: Codable {
+    var version = 1
+    let conversationIDs: Set<UUID>
 }
 
 private struct ConversationReadState: Codable {

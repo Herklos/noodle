@@ -157,6 +157,9 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     case markRead(LinkReadMark)
     /// Pins or unpins one of this user's conversations, for all their devices. The Hub pushes `pinChanged`.
     case pin(LinkPin)
+    /// Sets how one of this user's groups notifies them, for all their devices. The Hub pushes
+    /// `notificationsChanged`. Only a Hub whose status says `mutesGroups` knows it.
+    case setNotifications(LinkNotificationsChange)
     /// Where this device hears of unread replies while it is away from the Hub, or nil to stop.
     case pushTopic(LinkPushTopic)
     /// Lets the Hub ring this device through Noodle Push while it is away or Noodle is closed, or with no
@@ -666,6 +669,8 @@ public enum LinkEvent: Codable, Equatable, Sendable {
     case readChanged(conversationID: UUID, upTo: Date)
     /// This user pinned a conversation, on one of their devices, or unpinned it: nil.
     case pinChanged(conversationID: UUID, pinnedAt: Date?)
+    /// This user changed how one of their groups notifies them, on one of their devices.
+    case notificationsChanged(conversationID: UUID, notifications: LinkNotifications)
     /// This user's connections, their sign-in or their bots changed.
     case connectionsChanged
     /// Open this page in the browser to sign a connection in, then send `finishSignIn`.
@@ -1092,12 +1097,15 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     public var callPushExpiresAt: Date?
     /// Whether the Hub says why a bot does not answer for now, as each `LinkBot.pause`, so a bot it lists without one runs.
     public var explainsPauses: Bool
+    /// Whether the Hub keeps how each group notifies its user, as `LinkGroup.notifications`, and takes
+    /// `setNotifications`, so a device may offer to mute a group.
+    public var mutesGroups: Bool
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
                 canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
                 keepsAnnotations: Bool = false, signsInToBrowsers: Bool = false, ringsThroughPush: Bool = false,
-                callPushExpiresAt: Date? = nil, explainsPauses: Bool = false) {
+                callPushExpiresAt: Date? = nil, explainsPauses: Bool = false, mutesGroups: Bool = false) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1115,11 +1123,12 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.ringsThroughPush = ringsThroughPush
         self.callPushExpiresAt = callPushExpiresAt
         self.explainsPauses = explainsPauses
+        self.mutesGroups = mutesGroups
     }
 
     private enum CodingKeys: String, CodingKey {
         case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
-             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt, explainsPauses
+             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt, explainsPauses, mutesGroups
     }
 
     public init(from decoder: Decoder) throws {
@@ -1141,6 +1150,7 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         ringsThroughPush = try c.decode(.ringsThroughPush, or: false)
         callPushExpiresAt = try c.decodeIfPresent(Date.self, forKey: .callPushExpiresAt)
         explainsPauses = try c.decode(.explainsPauses, or: false)
+        mutesGroups = try c.decode(.mutesGroups, or: false)
     }
 }
 
@@ -1408,9 +1418,11 @@ public struct LinkGroup: Codable, Equatable, Identifiable, Sendable {
     public var background: LinkBackground?
     /// When its user pinned it, which orders pins. Nil when not pinned, or from a Hub without pins.
     public var pinnedAt: Date?
+    /// How it notifies its user. Nil for every reply, or from a Hub that does not mute groups.
+    public var notifications: LinkNotifications?
 
     public init(id: UUID, draft: LinkGroupDraft, createdAt: Date, readUpTo: Date? = nil, archivedAt: Date? = nil,
-                background: LinkBackground? = nil, pinnedAt: Date? = nil) {
+                background: LinkBackground? = nil, pinnedAt: Date? = nil, notifications: LinkNotifications? = nil) {
         self.id = id
         self.draft = draft
         self.createdAt = createdAt
@@ -1418,6 +1430,34 @@ public struct LinkGroup: Codable, Equatable, Identifiable, Sendable {
         self.archivedAt = archivedAt
         self.background = background
         self.pinnedAt = pinnedAt
+        self.notifications = notifications
+    }
+
+    /// Whether its replies notify nothing and count as nothing unread.
+    public var isMuted: Bool { notifications == .muted }
+}
+
+/// How a group tells its user of new replies. A level from a newer app still reads, and counts as
+/// every reply where it is not known.
+public struct LinkNotifications: RawRepresentable, Codable, Hashable, Sendable {
+    public var rawValue: String
+
+    public init(rawValue: String) { self.rawValue = rawValue }
+
+    /// Every reply notifies and counts as unread.
+    public static let all = LinkNotifications(rawValue: "all")
+    /// No reply notifies or counts towards the unread badge; new replies still show in the list.
+    public static let muted = LinkNotifications(rawValue: "muted")
+}
+
+/// A group, by its conversation's ID, and how it should notify its user.
+public struct LinkNotificationsChange: Codable, Equatable, Sendable {
+    public var conversationID: UUID
+    public var notifications: LinkNotifications
+
+    public init(conversationID: UUID, notifications: LinkNotifications) {
+        self.conversationID = conversationID
+        self.notifications = notifications
     }
 }
 

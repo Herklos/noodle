@@ -443,6 +443,32 @@ import XCTest
         XCTAssertEqual(pinned, [ada.id, eli.id])
     }
 
+    /// The Mac's own muted groups are the phone's: muting on the phone mutes on the Mac, and muting on the Mac reaches the phone.
+    func testMutedGroupsAreTheMacsOwn() async throws {
+        let (f, made) = try await fixture(bots: ["Eli", "Ada"])
+        let group = try f.repository.createGroup(named: "House", publicDescription: "", participantIDs: made.map(\.id),
+                                                 existingAgents: try f.repository.loadAgents())
+        var edited = 0
+        f.personal.onNotificationsEdited = { edited += 1 }
+
+        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .muted)))
+        XCTAssertEqual(try f.repository.loadMutedConversationIDs(), [group.id])
+        XCTAssertEqual(edited, 1)
+        guard case .groups(let muted) = try await f.device.request(.groups) else { return XCTFail("no groups") }
+        XCTAssertEqual(muted.first { $0.id == group.id }?.notifications, .muted)
+
+        let events = try await f.device.subscribe()
+        // Once the Hub answers, it has the subscription.
+        _ = try await f.device.request(.bots)
+        try f.repository.saveMutedConversationIDs([])
+        f.personal.notificationsChanged()
+        for try await event in events {
+            if case .notificationsChanged(group.id, let level) = event { XCTAssertEqual(level, .all); break }
+        }
+        guard case .groups(let unmuted) = try await f.device.request(.groups) else { return XCTFail("no groups") }
+        XCTAssertNil(unmuted.first { $0.id == group.id }?.notifications)
+    }
+
     /// A long conversation, well past what one answer may carry, arrives newest first and page by
     /// page as the person scrolls back; a device reading onward gets the rest the same way.
     func testALongConversationArrivesPageByPage() async throws {

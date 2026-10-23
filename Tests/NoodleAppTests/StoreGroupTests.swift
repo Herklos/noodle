@@ -128,6 +128,37 @@ import XCTest
         XCTAssertEqual(try f.repository.loadPinnedConversationIDs(), [f.directB.id])
     }
 
+    /// A muted group leaves Unread and the Dock's count but keeps its dot, and stays muted after a reload.
+    /// Bots' own conversations always notify.
+    func testAMutedGroupLeavesUnreadAndTheDockCount() throws {
+        let f = try fixture(), group = try f.group(name: "Launch team"), now = Date()
+        XCTAssertTrue(f.store.canMute(group))
+        XCTAssertFalse(f.store.canMute(f.directA))
+        try f.repository.append(ChatMessage(conversationID: group.id, author: .agent(f.a.id), body: "Shipped",
+                                            createdAt: now.addingTimeInterval(10), delivery: .delivered))
+        try f.repository.append(ChatMessage(conversationID: f.directB.id, author: .agent(f.b.id), body: "Hello",
+                                            createdAt: now.addingTimeInterval(20), delivery: .delivered))
+        f.store.refreshTranscripts()
+        XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directB.id])
+
+        f.store.setMuted(true, conversationID: group.id)
+        XCTAssertTrue(f.store.isMuted(group.id))
+        XCTAssertEqual(f.store.badgedConversationIDs, [f.directB.id])
+        XCTAssertTrue(f.store.hasUnreadMessages(in: group), "Its row still shows new replies")
+        let section = f.store.sidebarSections(.unreadSection)
+        XCTAssertEqual(section.unread.map(\.id), [f.directB.id])
+        XCTAssertEqual(section.groups.map(\.id), [group.id])
+        f.store.setMuted(true, conversationID: f.directA.id)
+        XCTAssertFalse(f.store.isMuted(f.directA.id))
+
+        f.store.reload()
+        XCTAssertTrue(f.store.isMuted(group.id))
+        XCTAssertEqual(try f.repository.loadMutedConversationIDs(), [group.id])
+        f.store.setMuted(false, conversationID: group.id)
+        XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directB.id])
+        XCTAssertEqual(try f.repository.loadMutedConversationIDs(), [])
+    }
+
     func testSectionsOrderByLastMessageNotByOtherChanges() throws {
         let f = try fixture(), now = Date()
         try f.repository.append(ChatMessage(conversationID: f.directA.id, author: .user, body: "Latest",

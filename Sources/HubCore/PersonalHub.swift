@@ -54,7 +54,7 @@ import NoodleRuntime
                                call: browser ?? BrowserToolProvider.liveTransport())
         bots = HubBots(repository: repository, runtime: runtime, access: access, connections: connections, computers: computers,
                        browsers: browsers, applets: applets, uploads: directory.appendingPathComponent("Uploads", isDirectory: true),
-                       readMarks: directory.appendingPathComponent("read.json"), pins: nil)
+                       readMarks: directory.appendingPathComponent("read.json"), pins: nil, notifications: nil)
         link = HubLinkService(hubName: name, directory: directory.appendingPathComponent("Link", isDirectory: true),
                               access: access, profiles: profiles, bots: bots, connections: connections, computers: computers,
                               browsers: browsers, port: port, router: router, localEndpoints: localEndpoints,
@@ -91,6 +91,17 @@ import NoodleRuntime
     /// The owner changed pins on the Mac; their devices show the same.
     public func pinsChanged() {
         bots.pinsChanged(for: owner)
+    }
+
+    /// Runs when the owner muted or unmuted a group on one of their devices, so the Mac reads its muted groups again.
+    public var onNotificationsEdited: (() -> Void)? {
+        get { bots.onNotificationsEdited }
+        set { bots.onNotificationsEdited = newValue }
+    }
+
+    /// The owner muted or unmuted a group on the Mac; their devices show the same, and the Hub notifies them so.
+    public func notificationsChanged() {
+        bots.notificationsChanged(for: owner)
     }
 
     public func start() async {

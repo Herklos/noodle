@@ -27,6 +27,8 @@ import Observation
     @ObservationIgnored var onBackgroundChanged: ((_ conversationID: UUID) -> Void)?
     /// Runs when the owner pinned or unpinned on one of their devices.
     @ObservationIgnored var onPinsEdited: (() -> Void)?
+    /// Runs when the owner muted or unmuted a group on one of their devices.
+    @ObservationIgnored var onNotificationsEdited: (() -> Void)?
     /// A bot here's sharing on the Hubs this Mac joined, and sharing it on one, for the owner's phone.
     @ObservationIgnored var hubSharing: ((UUID) async throws -> [LinkHubSharing])?
     @ObservationIgnored var shareOnHub: ((UUID, String, [UUID]) async throws -> [LinkHubSharing])?
@@ -85,6 +87,7 @@ import Observation
             hub.bots.onBackgroundChanged = { [weak self] in self?.onBackgroundChanged?($0) }
             hub.onToolsEdited = { [weak self] in self?.onToolsEdited?() }
             hub.onPinsEdited = { [weak self] in self?.onPinsEdited?() }
+            hub.onNotificationsEdited = { [weak self] in self?.onNotificationsEdited?() }
             hub.link.hubSharing = { [weak self] in try await self?.hubSharing?($0) ?? [] }
             hub.link.shareOnHub = { [weak self] in
                 guard let share = self?.shareOnHub else { throw LinkError("Noodle is closing.") }

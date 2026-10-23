@@ -178,6 +178,29 @@ final class LinkCompatibilityTests: XCTestCase {
         XCTAssertEqual(LinkProtocol.decodeEvent(LinkProtocol.encode(event)), event)
     }
 
+    /// A group from a Hub without mutes notifies; a level a newer app adds still reads, and is not muted.
+    func testMutedGroupsReadAcrossAppVersions() throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
+        let group = try decode(LinkGroup.self, #"{"id":"\#(id)","draft":{"name":"House","publicDescription":"","botIDs":[]},"createdAt":0}"#)
+        XCTAssertNil(group.notifications)
+        XCTAssertFalse(group.isMuted)
+        let status = try decode(LinkStatus.self, #"{"hubName":"Mac mini"}"#)
+        XCTAssertFalse(status.mutesGroups)
+
+        var muted = group
+        muted.notifications = .muted
+        XCTAssertEqual(try decode(LinkGroup.self, String(decoding: try LinkProtocol.encoder.encode(muted), as: UTF8.self)), muted)
+        let later = try decode(LinkGroup.self,
+            #"{"id":"\#(id)","draft":{"name":"House","publicDescription":"","botIDs":[]},"createdAt":0,"notifications":"mentions"}"#)
+        XCTAssertFalse(later.isMuted)
+
+        let request = try decode(LinkRequest.self,
+            #"{"setNotifications":{"_0":{"conversationID":"00000000-0000-0000-0000-00000000000A","notifications":"muted"}}}"#)
+        XCTAssertEqual(request, .setNotifications(LinkNotificationsChange(conversationID: id, notifications: .muted)))
+        let event = LinkEvent.notificationsChanged(conversationID: id, notifications: .all)
+        XCTAssertEqual(LinkProtocol.decodeEvent(LinkProtocol.encode(event)), event)
+    }
+
     func testFieldsAddedLaterMayBeMissing() throws {
         let id = UUID(), conversation = UUID()
         let message = try decode(LinkMessage.self,
