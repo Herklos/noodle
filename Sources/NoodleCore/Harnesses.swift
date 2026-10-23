@@ -301,6 +301,8 @@ public struct AgentRuntimeSnapshot: Codable, Hashable, Sendable {
     public var failure: AgentRuntimeFailure?
     /// First connection retry in the current episode; repeated errors do not advance it.
     public var reconnectingSince: Date?
+    /// When the harness said its usage comes back, for a usage limit; nil when it did not say.
+    public var usageResetsAt: Date?
 
     public var canKick: Bool { phase == .failed || reconnectingSince != nil }
 
@@ -323,7 +325,8 @@ public struct AgentRuntimeSnapshot: Codable, Hashable, Sendable {
         detail: String,
         processIdentifier: Int32? = nil,
         failure: AgentRuntimeFailure? = nil,
-        reconnectingSince: Date? = nil
+        reconnectingSince: Date? = nil,
+        usageResetsAt: Date? = nil
     ) {
         self.agentID = agentID
         self.phase = phase
@@ -331,6 +334,7 @@ public struct AgentRuntimeSnapshot: Codable, Hashable, Sendable {
         self.processIdentifier = processIdentifier
         self.failure = failure
         self.reconnectingSince = reconnectingSince
+        self.usageResetsAt = usageResetsAt
     }
 }
 

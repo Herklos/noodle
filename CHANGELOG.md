@@ -6,7 +6,13 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Bots can continue on another harness when theirs runs out of usage. Turn it on in Settings → Harnesses and put the harnesses in order. A bot whose harness runs out moves to the next one that is on, installed and has usage left, with that harness's default model, and says so in its conversation, such as "Codex is out of usage, continuing on Claude Code". It goes back once its own harness has usage again, at a moment it is not working, or when you choose Kick. Bot settings are not changed. If every harness is out of usage, the bot pauses as before.
+
 ### Changed
+
+- Codex and Claude Code bots that run out of usage now pause until you choose Kick, as Grok Build bots do, instead of trying again with every message.
 
 - Files in conversations with bots on a Noodle Hub no longer all download to this Mac. Pictures, videos and PDFs show the Hub's preview, and a file downloads when you open, share, save or drag it, or use it as a background. Downloaded files take up to 2 GB for each Hub; past that, the ones you opened least recently are removed from this Mac and download again when you open them. Files sent to bots this Mac hosts still download, as the bots read them.
 

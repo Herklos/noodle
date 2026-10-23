@@ -67,4 +67,19 @@ public enum ClaudeProtocol {
         return ["failed to authenticate", "oauth session expired", "not logged in", "please run /login",
                 "invalid api key", "authentication_error"].contains(where: lower.contains)
     }
+
+    /// Claude Code ends the turn with this text once the plan's limit is used up. A busy API
+    /// (429 rate_limit_error, 529 overloaded_error) is retried and is not out of usage.
+    public static func isUsageLimit(_ text: String) -> Bool {
+        let lower = text.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
+        return ["usage limit reached", "hit your limit", "hit your usage limit", "hit your session limit",
+                "hit your weekly limit"].contains(where: lower.contains)
+    }
+
+    /// The older message, `Claude AI usage limit reached|<Unix seconds>`, carries when usage comes back.
+    public static func usageLimitReset(_ text: String) -> Date? {
+        guard isUsageLimit(text), let last = text.split(separator: "|").last, last.count < text.count,
+              let seconds = TimeInterval(last.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
 }

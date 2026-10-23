@@ -49,6 +49,18 @@ public struct HarnessHostInspection {
     }
 }
 
+/// A bot running on another harness from Settings › Harnesses because its own ran out of usage.
+/// It uses that harness's default model and login, and goes back at an idle point after `returnAfter`.
+public struct HarnessFallback: Equatable, Sendable {
+    public let primary: HarnessProvider
+    public var current: HarnessProvider
+    public let returnAfter: Date
+    /// How many times in a row the bot's own harness ran out again soon after it came back.
+    let flaps: Int
+    /// The bot's own login, keyed like SubscriptionUsageStore.
+    let primaryKey: String
+}
+
 /// A confirmation is valid only for this bot configuration, runtime, and failure.
 public struct AgentKickRequest: Identifiable {
     public let id = UUID()
@@ -200,6 +212,23 @@ public final class AgentRuntimeCoordinator {
     @ObservationIgnored public var onSignInRequired: (@MainActor (UUID) -> Void)?
     /// Called once each time a bot pauses until Kick for a reported failure other than sign-in.
     @ObservationIgnored public var onPaused: (@MainActor (UUID) -> Void)?
+    /// Called with the line to show in the bot's conversation when it moves to another harness, or back to its own.
+    @ObservationIgnored public var onHarnessSwitch: (@MainActor (UUID, String) -> Void)?
+    /// Bots running on another harness because their own ran out of usage. Runtime state only:
+    /// agent.json and Edit Bot keep each bot's own harness.
+    public private(set) var harnessFallbacks: [UUID: HarnessFallback] = [:]
+    /// Logins found out of usage, keyed like SubscriptionUsageStore, and until when.
+    private(set) var usageExhaustedUntil: [String: Date] = [:]
+    /// When each bot last came back to its own harness, and how many times in a row it ran out again soon after.
+    @ObservationIgnored private var fallbackReturns: [UUID: (date: Date, flaps: Int)] = [:]
+    /// The shortest stay on a fallback; it doubles each time the bot's own harness runs out again soon after it came back.
+    static let fallbackCooldown: TimeInterval = 30 * 60
+    static let longestFallbackCooldown: TimeInterval = 8 * 60 * 60
+    /// How long a login that did not say when its usage comes back counts as out of usage.
+    static let unknownUsageReset: TimeInterval = 60 * 60
+
+    /// The harness a bot runs on instead of its own; nil while it runs on its own.
+    public func runningHarness(for agentID: UUID) -> HarnessProvider? { harnessFallbacks[agentID]?.current }
     /// Retries before a turn finishes fail the same way, so they stay quiet.
     @ObservationIgnored private var signInAnnounced: Set<UUID> = []
     /// Whether a bot's harness login works now, asked without starting the bot or a turn;
@@ -679,7 +708,13 @@ public final class AgentRuntimeCoordinator {
             saveSessionDates()
         }
 
+        harnessFallbacks = harnessFallbacks.filter { liveIDs.contains($0.key) }
+        fallbackReturns = fallbackReturns.filter { liveIDs.contains($0.key) }
         for agent in agents {
+            // A bot given another harness in Edit Bot runs on that one from now on.
+            if let fallback = harnessFallbacks[agent.id], agent.harnessIdentifier != fallback.primary.rawValue {
+                harnessFallbacks[agent.id] = nil
+            }
             if blockedRestarts.contains(agent.id) { continue }
             if blockedRecoveries.contains(agent.id), connectionRecoveryAttempts[agent.id] != nil { continue }
             if heldAgents[agent.id] != nil, processes[agent.id] == nil { hold(agent.id); continue }
@@ -709,7 +744,7 @@ public final class AgentRuntimeCoordinator {
         snapshots = snapshots.filter { liveIDs.contains($0.key) }
 
         if let repository {
-            for agent in agents where processes[agent.id]?.runs(agent) != true
+            for agent in agents where processes[agent.id]?.runs(runningAgent(agent)) != true
                 && !blockedRestarts.contains(agent.id)
                 && !(blockedRecoveries.contains(agent.id) && connectionRecoveryAttempts[agent.id] != nil) {
                 restart(agent: agent, repository: repository)
@@ -807,7 +842,8 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
-    public func start(agent: AgentRecord, repository: WorkspaceRepository) {
+    public func start(agent configured: AgentRecord, repository: WorkspaceRepository) {
+        let agent = runningAgent(configured)
         if heldAgents[agent.id] != nil { hold(agent.id); return }
         guard !neverStarts(agent.id), processes[agent.id] == nil, !changingAccess.contains(agent.id), !blockedRestarts.contains(agent.id),
               !blockedRecoveries.contains(agent.id) else { return }
@@ -838,13 +874,14 @@ public final class AgentRuntimeCoordinator {
         let runtimeID = UUID()
         runtimeIDs[agent.id] = runtimeID
         usageMeters[agent.id] = UsageMeter()
+        let ownLogin = harnessFallbacks[agent.id] == nil
         let process = makeProcess(AgentRuntimeLaunch(
             agent: agent, provider: installation.provider,
             executableURL: URL(fileURLWithPath: executablePath), workspaceURL: repository.directory(for: agent),
             extendedAccess: accessConfiguration.isExtended(for: agent),
             appsEnabled: accessConfiguration.appsEnabled(for: agent),
             recoverInterruptedWork: recoveryPending.remove(agent.id) != nil,
-            onSnapshot: runtimeSnapshotHandler(for: agent.id, runtimeID: runtimeID),
+            onSnapshot: runtimeSnapshotHandler(for: agent.id, runtimeID: runtimeID, agent: configured, repository: repository),
             onHeartbeat: { [weak self] in
                 guard let self, self.runtimeIDs[agent.id] == runtimeID else { return }
                 self.recordHeartbeat(for: agent.id)
@@ -857,7 +894,8 @@ public final class AgentRuntimeCoordinator {
                 guard let self, self.runtimeIDs[agent.id] == runtimeID else { return }
                 self.activity.record(message, provider: installation.provider, agentID: agent.id)
                 self.recordUsage(message, provider: installation.provider, agent: agent)
-                self.recordSubscriptionUsage(message, provider: installation.provider, agent: agent, repository: repository)
+                self.recordSubscriptionUsage(message, provider: installation.provider, agent: agent, repository: repository,
+                                             ownLogin: ownLogin)
             }))
         processes[agent.id] = process
         process.start()
@@ -877,11 +915,12 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
-    /// Plan limits belong to the login the bot runs on, its profile's or the system one.
+    /// Plan limits belong to the login the bot runs on, its profile's or the system one; a fallback harness runs on its system one.
     private func recordSubscriptionUsage(_ message: [String: Any], provider: HarnessProvider, agent: AgentRecord,
-                                         repository: WorkspaceRepository) {
+                                         repository: WorkspaceRepository, ownLogin: Bool) {
         guard SubscriptionUsage.isReport(message, provider: provider) else { return }
-        subscriptionUsage.record(message, provider: provider, profile: try? repository.loadAgentHarnessProfile(agent), at: now())
+        subscriptionUsage.record(message, provider: provider,
+                                 profile: ownLogin ? (try? repository.loadAgentHarnessProfile(agent)) : nil, at: now())
     }
 
     /// Organize waits for an idle bot, like a heartbeat, so it never cuts into work.
@@ -897,7 +936,18 @@ public final class AgentRuntimeCoordinator {
     /// Ordinary Kick remains immediate; replacing a missing session requires a
     /// concrete confirmation. Account failures explain the prerequisite first.
     public func kick(agent: AgentRecord, repository: WorkspaceRepository) -> AgentKickRequest? {
-        guard !isStoppingAll, !changingAccess.contains(agent.id), snapshot(for: agent.id).canKick else { return nil }
+        guard !isStoppingAll, !changingAccess.contains(agent.id) else { return nil }
+        // Kick takes a bot on a fallback back to its own harness at once; if that is still out
+        // of usage, the bot falls back again.
+        if let fallback = harnessFallbacks.removeValue(forKey: agent.id) {
+            usageExhaustedUntil[fallback.primaryKey] = nil
+            connectionRecoveryAttempts[agent.id] = nil
+            forgetSignInRetries(agent.id)
+            onHarnessSwitch?(agent.id, "Back on \(fallback.primary.displayName)")
+            restart(agent: agent, repository: repository, sessionRecovery: nil, retryFailedStop: true)
+            return nil
+        }
+        guard snapshot(for: agent.id).canKick else { return nil }
         connectionRecoveryAttempts[agent.id] = nil
         forgetSignInRetries(agent.id)
         if let failure = snapshot(for: agent.id).failure, failure != .recoveryFailed {
@@ -912,7 +962,7 @@ public final class AgentRuntimeCoordinator {
 
     /// Only harnesses with a saved ACP session have recovery to prepare; the rest simply restart.
     private func sessionRecovery(_ recovery: SessionRecovery, for agent: AgentRecord) -> SessionRecovery? {
-        let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))
+        let provider = runningAgent(agent).harnessIdentifier.flatMap(HarnessProvider.init(rawValue:))
         return provider == .grokBuild || provider == .openCode ? recovery : nil
     }
 
@@ -921,7 +971,7 @@ public final class AgentRuntimeCoordinator {
         guard !isStoppingAll, !changingAccess.contains(agent.id),
               lifecycleID == request.lifecycleID, runtimeIDs[agent.id] == request.runtimeID,
               snapshot(for: agent.id).phase == .failed, snapshot(for: agent.id).failure == request.failure,
-              processes[agent.id]?.runs(agent) ?? true,
+              processes[agent.id]?.runs(runningAgent(agent)) ?? true,
               accessConfiguration.isExtended(for: agent) == request.extendedAccess else { return }
         let recovery: SessionRecovery
         switch request.failure {
@@ -1001,9 +1051,10 @@ public final class AgentRuntimeCoordinator {
             recoveryPending.remove(agent.id)
             sessionStartDates[agent.id] = now()
             saveSessionDates()
-            let provider = HarnessProvider(rawValue: agent.harnessIdentifier ?? "") ?? .codex
+            let running = runningAgent(agent)
+            let provider = HarnessProvider(rawValue: running.harnessIdentifier ?? "") ?? .codex
             let state = repository.storage(for: agent.id).sessionState(provider: provider,
-                extendedAccess: accessConfiguration.isExtended(for: agent))
+                extendedAccess: accessConfiguration.isExtended(for: running))
             try? FileManager.default.removeItem(at: state)
             try? FileManager.default.removeItem(at: state.appendingPathExtension("unfinished"))
         }
@@ -1024,12 +1075,13 @@ public final class AgentRuntimeCoordinator {
                     do {
                         let storage = repository.storage(for: agent.id)
                         try storage.validate()
-                        guard let provider = agent.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)),
+                        let running = self.runningAgent(agent)
+                        guard let provider = running.harnessIdentifier.flatMap(HarnessProvider.init(rawValue:)),
                               provider == .grokBuild || provider == .openCode else {
                             throw HarnessSetupError("This harness does not support session recovery through Kick.")
                         }
                         let state = storage.sessionState(provider: provider,
-                            extendedAccess: self.accessConfiguration.isExtended(for: agent))
+                            extendedAccess: self.accessConfiguration.isExtended(for: running))
                         switch sessionRecovery {
                         case .replace(let sessionID): try ACPSessionState.prepareRecovery(at: state, replacing: sessionID)
                         case .retry: try ACPSessionState.allowRecoveryRetry(at: state)
@@ -1096,6 +1148,8 @@ public final class AgentRuntimeCoordinator {
         failedStops.removeValue(forKey: agentID)?.stop { _ in }
         blockedRestarts.remove(agentID)
         snapshots.removeValue(forKey: agentID)
+        harnessFallbacks.removeValue(forKey: agentID)
+        fallbackReturns.removeValue(forKey: agentID)
         signInAnnounced.remove(agentID)
         forgetSignInRetries(agentID)
         heartbeatScheduler.remove(agentID)
@@ -1142,7 +1196,7 @@ public final class AgentRuntimeCoordinator {
 
     public func reconcile(agents: [AgentRecord], repository: WorkspaceRepository, immediately: Bool = false) {
         guard !isStoppingAll else { return }
-        for agent in agents where installation(for: agent) != nil && !neverStarts(agent.id) {
+        for agent in agents where installation(for: runningAgent(agent)) != nil && !neverStarts(agent.id) {
             // A bot waiting on the person for a reported failure keeps it until Kick;
             // restarting cannot sign in, restore usage or answer a safety stop.
             if let process = processes[agent.id], process.snapshot.phase == .failed, let failure = process.snapshot.failure {
@@ -1150,7 +1204,7 @@ public final class AgentRuntimeCoordinator {
                 continue
             }
             if let process = processes[agent.id], process.isAlive {
-                if agent.harnessIdentifier == HarnessProvider.codex.rawValue,
+                if process.configuration.harnessIdentifier == HarnessProvider.codex.rawValue,
                    process.snapshot.phase == .working,
                    let since = process.snapshot.reconnectingSince,
                    now().timeIntervalSince(since) >= 10 * 60,
@@ -1178,6 +1232,99 @@ public final class AgentRuntimeCoordinator {
             scheduleRestart(agent: agent, repository: repository, detail: "Runtime connection was lost", immediately: immediately)
         }
         checkSessionRollovers(agents: agents, repository: repository)
+        checkFallbackReturns(agents: agents, repository: repository)
+    }
+
+    /// The bot's record as it runs now: on a fallback, that harness with its default model and effort.
+    func runningAgent(_ agent: AgentRecord) -> AgentRecord {
+        guard let fallback = harnessFallbacks[agent.id], agent.harnessIdentifier == fallback.primary.rawValue else { return agent }
+        var running = agent
+        running.harnessIdentifier = fallback.current.rawValue
+        running.modelIdentifier = nil
+        running.reasoningEffort = nil
+        return running
+    }
+
+    /// Moves a bot whose harness ran out of usage, or whose fallback needs a sign-in, to the next harness
+    /// in Settings › Harnesses that is on, installed and has usage left. False when there is none, and the
+    /// bot pauses as before.
+    private func fallBack(_ agent: AgentRecord, repository: WorkspaceRepository, after snapshot: AgentRuntimeSnapshot) -> Bool {
+        guard let failure = snapshot.failure,
+              failure == .usageLimit || failure == .authenticationRequired && harnessFallbacks[agent.id] != nil,
+              harnesses.fallbackIsOn, !isStoppingAll, !neverStarts(agent.id), !changingAccess.contains(agent.id),
+              let primary = HarnessProvider(rawValue: agent.harnessIdentifier ?? "") else { return false }
+        let date = now()
+        let primaryKey = SubscriptionUsageStore.key(primary, profile: try? repository.loadAgentHarnessProfile(agent))
+        let current = harnessFallbacks[agent.id]?.current ?? primary
+        let currentKey = current == primary ? primaryKey : SubscriptionUsageStore.key(current, profile: nil)
+        if failure == .usageLimit {
+            let reset = (snapshot.usageResetsAt ?? reportedReset(currentKey, at: date)).flatMap { $0 > date ? $0 : nil }
+            usageExhaustedUntil[currentKey] = reset ?? date.addingTimeInterval(Self.unknownUsageReset)
+        }
+        guard let next = nextFallback(after: current, primary: primary, agent: agent, at: date) else { return false }
+        if var fallback = harnessFallbacks[agent.id] {
+            fallback.current = next
+            harnessFallbacks[agent.id] = fallback
+        } else {
+            // Out again soon after coming back: stay away longer each time, so a harness whose usage
+            // has only just come back cannot make the bot flap between harnesses.
+            let flaps = fallbackReturns[agent.id].map { date.timeIntervalSince($0.date) < Self.fallbackCooldown ? $0.flaps + 1 : 0 } ?? 0
+            let cooldown = min(Self.fallbackCooldown * pow(2, Double(flaps)), Self.longestFallbackCooldown)
+            let reset = usageExhaustedUntil[primaryKey] ?? date.addingTimeInterval(Self.unknownUsageReset)
+            harnessFallbacks[agent.id] = HarnessFallback(primary: primary, current: next,
+                returnAfter: max(reset, date.addingTimeInterval(cooldown)), flaps: flaps, primaryKey: primaryKey)
+        }
+        let reason = failure == .usageLimit ? "is out of usage" : "needs you to sign in"
+        onHarnessSwitch?(agent.id, "\(current.displayName) \(reason), continuing on \(next.displayName)")
+        restart(agent: agent, repository: repository, sessionRecovery: nil)
+        return true
+    }
+
+    /// The next harness in the list after `current`, around to the start, that the bot can run on now.
+    private func nextFallback(after current: HarnessProvider, primary: HarnessProvider, agent: AgentRecord,
+                              at date: Date) -> HarnessProvider? {
+        let list = harnesses.fallbacks
+        let start = list.firstIndex(of: current).map { $0 + 1 } ?? 0
+        return (Array(list[start...]) + Array(list[..<start])).first { provider in
+            guard provider != primary, provider != current, harnesses.isOn(provider), capabilityErrors[provider] == nil,
+                  installations.contains(where: { $0.provider == provider && $0.isAvailable }) else { return false }
+            var running = agent
+            running.harnessIdentifier = provider.rawValue
+            // A harness that needs unrestricted access runs only for a bot allowed it in Settings › Bots.
+            guard provider.supportsRestrictedAccess || accessConfiguration.isExtended(for: running) else { return false }
+            return !isOutOfUsage(SubscriptionUsageStore.key(provider, profile: nil), at: date)
+        }
+    }
+
+    /// When a harness's own login has usage again, while it is out of usage; nil while it has usage left.
+    public func usageReturns(_ provider: HarnessProvider) -> Date? {
+        let key = SubscriptionUsageStore.key(provider, profile: nil), date = now()
+        return [usageExhaustedUntil[key].flatMap { $0 > date ? $0 : nil }, reportedReset(key, at: date)].compactMap { $0 }.max()
+    }
+
+    private func isOutOfUsage(_ key: String, at date: Date) -> Bool {
+        usageExhaustedUntil[key].map { $0 > date } == true || reportedReset(key, at: date) != nil
+    }
+
+    /// When a login's used-up plan limit resets, as the harness last reported; nil while none is used up.
+    private func reportedReset(_ key: String, at date: Date) -> Date? {
+        subscriptionUsage.accounts[key]?.current(at: date).filter { ($0.usedPercent ?? 0) >= 100 }.compactMap(\.resetsAt).max()
+    }
+
+    /// Takes bots on a fallback back to their own harness once its usage is back and the cooldown has passed,
+    /// only while idle or paused, never in the middle of a turn.
+    private func checkFallbackReturns(agents: [AgentRecord], repository: WorkspaceRepository) {
+        let date = now()
+        for agent in agents {
+            guard let fallback = harnessFallbacks[agent.id], date >= fallback.returnAfter,
+                  !changingAccess.contains(agent.id), !neverStarts(agent.id), let process = processes[agent.id],
+                  process.canReceiveHeartbeat || process.snapshot.phase == .failed && process.snapshot.failure != nil,
+                  !isOutOfUsage(fallback.primaryKey, at: date) else { continue }
+            harnessFallbacks[agent.id] = nil
+            fallbackReturns[agent.id] = (date, fallback.flaps)
+            onHarnessSwitch?(agent.id, "Back on \(fallback.primary.displayName)")
+            restart(agent: agent, repository: repository, sessionRecovery: nil)
+        }
     }
 
     /// A bot parked on sign-in restarts by itself, as Kick would, once its harness reports a
@@ -1185,13 +1332,13 @@ public final class AgentRuntimeCoordinator {
     /// retried a few times with growing gaps, then only after the harness was seen signed out.
     private func retryOnceSignedIn(_ agent: AgentRecord, repository: WorkspaceRepository) {
         guard let checkSignIn, !signInChecks.contains(agent.id), let runtimeID = runtimeIDs[agent.id],
-              processes[agent.id]?.runs(agent) == true else { return }
+              processes[agent.id]?.runs(runningAgent(agent)) == true else { return }
         if let next = nextSignInCheck[agent.id], now() < next { return }
         nextSignInCheck[agent.id] = now().addingTimeInterval(Self.signInCheckInterval)
         signInChecks.insert(agent.id)
-        let lifecycle = lifecycleID
+        let lifecycle = lifecycleID, running = runningAgent(agent)
         Task { [weak self] in
-            let signedIn = await checkSignIn(agent)
+            let signedIn = await checkSignIn(running)
             guard let self else { return }
             self.signInChecks.remove(agent.id)
             guard !self.isStoppingAll, self.lifecycleID == lifecycle, self.runtimeIDs[agent.id] == runtimeID,
@@ -1275,7 +1422,8 @@ public final class AgentRuntimeCoordinator {
         restartAttempts.removeValue(forKey: agentID)
     }
 
-    private func runtimeSnapshotHandler(for agentID: UUID, runtimeID: UUID) -> @MainActor (AgentRuntimeSnapshot) -> Void {
+    private func runtimeSnapshotHandler(for agentID: UUID, runtimeID: UUID, agent: AgentRecord,
+                                        repository: WorkspaceRepository) -> @MainActor (AgentRuntimeSnapshot) -> Void {
         var previousPhase: AgentRuntimePhase?
         return { [weak self] snapshot in
             guard let self, self.runtimeIDs[agentID] == runtimeID, snapshot.agentID == agentID else { return }
@@ -1287,10 +1435,13 @@ public final class AgentRuntimeCoordinator {
                 self.signInAnnounced.remove(agentID)
                 self.forgetSignInRetries(agentID)
             }
+            let previous = self.snapshots[agentID]
+            // A bot that continues on another harness does not pause.
+            if snapshot.phase == .failed, previous?.phase != .failed || previous?.failure != snapshot.failure,
+               self.fallBack(agent, repository: repository, after: snapshot) { return }
             if snapshot.failure == .authenticationRequired, self.signInAnnounced.insert(agentID).inserted {
                 self.onSignInRequired?(agentID)
             }
-            let previous = self.snapshots[agentID]
             self.snapshots[agentID] = snapshot
             // Only failures the runtime keeps until Kick; a plain stop restarts by itself.
             if snapshot.phase == .failed, let failure = snapshot.failure, failure != .authenticationRequired,

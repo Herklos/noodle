@@ -63,8 +63,9 @@ final class HarnessProfileTests: XCTestCase {
         let profile = try store.create(provider: .codex, named: "Work")
         try repository.updateAgentHarnessProfile(agent, profile: profile.id)
 
-        // The bot's harness no longer matches the profile's.
-        XCTAssertThrowsError(try store.selected(workspace: workspace, provider: .claudeCode))
+        // A profile belongs to its own harness. On another one, as a fallback when its own
+        // runs out of usage, the bot uses that harness's own login.
+        XCTAssertNil(try store.selected(workspace: workspace, provider: .claudeCode))
 
         // A redirected login home must not stand in for the profile.
         let home = store.loginHome(profile), moved = home.deletingLastPathComponent().appendingPathComponent("moved")

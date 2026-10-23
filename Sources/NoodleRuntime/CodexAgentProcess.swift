@@ -59,6 +59,10 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
     private var reconnectingSince: Date?
     /// Whether the active turn's error said the model service was too busy to answer.
     private var turnWasBusy = false
+    /// The account is out of usage: the bot waits for Kick or another harness instead of starting turns that fail again.
+    private var usageLimited = false
+    /// When the account's used-up limit resets, from its last rate limit report.
+    private var usageResetsAt: Date?
     /// A turn the model service was too busy for, waiting to be tried again.
     private var busyRetry: Task<Void, Never>?
     private var busyRetries = 0
@@ -372,6 +376,10 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         }
         // Account limits belong to no thread or turn; the latest one is what Settings shows.
         if method == "account/rateLimits/updated", let params {
+            if let limits = params["rateLimits"] as? [String: Any], limits["limitId"] as? String ?? "codex" == "codex",
+               let usage = SubscriptionUsage.codex(limits, at: now()) {
+                usageResetsAt = usage.windows.filter { ($0.usedPercent ?? 0) >= 100 }.compactMap(\.resetsAt).max()
+            }
             onActivity(["method": method, "params": params])
             return
         }
@@ -429,6 +437,10 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             if willRetry && Self.isConnectionError(error) {
                 if reconnectingSince == nil { reconnectingSince = now() }
                 update(.working, "Reconnecting…")
+            } else if !willRetry, Self.isUsageLimitError(error) {
+                reconnectingSince = nil
+                usageLimited = true
+                update(.failed, Self.usageLimitDetail, failure: .usageLimit)
             } else {
                 reconnectingSince = nil
                 update(.failed, detail)
@@ -479,6 +491,12 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
             }
             trace.finish(outcome)
             let error = turn?["error"] as? [String: Any]
+            if usageLimited || status == "failed" && error.map(Self.isUsageLimitError) == true {
+                busyRetries = 0
+                usageLimited = true
+                update(.failed, Self.usageLimitDetail, failure: .usageLimit)
+                return
+            }
             // The person's message was read before the service turned the turn away,
             // so no later wake would answer it: try the work again after a while.
             if status == "failed", turnWasBusy || error.map(Self.isBusyError) == true,
@@ -517,6 +535,13 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
     private static func isBusyError(_ error: [String: Any]) -> Bool {
         ["serverOverloaded", "rateLimitExceeded"].contains(error["codexErrorInfo"] as? String)
     }
+
+    /// The account's plan is used up; unlike a busy service, trying again soon cannot help.
+    private static func isUsageLimitError(_ error: [String: Any]) -> Bool {
+        ["usageLimitExceeded", "sessionBudgetExceeded"].contains(error["codexErrorInfo"] as? String)
+    }
+
+    private static let usageLimitDetail = "Codex's usage limit has been reached. Once usage is available again, right-click the bot and choose Kick to resume. Unfinished work is preserved."
 
     private func scheduleBusyRetry(after delay: Duration) {
         busyRetry = Task { [weak self] in
@@ -632,6 +657,7 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         earlyTurnError = nil
         turnErrorDetail = nil
         turnWasBusy = false
+        usageLimited = false
         cancelBusyRetry()
         reconnectingSince = nil
         trace.begin(reason: reason)
@@ -806,13 +832,15 @@ public final class CodexAgentProcess: AgentRuntimeProcess {
         update(.failed, detail)
     }
 
-    private func update(_ phase: AgentRuntimePhase, _ detail: String) {
+    private func update(_ phase: AgentRuntimePhase, _ detail: String, failure: AgentRuntimeFailure? = nil) {
         snapshot = AgentRuntimeSnapshot(
             agentID: configuration.id,
             phase: phase,
             detail: detail,
             processIdentifier: hostPID,
-            reconnectingSince: reconnectingSince
+            failure: failure,
+            reconnectingSince: reconnectingSince,
+            usageResetsAt: failure == .usageLimit ? usageResetsAt : nil
         )
         onSnapshot(snapshot)
     }

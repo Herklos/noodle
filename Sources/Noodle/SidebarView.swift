@@ -123,7 +123,8 @@ struct SidebarView: View {
                 Button("Organize") { store.runtime.organize(agent.id) }
                     .disabled(!store.runtime.canOrganize(agent.id))
                 Divider()
-                if store.runtime.snapshot(for: agent.id).phase == .failed {
+                // Kick also takes a bot on a fallback harness back to its own.
+                if store.runtime.snapshot(for: agent.id).phase == .failed || store.runtime.runningHarness(for: agent.id) != nil {
                     Button("Kick") {
                         kickRequest = store.runtime.kick(agent: agent, repository: store.repository)
                     }

@@ -324,7 +324,9 @@ struct MessageBubble: View {
         } else if isSystem {
             HStack {
                 Spacer(minLength: 80)
-                Label(message.body, systemImage: "person.2.fill")
+                // Groups announce member changes; a bot's own conversation, only a change of harness.
+                Label(message.body, systemImage: store.conversations.first(where: { $0.id == message.conversationID })?.kind == .direct
+                      ? "arrow.left.arrow.right" : "person.2.fill")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

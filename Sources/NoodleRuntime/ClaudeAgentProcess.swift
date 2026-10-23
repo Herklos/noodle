@@ -45,6 +45,9 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
     private var terminationReported = false
     private var lastErrorText: String?
     private var safetyStopped = false
+    /// The account's plan limit turned requests away, as its last rate_limit_event said, and until when.
+    private var usageRejected = false
+    private var usageResetsAt: Date?
     /// Held for Kick after a safety stop; new messages wait instead of starting Claude again.
     private var paused = false
     private lazy var trace = RuntimeTrace(agentID: configuration.id, provider: .claudeCode, workspace: workspaceURL)
@@ -327,6 +330,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         if ownSession, turnIsActive || backgroundTaskCount > 0 || type == "rate_limit_event" {
             onActivity(message)
         }
+        if ownSession, type == "rate_limit_event", let info = message["rate_limit_info"] as? [String: Any],
+           let status = info["status"] as? String {
+            usageRejected = status == "rejected"
+            usageResetsAt = usageRejected ? (info["resetsAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) } : nil
+        }
         // Tool results going back to the model carry the steered message with them.
         if ownSession, type == "user", steeringNotificationID != nil, message["parent_tool_use_id"] as? String == nil {
             endSteering()
@@ -388,6 +396,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             pauseForSignIn()
             return
         }
+        if failed, usageRejected || detail.map(ClaudeProtocol.isUsageLimit) == true {
+            // Restarting cannot restore usage. The unfinished turn stays recorded, so Kick or another harness picks it up.
+            pauseForUsageLimit(resetsAt: detail.flatMap(ClaudeProtocol.usageLimitReset) ?? usageResetsAt)
+            return
+        }
         do { try turnRecovery.finish() }
         catch {
             update(.failed, "Could not record finished Claude work: \(error.localizedDescription)")
@@ -439,6 +452,14 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
                failure: .authenticationRequired)
     }
 
+    private func pauseForUsageLimit(resetsAt: Date?) {
+        trace.finish(.turnFailed)
+        disconnect()
+        paused = true
+        update(.failed, "Claude Code's usage limit has been reached. Once usage is available again, right-click the bot and choose Kick to resume. Unfinished work is preserved.",
+               failure: .usageLimit, usageResetsAt: resetsAt)
+    }
+
     private func pauseForSafetyStop() {
         safetyStopped = false
         trace.finish(.turnFailed)
@@ -472,13 +493,14 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         connection = nil
     }
 
-    private func update(_ phase: AgentRuntimePhase, _ detail: String, failure: AgentRuntimeFailure? = nil) {
+    private func update(_ phase: AgentRuntimePhase, _ detail: String, failure: AgentRuntimeFailure? = nil, usageResetsAt: Date? = nil) {
         snapshot = AgentRuntimeSnapshot(
             agentID: configuration.id,
             phase: phase,
             detail: detail,
             processIdentifier: processIdentifier,
-            failure: failure
+            failure: failure,
+            usageResetsAt: usageResetsAt
         )
         onSnapshot(snapshot)
     }
