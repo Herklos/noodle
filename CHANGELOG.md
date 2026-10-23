@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- More Shortcuts actions: Open Conversation opens your chat with a bot or group, and Call Agent calls a bot, opening your chat with it instead when it can't take calls. Send to Agent can send files, with or without a message, copied into the conversation as dropped files are, and can open the conversation after sending.
+
 ## [0.74.1] - 2026-10-23
 
 ### Fixed

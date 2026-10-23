@@ -1,6 +1,8 @@
 import AppIntents
+import AppKit
 import Foundation
 import NoodleCore
+import UniformTypeIdentifiers
 
 struct NoodleConversationEntity: AppEntity {
     static let typeDisplayRepresentation = TypeDisplayRepresentation(
@@ -30,10 +32,7 @@ struct NoodleConversationEntity: AppEntity {
 
 struct NoodleConversationQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [NoodleConversationEntity] {
-        let wanted = Set(identifiers.compactMap(UUID.init(uuidString:)))
-        return try Self.loadConversations()
-            .filter { wanted.contains($0.id) }
-            .map(NoodleConversationEntity.init)
+        try Self.loadConversations(identifiers: identifiers).map(NoodleConversationEntity.init)
     }
 
     func suggestedEntities() async throws -> [NoodleConversationEntity] {
@@ -41,29 +40,69 @@ struct NoodleConversationQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [NoodleConversationEntity] {
-        let term = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        let conversations = try Self.loadConversations()
-        guard !term.isEmpty else { return conversations.map(NoodleConversationEntity.init) }
-        return conversations
-            .filter { $0.displayName.localizedCaseInsensitiveContains(term) }
-            .map(NoodleConversationEntity.init)
+        try Self.loadConversations(matching: string).map(NoodleConversationEntity.init)
     }
 
-    private static func loadConversations() throws -> [BotConversation] {
+    /// The bots and groups shown on this Mac, newest first: all of them, those with the identifiers, or those whose
+    /// names contain the search.
+    static func loadConversations(identifiers: [String]? = nil, matching string: String = "") throws -> [BotConversation] {
         let repository = NoodleIntentEnvironment.repository()
         try repository.prepare()
         let archivedAgentIDs = Set(try repository.loadAgents().filter { $0.archivedAt != nil }.map(\.id))
+        let wanted = identifiers.map { Set($0.compactMap(UUID.init(uuidString:))) }
+        let term = string.trimmingCharacters(in: .whitespacesAndNewlines)
         return try repository.loadConversations()
             .filter { $0.isShownHere && $0.archivedAt == nil && !($0.kind == .direct && $0.participantIDs.allSatisfy(archivedAgentIDs.contains)) }
+            .filter { wanted?.contains($0.id) ?? true }
+            .filter { term.isEmpty || $0.displayName.localizedCaseInsensitiveContains(term) }
             .sorted { $0.updatedAt > $1.updatedAt }
+    }
+}
+
+/// A bot, by its chat, for what only a bot can do, such as taking a call.
+struct NoodleAgentEntity: AppEntity {
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(
+        name: "Noodle Agent",
+        numericFormat: "\(placeholder: .int) Noodle agents"
+    )
+    static let defaultQuery = NoodleAgentQuery()
+
+    let id: String
+    let name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)", image: .init(systemName: "person.crop.circle"))
+    }
+
+    init(_ conversation: BotConversation) {
+        id = conversation.id.uuidString
+        name = conversation.displayName
+    }
+}
+
+struct NoodleAgentQuery: EntityStringQuery {
+    func entities(for identifiers: [String]) async throws -> [NoodleAgentEntity] {
+        try Self.bots(NoodleConversationQuery.loadConversations(identifiers: identifiers))
+    }
+
+    func suggestedEntities() async throws -> [NoodleAgentEntity] {
+        try Self.bots(NoodleConversationQuery.loadConversations())
+    }
+
+    func entities(matching string: String) async throws -> [NoodleAgentEntity] {
+        try Self.bots(NoodleConversationQuery.loadConversations(matching: string))
+    }
+
+    private static func bots(_ conversations: [BotConversation]) -> [NoodleAgentEntity] {
+        conversations.filter { $0.kind == .direct }.map(NoodleAgentEntity.init)
     }
 }
 
 struct SendNoodleCommandIntent: AppIntent {
     static let title: LocalizedStringResource = "Send to Agent"
     static let description = IntentDescription(
-        "Send a message to a Noodle agent or group of agents. Replies appear in the conversation in Noodle.",
-        searchKeywords: ["Send to Bot", "Send to a Bot", "Bot"]
+        "Send a message or files to a Noodle agent or group of agents. Replies appear in the conversation in Noodle.",
+        searchKeywords: ["Send to Bot", "Send to a Bot", "Bot", "Send File", "Send and Open"]
     )
 
     @Parameter(
@@ -78,28 +117,88 @@ struct SendNoodleCommandIntent: AppIntent {
         description: "The question, instruction, or message to send.",
         requestValueDialog: "What would you like to send?"
     )
-    var command: String
+    var command: String?
+
+    @Parameter(title: "Files", description: "Files to send with the message.")
+    var files: [IntentFile]?
+
+    @Parameter(title: "Open Conversation", description: "Open the conversation in Noodle after sending.", default: false)
+    var opensConversation: Bool
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Send \(\.$command) to \(\.$conversation)")
+        Summary("Send \(\.$command) to \(\.$conversation)") {
+            \.$files
+            \.$opensConversation
+        }
     }
 
-    static var supportedModes: IntentModes { .background }
+    static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let conversationID = UUID(uuidString: conversation.id) else {
-            throw NoodleIntentError.missingConversation
-        }
-        let text = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw NoodleIntentError.emptyCommand }
+        let conversationID = try NoodleIntentEnvironment.id(of: conversation.id)
+        let text = (command ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let files = files ?? []
+        guard !text.isEmpty || !files.isEmpty else { throw $command.needsValueError("What would you like to send?") }
 
-        let store = NoodleStore.active ?? NoodleStore(
-            repository: NoodleIntentEnvironment.repository()
-        )
-        store.startMonitoring()
-        try store.sendCommand(text, to: conversationID)
+        let store = NoodleIntentEnvironment.store()
+        try store.sendCommand(text, files: files.map(NoodleIntentEnvironment.payload), to: conversationID)
+        if opensConversation {
+            try await continueInForeground(alwaysConfirm: false)
+            try store.openConversation(conversationID)
+            NSApp.activate()
+        }
         return .result(dialog: "Sent to \(conversation.name).")
+    }
+}
+
+/// Opens a bot's or group's conversation, as clicking its notification does.
+struct OpenConversationIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open Conversation"
+    static let description = IntentDescription(
+        "Open your conversation with a Noodle agent or group of agents.",
+        searchKeywords: ["Open Chat with Agent", "Open Chat with Bot", "Chat with Bot", "Bot", "Group"]
+    )
+
+    @Parameter(title: "Agent or Group", requestValueDialog: "Which conversation should Noodle open?")
+    var conversation: NoodleConversationEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Open \(\.$conversation)")
+    }
+
+    static var supportedModes: IntentModes { .foreground }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        try NoodleIntentEnvironment.store().openConversation(NoodleIntentEnvironment.id(of: conversation.id))
+        NSApp.activate()
+        return .result()
+    }
+}
+
+/// Calls a bot, opening its chat; one that can't take calls just has its chat opened.
+struct CallAgentIntent: AppIntent {
+    static let title: LocalizedStringResource = "Call Agent"
+    static let description = IntentDescription(
+        "Call a Noodle agent. If it can't take calls, your chat with it opens instead.",
+        searchKeywords: ["Call Bot", "Call a Bot", "Bot"]
+    )
+
+    @Parameter(title: "Agent", requestValueDialog: "Which agent should Noodle call?")
+    var bot: NoodleAgentEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Call \(\.$bot)")
+    }
+
+    static var supportedModes: IntentModes { .foreground }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        try NoodleIntentEnvironment.store().callFromShortcut(NoodleIntentEnvironment.id(of: bot.id))
+        NSApp.activate()
+        return .result()
     }
 }
 
@@ -118,9 +217,48 @@ struct NoodleShortcuts: AppShortcutsProvider {
             shortTitle: "Send to Agent",
             systemImageName: "paperplane.fill"
         )
+        AppShortcut(
+            intent: OpenConversationIntent(),
+            phrases: [
+                "Open a conversation in \(.applicationName)",
+                "Open \(\.$conversation) in \(.applicationName)",
+                "Open my chat with \(\.$conversation) in \(.applicationName)"
+            ],
+            shortTitle: "Open Conversation",
+            systemImageName: "bubble.left.and.bubble.right.fill"
+        )
+        AppShortcut(
+            intent: CallAgentIntent(),
+            phrases: [
+                "Call an agent with \(.applicationName)",
+                "Call a bot with \(.applicationName)",
+                "Call \(\.$bot) with \(.applicationName)"
+            ],
+            shortTitle: "Call Agent",
+            systemImageName: "phone.fill"
+        )
     }
 
     static let shortcutTileColor: ShortcutTileColor = .teal
+}
+
+extension NoodleStore {
+    /// Opens a bot's or group's conversation where it shows, as clicking its notification does.
+    func openConversation(_ conversationID: UUID) throws {
+        guard conversations.contains(where: { $0.id == conversationID }) else {
+            throw WorkspaceError.missingConversation(conversationID)
+        }
+        openNotification(conversationID: conversationID, messageID: nil)
+    }
+
+    /// Opens a bot's chat and calls it. One that can't take calls just has its chat opened, and a call already with
+    /// it goes on; a call with another bot ends, as calling from that bot's profile does.
+    func callFromShortcut(_ conversationID: UUID, media: (any VoiceCallMedia)? = nil) throws {
+        try openConversation(conversationID)
+        guard let conversation = conversations.first(where: { $0.id == conversationID }),
+              voiceCalls.call?.conversationID != conversationID else { return }
+        startVoiceCall(in: conversation, media: media)
+    }
 }
 
 private enum NoodleIntentEnvironment {
@@ -138,16 +276,33 @@ private enum NoodleIntentEnvironment {
                 : Bundle.main.executableURL
         )
     }
+
+    @MainActor
+    static func store() -> NoodleStore {
+        let store = NoodleStore.active ?? NoodleStore(repository: repository())
+        store.startMonitoring()
+        return store
+    }
+
+    static func id(of entityID: String) throws -> UUID {
+        guard let id = UUID(uuidString: entityID) else { throw NoodleIntentError.missingConversation }
+        return id
+    }
+
+    /// A file Shortcuts passes, by its location when it has one, as a dropped file is copied.
+    static func payload(_ file: IntentFile) -> AttachmentTransferPayload {
+        if let url = file.fileURL { return .file(url) }
+        let type = file.type ?? UTType(filenameExtension: (file.filename as NSString).pathExtension)
+        return .data(file.data, originalFilename: file.filename,
+                     mediaType: type?.preferredMIMEType ?? "application/octet-stream")
+    }
 }
 
 private enum NoodleIntentError: LocalizedError {
-    case emptyCommand
     case missingConversation
 
     var errorDescription: String? {
         switch self {
-        case .emptyCommand:
-            "Enter a message to send."
         case .missingConversation:
             "That Noodle conversation is no longer available."
         }
