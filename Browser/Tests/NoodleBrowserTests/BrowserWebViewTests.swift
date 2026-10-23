@@ -47,7 +47,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.surface.ignoresMouseEvents)
         tab.watched = false
         XCTAssertFalse(tab.surface.isVisible)
-        XCTAssertEqual(tab.surface.alphaValue, 1)
+        XCTAssertEqual(tab.surface.alphaValue, 0, "the window turned opaque off screen")
     }
 
     /// A tab a bot uses keeps drawing and getting animation frames with no browser window open,
@@ -181,6 +181,36 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(response.text, "true")
         XCTAssertNil(runtime.failure, "the person was alerted to a bot's popup")
         let tab = try runtime.tab(browserID: browser, tabID: tabID)
+        XCTAssertTrue(tab.info.error?.contains("(tabs, close)") == true, tab.info.error ?? "no note on the tab")
+    }
+
+    /// A bot's tab is also shown in the browser window when the person has it open, since a bot's new
+    /// tab becomes the selected one. A popup its page opens past the tab limit still tells the bot on
+    /// its tab, without an alert for the person, who neither clicked nor typed in it.
+    @MainActor func testAPopupPastTheTabLimitInABotsTabInTheBrowserWindowTellsTheBot() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id
+        let opened = try await runtime.perform(.init(.open, browserID: browser))
+        let tab = try runtime.tab(browserID: browser, tabID: try XCTUnwrap(opened.tabID))
+        // As in the browser window, shown but out of the way, transparent so nothing appears here.
+        let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.alphaValue = 0; window.ignoresMouseEvents = true
+        defer { window.contentView = nil; window.close() }
+        tab.detachSurface()
+        window.contentView = BrowserWebContainer(web: tab.web)
+        window.orderBack(nil)
+        XCTAssertTrue(tab.web.window === window && window.isVisible)
+        var profile = try library.profile(browser)
+        profile.tabs += (0..<99).map { _ in BrowserTabInfo(lastUsed: Date()) }
+        try library.update(profile)
+        var popup = BrowserRequest(.eval, browserID: browser, tabID: tab.id)
+        popup.text = "return window.open('about:blank') === null;"
+        let response = try await runtime.perform(popup)
+        XCTAssertEqual(response.text, "true")
+        XCTAssertNil(runtime.failure, "the person was alerted to a bot's popup")
         XCTAssertTrue(tab.info.error?.contains("(tabs, close)") == true, tab.info.error ?? "no note on the tab")
     }
 

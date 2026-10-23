@@ -3,6 +3,7 @@ import Foundation
 import HubLink
 @testable import NoodleMobile
 import NoodlePatch
+import PDFKit
 import Testing
 import UIKit
 
@@ -82,6 +83,45 @@ import UIKit
         #expect(edge.0 > 200 && edge.1 > 100 && edge.1 < 180 && edge.2 < 40)
         #expect(pixel(45, 75) == (255, 255, 255))
         #expect(pixel(45, 10) == (255, 255, 255))
+    }
+
+    // MARK: Mark Up stills
+
+    /// A picture is marked on itself, a PDF on its page, any other file on the page Quick Look draws of it.
+    @Test func markUpFreezesEachKindOfFileItsOwnWay() {
+        func kind(_ name: String, _ type: String) -> MarkUpStill.Kind {
+            MarkUpStill.kind(of: LinkAttachment(id: UUID(), filename: name, mediaType: type, byteCount: 1),
+                             at: URL(fileURLWithPath: "/tmp/\(name)"))
+        }
+        #expect(kind("shot.png", "image/png") == .image)
+        #expect(kind("report.pdf", "application/pdf") == .pdf)
+        #expect(kind("report.pdf", "application/octet-stream") == .pdf)
+        #expect(kind("letter.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == .document)
+    }
+
+    /// A PDF's page is drawn as it prints, on white, rather than the black a snapshot of Quick Look gives.
+    @Test func aPDFPageIsMarkedAsItShows() throws {
+        let data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 200, height: 100)).pdfData { context in
+            context.beginPage()
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 50, height: 100))
+        }
+        let page = try #require(PDFDocument(data: data)?.page(at: 0))
+        let still = try #require(MarkUpStill.page(page, longest: 400).cgImage)
+        #expect(still.width == 400 && still.height == 200)
+
+        var pixels = [UInt8](repeating: 0, count: 400 * 200 * 4)
+        let context = try #require(CGContext(data: &pixels, width: 400, height: 200, bitsPerComponent: 8, bytesPerRow: 1600,
+                                             space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(still, in: CGRect(x: 0, y: 0, width: 400, height: 200))
+        func pixel(_ x: Int, _ yFromTop: Int) -> (UInt8, UInt8, UInt8) {
+            let offset = (yFromTop * 400 + x) * 4
+            return (pixels[offset], pixels[offset + 1], pixels[offset + 2])
+        }
+        let left = pixel(40, 100)
+        #expect(left.2 > 200 && left.0 < 60)
+        #expect(pixel(300, 100) == (255, 255, 255))
     }
 
     // MARK: Notes
