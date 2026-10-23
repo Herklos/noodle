@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-23
+
 ### Added
 
 - Choose how a group notifies you: touch and hold it and choose Notifications, then Default, All Messages, Mentions Only or Muted. In Mentions Only, a reply notifies you and counts on the app icon only when it names you, by your full name or your first name alone as the Hub lists you; other replies still show unread. A muted group sends no notifications, not even for your name, stays out of Unread and isn't counted on the app icon; its row shows a grey dot when there are new replies. Settings has In Groups, Notify Me For, for the groups on Default. The choices apply to all your devices. One-to-one chats always notify. A Hub that can only mute groups shows Mute and Unmute, and older Hubs show neither.
