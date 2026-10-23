@@ -346,9 +346,12 @@ final class NoodleStore {
             let conversation = self.conversations.first { $0.kind == .direct && $0.participantIDs == [id] }
             NoodleNotifications.postPaused(agent, summary: summary, detail: snapshot.detail, conversationID: conversation?.id)
         }
+        self.runtime.onHarnessSwitch = { [weak self] id, line in self?.postHarnessSwitch(line, agentID: id) }
         self.runtime.checkSignIn = { [weak self] agent in
             guard let self, let installation = self.runtime.installation(for: agent) else { return nil }
-            guard let profile = try? self.repository.loadAgentHarnessProfile(agent) else {
+            // A bot on a fallback harness runs on that harness's own login, not its profile.
+            guard self.runtime.runningHarness(for: agent.id) == nil,
+                  let profile = try? self.repository.loadAgentHarnessProfile(agent) else {
                 return await self.harnessSetup.signedIn(installation)
             }
             return await self.harnessProfiles.signedIn(profile, installation: installation)
@@ -1512,6 +1515,19 @@ final class NoodleStore {
         } catch {
             errorMessage = "Could not add the call to the conversation: \(error.localizedDescription)"
             return nil
+        }
+    }
+
+    /// Says in the bot's own conversation which harness it continues on.
+    private func postHarnessSwitch(_ line: String, agentID: UUID) {
+        guard let conversation = conversations.first(where: { $0.kind == .direct && $0.participantIDs == [agentID] }) else { return }
+        let message = ChatMessage(conversationID: conversation.id, author: .system, body: line, delivery: .delivered)
+        do {
+            try repository.append(message)
+            messagesByConversation[conversation.id, default: []].append(message)
+            sendToHub(conversation.id)
+        } catch {
+            errorMessage = "Could not add the harness change to the conversation: \(error.localizedDescription)"
         }
     }
 

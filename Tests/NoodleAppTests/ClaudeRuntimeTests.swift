@@ -272,6 +272,43 @@ import XCTest
         XCTAssertTrue(f.failures.isEmpty, "Restarting cannot sign the user in")
     }
 
+    /// Claude Code rejects the turn once the plan's limit is used up; the turn is kept for whoever picks it up.
+    func testUsageLimitPausesWithTheTypedFailureAndKeepsTheTurn() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
+        try await ready(f, wire, p); try confirm(wire)
+        p.notify(); try await f.wait { wire.count("user") == 1 }
+        let session = try XCTUnwrap(wire.launches.last?.2).uuidString
+        wire.emit(["type": "rate_limit_event", "session_id": session, "rate_limit_info": [
+            "status": "rejected", "rateLimitType": "five_hour", "resetsAt": 1_800_007_200]])
+        wire.emit(["type": "result", "subtype": "success", "is_error": true, "session_id": session,
+                   "result": "You've hit your limit · resets 4am"])
+        try await f.wait { p.snapshot.phase == .failed }
+        XCTAssertEqual(p.snapshot.failure, .usageLimit)
+        XCTAssertEqual(p.snapshot.usageResetsAt, Date(timeIntervalSince1970: 1_800_007_200))
+        XCTAssertTrue(p.hasInterruptedWork, "The turn is picked up again after Kick or on another harness")
+        XCTAssertTrue(p.isAlive, "A paused bot must not look lost, or the coordinator restarts it")
+        XCTAssertTrue(f.failures.isEmpty)
+        p.notify(); p.heartbeat(); await f.drain()
+        XCTAssertEqual(wire.count("user"), 1, "New messages wait")
+    }
+
+    /// The older message carries the reset time itself; a busy API is not out of usage.
+    func testUsageLimitTextIsRecognizedAndBusyErrorsAreNot() async throws {
+        XCTAssertTrue(ClaudeProtocol.isUsageLimit("Claude AI usage limit reached|1800003600"))
+        XCTAssertEqual(ClaudeProtocol.usageLimitReset("Claude AI usage limit reached|1800003600"), Date(timeIntervalSince1970: 1_800_003_600))
+        XCTAssertTrue(ClaudeProtocol.isUsageLimit("You've hit your limit · resets 4am (Europe/London)"))
+        XCTAssertFalse(ClaudeProtocol.isUsageLimit("API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}"))
+        XCTAssertFalse(ClaudeProtocol.isUsageLimit("API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}"))
+
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
+        try await ready(f, wire, p); try confirm(wire)
+        p.notify(); try await f.wait { wire.count("user") == 1 }
+        wire.emit(["type": "result", "subtype": "success", "is_error": true, "session_id": try XCTUnwrap(wire.launches.last?.2).uuidString,
+                   "result": "API Error: 529 overloaded_error"])
+        try await f.wait { p.canReceiveHeartbeat }
+        XCTAssertNil(p.snapshot.failure)
+    }
+
     func testSafetyStopPausesAfterTheTurnUntilKicked() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
         try await ready(f, wire, p); try confirm(wire)

@@ -43,6 +43,7 @@ public struct HarnessesSettingsView: View {
                         }
                     }
                 }
+                HarnessFallbackSection(runtime: store.runtime)
                 if installations.contains(where: setup.isManaged) {
                     Section {
                         @Bindable var setup = setup

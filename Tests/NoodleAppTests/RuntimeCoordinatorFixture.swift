@@ -29,11 +29,12 @@ import XCTest
         snapshot = .init(agentID: launch.agent.id, phase: .offline, detail: "Fixture")
     }
     func transition(_ phase: AgentRuntimePhase, detail: String = "Fixture", failure: AgentRuntimeFailure? = nil,
-                    reconnectingSince: Date? = nil) {
+                    reconnectingSince: Date? = nil, usageResetsAt: Date? = nil) {
         snapshot.phase = phase
         snapshot.detail = detail
         snapshot.failure = failure
         snapshot.reconnectingSince = reconnectingSince
+        snapshot.usageResetsAt = usageResetsAt
         launch.onSnapshot(snapshot)
     }
     func start() { starts += 1; isAlive = true; transition(.ready) }

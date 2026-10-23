@@ -153,14 +153,16 @@ public struct HarnessProfileStore: Sendable {
     }
 
     /// Resolves the profile a bot selected in its agent.json. Nil means the
-    /// system profile. A missing, redirected, or mismatched profile is an
-    /// error: a bot must never start under a different account by accident.
+    /// system profile. A missing or redirected profile is an error: a bot must
+    /// never start under a different account of its harness by accident. A
+    /// profile belongs to its own harness; on another one, where a bot continues
+    /// when its own runs out of usage, the bot uses that harness's system login.
     public func selected(workspace: URL, provider: HarnessProvider) throws -> HarnessProfile? {
         guard let id = try AgentConfiguration.load(from: AgentStorageLayout(workspace: workspace)).harnessProfile else { return nil }
-        guard let profile = try? validated(id), profile.provider == provider else {
+        guard let profile = try? validated(id) else {
             throw HarnessSetupError("This bot's \(provider.displayName) profile is unavailable. Choose another profile in the bot's settings, then retry startup.")
         }
-        return profile
+        return profile.provider == provider ? profile : nil
     }
 
     /// A profile whose folders are in place and not redirected elsewhere.

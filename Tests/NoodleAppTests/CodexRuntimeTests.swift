@@ -369,6 +369,39 @@ import XCTest
             XCTAssertTrue(f.recovery(.codex).hasUnfinishedTurn)
         }
     }
+
+    /// Out of usage waits for Kick or a fallback harness, with the reset time the account last reported.
+    func testUsageLimitPausesWithTheTypedFailureAndResetTime() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
+        try await active(f, wire, p)
+        wire.emit(["method": "account/rateLimits/updated", "params": ["rateLimits": [
+            "primary": ["usedPercent": 100, "windowDurationMins": 300, "resetsAt": 1_800_003_600],
+            "secondary": ["usedPercent": 40, "windowDurationMins": 10_080, "resetsAt": 1_800_500_000]]]])
+        wire.emit(["method": "error", "params": ["threadId": "fixture-thread", "turnId": "turn-one",
+            "willRetry": false, "error": ["codexErrorInfo": "usageLimitExceeded", "message": "You've hit your usage limit."]]])
+        try await f.wait { p.snapshot.phase == .failed }
+        XCTAssertEqual(p.snapshot.failure, .usageLimit)
+        XCTAssertEqual(p.snapshot.usageResetsAt, Date(timeIntervalSince1970: 1_800_003_600))
+        wire.emit(["method": "turn/completed", "params": ["threadId": "fixture-thread", "turn": ["id": "turn-one", "status": "failed"]]])
+        await f.drain()
+        XCTAssertEqual(p.snapshot.phase, .failed, "The finished turn must not make the bot look ready")
+        XCTAssertEqual(p.snapshot.failure, .usageLimit)
+        p.notify(); p.heartbeat(); await f.drain()
+        XCTAssertEqual(wire.count("turn/start"), 1, "New messages wait instead of starting turns that fail again")
+    }
+
+    /// A busy service is retried and never counts as out of usage.
+    func testBusyErrorsAreNotUsageLimits() async throws {
+        for info in ["rateLimitExceeded", "serverOverloaded"] {
+            let f = try fixture(), wire = HarnessWire(), p = f.codex(wire)
+            try await active(f, wire, p)
+            wire.emit(["method": "error", "params": ["threadId": "fixture-thread", "turnId": "turn-one",
+                "willRetry": false, "error": ["codexErrorInfo": info]]])
+            try await f.wait { p.snapshot.phase == .failed }
+            XCTAssertNil(p.snapshot.failure, info)
+        }
+    }
+
     func testQuestionsAreAnsweredImmediatelyWithoutBlockingTurnCompletion() async throws {
         for extended in [false, true] {
             let f = try fixture(), wire = HarnessWire(), p = f.codex(wire, extended: extended)
