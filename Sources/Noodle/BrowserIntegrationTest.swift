@@ -131,7 +131,7 @@ import NoodleLaunchChecks
                   let attachment = try repository.loadAttachments(conversationID: createdAgent.conversation.id).first(where: { $0.id == attachmentID }),
                   case .browser(let id, let tab)? = attachment.companion, id == browserID,
                   tab?.uuidString.lowercased() == tabID.lowercased(),
-                  let preview = attachment.card?.image, NSImage(data: preview) != nil else {
+                  let preview = repository.cardImage(of: attachment), NSImage(data: preview) != nil else {
                 throw BrowserError("CLI did not send a valid browser preview attachment.")
             }
             guard try repository.loadMessages(conversationID: createdAgent.conversation.id).last?.attachmentIDs == [attachmentID] else {

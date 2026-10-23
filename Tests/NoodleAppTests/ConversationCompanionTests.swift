@@ -37,14 +37,13 @@ final class ConversationCompanionTests: XCTestCase {
         XCTAssertEqual(companions.map(\.companionTitle), ["Build Box", "Timer", "A", "B"])
     }
 
-    func testEachCompanionNamesItsKindAndCarriesItsPreview() {
+    func testEachCompanionNamesItsKind() {
         let image = Data([1, 2, 3])
         let items = [attachment("Mac.webloc", url: ComputerLink.url(computer: UUID(), terminal: nil, view: "web"),
                                 card: LinkCard(title: "Mac", image: image)),
                      attachment("Example.webloc", url: BrowserLink.url(browser: UUID(), tab: UUID()), card: LinkCard(title: "Example", image: image)),
                      attachment("Timer.webloc", url: NoodletLink.url(for: UUID()))]
         XCTAssertEqual(items.map(\.companionKind), ["Computer", "Browser", "Noodlet"])
-        XCTAssertEqual(items.map(\.companionPreviewImage), [image, image, nil])
     }
 
     func testNoodletTitleBeforeItsPreviewResolvesIsNotTheBookmarkFilename() {

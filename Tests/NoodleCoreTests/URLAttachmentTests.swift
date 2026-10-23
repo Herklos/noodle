@@ -32,6 +32,27 @@ final class URLAttachmentTests: XCTestCase {
             XCTAssertThrowsError(try repository.importLinkAttachment(URL(string: invalid)!, into: bot.conversation.id))
         }
     }
+    /// Every listed attachment stays in memory, and the cards' pictures took tens of megabytes
+    /// for the few ever shown, so a card's picture is read from disk only when asked for.
+    func testListedCardsLeaveTheirPictureOnDisk() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = WorkspaceRepository(rootURL: root)
+        try repository.prepare()
+        let bot = try repository.createAgent(named: "Sharer")
+        let picture = Data(repeating: 7, count: 80_000)
+        let link = try repository.importLinkAttachment(NoodletLink.url(for: UUID()), into: bot.conversation.id,
+                                                       card: LinkCard(title: "Docs", detail: "a page", image: picture))
+        for _ in 0..<2 {
+            let listed = try XCTUnwrap(repository.loadAttachments(conversationID: bot.conversation.id).first)
+            XCTAssertEqual(listed.card?.title, "Docs")
+            XCTAssertEqual(listed.card?.detail, "a page")
+            XCTAssertNil(listed.card?.image, "A listed card holds its picture")
+            XCTAssertEqual(repository.cardImage(of: listed), picture)
+        }
+        XCTAssertEqual(repository.cardImage(of: link), picture)
+    }
+
     func testPathsAndFileURLsRemainLocal() throws {
         let directory = URL(fileURLWithPath: "/tmp/work", isDirectory: true)
         XCTAssertEqual(try AttachmentSource.resolve("image.png", relativeTo: directory).path, "/tmp/work/image.png")

@@ -44,9 +44,6 @@ extension ConversationAttachment {
         }
     }
 
-    /// Noodlet previews live with the applet and are resolved on demand.
-    var companionPreviewImage: Data? { card?.image }
-
     var companionSymbolName: String { isNoodletLink ? "square.grid.2x2" : previewSymbolName }
 
     var companionTitle: String { card?.title ?? (originalFilename as NSString).deletingPathExtension }
@@ -155,6 +152,7 @@ private struct CompanionRow: View {
     let attachment: ConversationAttachment
     let open: () -> Void
     @State private var noodletPreview: NSImage?
+    @State private var cardPicture: NSImage?
     @State private var noodletTitle: String?
     @State private var noodletUnavailable = false
     @State private var isHovered = false
@@ -184,6 +182,13 @@ private struct CompanionRow: View {
         .onHover { isHovered = $0 }
         .help(title)
         .task {
+            // Noodlet previews live with the applet and are resolved on demand; other cards keep theirs on disk.
+            if attachment.card != nil {
+                let attachment = attachment, repository = store.repository
+                cardPicture = await Task.detached(priority: .utility) {
+                    repository.cardImage(of: attachment).flatMap(NSImage.init(data:))
+                }.value
+            }
             guard let url = attachment.url, NoodletLink.id(in: url) != nil else { return }
             if let shown = NoodletAttachmentCard.shown(url) {
                 noodletTitle = shown.title
@@ -201,7 +206,7 @@ private struct CompanionRow: View {
     private var title: String { noodletTitle ?? attachment.companionTitle }
 
     @ViewBuilder private var preview: some View {
-        if let image = attachment.companionPreviewImage.flatMap(NSImage.init(data:)) ?? noodletPreview {
+        if let image = cardPicture ?? noodletPreview {
             Image(nsImage: image).resizable().scaledToFill()
         } else if attachment.isComputerLink, let terminal = attachment.card?.detail {
             // A computer shared as its terminal shows its latest lines, as its card does.
@@ -520,8 +525,12 @@ struct AttachmentInlinePreview: View {
             thumbnail = cached
             return
         }
-        if let card = attachment.card {
-            if let result = card.image.flatMap(AttachmentThumbnailCache.cardThumbnail) {
+        if attachment.card != nil {
+            let attachment = attachment, folder = fileURL.deletingLastPathComponent()
+            if let result = await Task.detached(priority: .utility, operation: {
+                WorkspaceRepository.cardImage(of: attachment, in: folder).flatMap(AttachmentThumbnailCache.cardThumbnail)
+            }).value {
+                guard !Task.isCancelled else { return }
                 AttachmentThumbnailCache.shared.setObject(result, forKey: key); thumbnail = result
             } else { thumbnailUnavailable = true }
             return

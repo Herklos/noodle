@@ -1180,7 +1180,8 @@ public struct WorkspaceRepository: Sendable {
             }
             let metadataStamp = FileRecordCache<ConversationAttachment>.stamp(directories: [folder], files: [metadata])
             attachmentRecords.read()
-            let attachment = try read(ConversationAttachment.self, from: metadataURL)
+            let record = try read(ConversationAttachment.self, from: metadataURL)
+            let attachment = Self.listed(record)
             let fileStamp = FileRecordCache<ConversationAttachment>.stamp(directories: [], files: [folder + "/" + attachment.storedFilename])
             let remember = { if let metadataStamp, let fileStamp { attachmentRecords.store(attachment, at: metadata, stamp: metadataStamp + fileStamp) } }
             if attachment.url != nil { remember(); return attachment }
@@ -1197,15 +1198,38 @@ public struct WorkspaceRepository: Sendable {
                 byteCount: attachment.byteCount,
                 createdAt: attachment.createdAt,
                 voice: attachment.voice,
-                card: attachment.card,
+                card: record.card,
                 annotation: attachment.annotation
             )
             // The rewrite changes the stamp, so the repaired copy is read once more next time.
             try? write(repaired, to: metadataURL)
-            return repaired
+            return Self.listed(repaired)
         }
         attachmentRecords.keep(entries.map(\.path), within: folder + "/")
         return attachments.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// An attachment as listed: its card without the picture, which `cardImage` reads when the card is shown.
+    private static func listed(_ attachment: ConversationAttachment) -> ConversationAttachment {
+        guard var card = attachment.card, card.image != nil else { return attachment }
+        card.image = nil
+        return ConversationAttachment(id: attachment.id, conversationID: attachment.conversationID,
+            originalFilename: attachment.originalFilename, storedFilename: attachment.storedFilename,
+            mediaType: attachment.mediaType, byteCount: attachment.byteCount, createdAt: attachment.createdAt,
+            url: attachment.url, voice: attachment.voice, card: card, annotation: attachment.annotation)
+    }
+
+    /// A link card's picture, which listed attachments leave on disk.
+    public func cardImage(of attachment: ConversationAttachment) -> Data? {
+        Self.cardImage(of: attachment, in: attachmentsDirectory(conversationID: attachment.conversationID))
+    }
+
+    /// The same for code that knows only the folder of the attachment's files.
+    public static func cardImage(of attachment: ConversationAttachment, in directory: URL) -> Data? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = directory.appendingPathComponent("\(attachment.id.uuidString.lowercased()).json")
+        return (try? Data(contentsOf: record)).flatMap { try? decoder.decode(ConversationAttachment.self, from: $0) }?.card?.image
     }
 
     private func detectedImageMediaType(at url: URL) -> String? {

@@ -643,7 +643,7 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
         if let after = request.after {
             start = min(max(0, after), messages.count)
             for message in messages[start...] {
-                let linked = linkMessage(message, files: files, pictures: false) { pixelSize(of: $0, in: repository, sizes: &pixelSizes) }
+                let linked = linkMessage(message, files: files) { pixelSize(of: $0, in: repository, sizes: &pixelSizes) }
                 guard fits(linked) else { break }
                 page.append(linked)
             }
@@ -651,7 +651,7 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
             let end = min(max(0, request.before ?? messages.count), messages.count)
             start = end
             for message in messages[..<end].reversed() {
-                let linked = linkMessage(message, files: files, pictures: false) { pixelSize(of: $0, in: repository, sizes: &pixelSizes) }
+                let linked = linkMessage(message, files: files) { pixelSize(of: $0, in: repository, sizes: &pixelSizes) }
                 guard fits(linked) else { break }
                 page.insert(linked, at: 0)
                 start -= 1
@@ -1753,7 +1753,7 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
     /// from Noodle Applet, anything else the one its card carries.
     public func picture(of attachmentID: UUID, in conversationID: UUID, for user: HubUser) async throws -> Data? {
         let (link, _) = try await companionLink(attachmentID, in: conversationID, for: user)
-        guard case .noodlet(let noodlet) = link else { return try attachments(in: conversationID)[attachmentID]?.card?.image }
+        guard case .noodlet(let noodlet) = link else { return try attachments(in: conversationID)[attachmentID].flatMap(repository.cardImage) }
         var info = AppletRequest(.info)
         info.noodletID = noodlet
         info.includePreview = true
@@ -1774,8 +1774,8 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
             return LinkCardInfo(title: title, image: response.mediaType == "image/png" ? response.data : nil,
                                 symbol: "square.grid.2x2", isGame: response.controls != nil || response.category == "games")
         }
-        guard let card = try attachments(in: conversationID)[attachmentID]?.card else { return nil }
-        return LinkCardInfo(title: card.title, detail: card.detail, image: card.image, symbol: card.symbol,
+        guard let attachment = try attachments(in: conversationID)[attachmentID], let card = attachment.card else { return nil }
+        return LinkCardInfo(title: card.title, detail: card.detail, image: repository.cardImage(of: attachment), symbol: card.symbol,
                             colour: card.colour, icon: card.icon, capturedAt: card.capturedAt)
     }
 
@@ -1888,25 +1888,29 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
     }
 
     private func linkMessage(_ message: ChatMessage, files: [UUID: ConversationAttachment], pictures: Bool = true) -> LinkMessage {
-        Self.linkMessage(message, files: files, pictures: pictures) { pixelSize(of: $0) }
+        let repository = repository
+        return Self.linkMessage(message, files: files, picture: { pictures && $0.card != nil ? repository.cardImage(of: $0) : nil }) {
+            pixelSize(of: $0)
+        }
     }
 
-    nonisolated private static func linkMessage(_ message: ChatMessage, files: [UUID: ConversationAttachment], pictures: Bool,
+    nonisolated private static func linkMessage(_ message: ChatMessage, files: [UUID: ConversationAttachment],
+                                                picture: (ConversationAttachment) -> Data? = { _ in nil },
                                                 pixelSize: (ConversationAttachment) -> LinkPixelSize?) -> LinkMessage {
         let author: LinkMessage.Author = switch message.author {
         case .user: .you
         case .agent(let id): .bot(id)
         case .system: .system
         }
-        let attachments = (message.attachmentIDs ?? []).compactMap { files[$0] }.map {
-            LinkAttachment(id: $0.id, filename: $0.originalFilename, mediaType: $0.mediaType, byteCount: Int($0.byteCount),
-                           voice: $0.voice.map { LinkVoice(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform,
-                                                           localeIdentifier: $0.localeIdentifier) },
-                           annotation: $0.annotation.map { LinkAnnotation($0) },
-                           url: $0.url,
-                           card: $0.card.map { LinkCardInfo(title: $0.title, detail: $0.detail, image: pictures ? $0.image : nil, symbol: $0.symbol,
-                                                            colour: $0.colour, icon: $0.icon, capturedAt: $0.capturedAt) },
-                           pixelSize: pixelSize($0))
+        let attachments = (message.attachmentIDs ?? []).compactMap { files[$0] }.map { file in
+            LinkAttachment(id: file.id, filename: file.originalFilename, mediaType: file.mediaType, byteCount: Int(file.byteCount),
+                           voice: file.voice.map { LinkVoice(transcript: $0.transcript, duration: $0.duration, waveform: $0.waveform,
+                                                             localeIdentifier: $0.localeIdentifier) },
+                           annotation: file.annotation.map { LinkAnnotation($0) },
+                           url: file.url,
+                           card: file.card.map { LinkCardInfo(title: $0.title, detail: $0.detail, image: picture(file), symbol: $0.symbol,
+                                                              colour: $0.colour, icon: $0.icon, capturedAt: $0.capturedAt) },
+                           pixelSize: pixelSize(file))
         }
         let reactions = (message.reactions ?? []).compactMap { reaction -> LinkReaction? in
             switch reaction.author {
