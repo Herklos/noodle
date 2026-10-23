@@ -88,6 +88,7 @@ extension NoodleStore {
             var target = HubSurfaceTarget(conversationID: attachment.conversationID, attachmentID: attachment.id,
                                           title: attachment.companionTitle)
             if case .noodlet = link { target.noodlet = true }
+            if case .browser = link { target.browser = true }
             surfacePanels.open(target, store: self, at: place)
             return
         }

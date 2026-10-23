@@ -13,6 +13,8 @@ struct HubSurfaceTarget: Hashable {
     let title: String
     /// A noodlet, which may run on this Mac instead.
     var noodlet = false
+    /// A browser tab, whose page can be signed in to.
+    var browser = false
 }
 
 /// Live views open floating, in the same dark frame as previews, one panel per link. Escape
@@ -61,10 +63,21 @@ struct HubSurfaceTarget: Hashable {
             panel.contentView = AnnotationPreviewFrame(content: content, filename: target.title, kindLabel: "Noodlet",
                 closeHint: "Close Noodlet (⌘W)", closeLabel: "Close Noodlet", accessory: place)
         } else {
-            let content = NSHostingView(rootView: HubSurfaceWindow(target: target).environment(store).preferredColorScheme(.dark))
+            let signIn = target.browser
+                ? HubBrowserSignIn(target: target, mirror: store.hubMirror(forConversation: target.conversationID)) : nil
+            let content = NSHostingView(rootView: HubSurfaceWindow(target: target, signIn: signIn).environment(store)
+                .preferredColorScheme(.dark))
             content.sizingOptions = []
+            var accessory: NSView?
+            if let signIn {
+                let button = NSHostingView(rootView: HubBrowserSignInButton(signIn: signIn))
+                button.appearance = NSAppearance(named: .darkAqua)
+                // It sits in the transparent title bar, whose safe area would push it below the header line.
+                button.safeAreaRegions = []
+                accessory = button
+            }
             panel.contentView = AnnotationPreviewFrame(content: content, filename: target.title, kindLabel: "Live",
-                closeHint: "Close Live View (⌘W)", closeLabel: "Close Live View")
+                closeHint: "Close Live View (⌘W)", closeLabel: "Close Live View", accessory: accessory)
         }
         let screen = NSApp.keyWindow?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? panel.frame
         var frame = panel.frame
@@ -105,6 +118,8 @@ private final class HubSurfacePanel: NSPanel {
 struct HubSurfaceWindow: View {
     @Environment(NoodleStore.self) private var store
     let target: HubSurfaceTarget
+    /// Signing in to a browser's page, which the header's button starts.
+    var signIn: HubBrowserSignIn?
     @State private var feed = SurfaceFeed()
     @State private var channel: LinkChannel?
     @State private var showing = false
@@ -126,6 +141,15 @@ struct HubSurfaceWindow: View {
         .background(ControllerInput(controls: controls) { change in
             channel?.send(LinkSurface.control(.input(.hold(key: change.key, pressed: change.pressed))))
         })
+        .sheet(isPresented: Binding(get: { signIn?.form != nil }, set: { if !$0 { signIn?.form = nil } })) {
+            if let signIn, let form = signIn.form {
+                HubBrowserSignInSheet(form: form) { try await signIn.fill($0, form: form) }
+            }
+        }
+        .alert("Can't Sign In", isPresented: Binding(get: { signIn?.problem != nil }, set: { if !$0 { signIn?.problem = nil } })) {
+            Button("OK") {}
+        } message: { Text(signIn?.problem ?? "") }
+        .onChange(of: showing) { signIn?.showing = showing }
         .task { await follow() }
         .onDisappear { channel?.cancel() }
     }

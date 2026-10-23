@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- Sign in to a page in a Hub bot's browser you watch live with this Mac's own fields: click Sign In… at the top of the live view, pick your login from Passwords or type it, and click Fill. Codes from Messages are offered too. Turn on Submit to send the form as well. Needs a Hub and Noodle Browser that offer it.
+
 ### Changed
 
 - Files in conversations with bots on a Noodle Hub no longer all download to this Mac. Pictures, videos and PDFs show the Hub's preview, and a file downloads when you open, share, save or drag it, or use it as a background. Downloaded files take up to 2 GB for each Hub; past that, the ones you opened least recently are removed from this Mac and download again when you open them. Files sent to bots this Mac hosts still download, as the bots read them.
