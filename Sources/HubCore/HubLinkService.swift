@@ -493,13 +493,16 @@ import os
         switch event {
         case .conversationChanged(let id, _): (conversation, read) = (id, false)
         case .readChanged(let id, _): (conversation, read) = (id, true)
-        case .notificationsChanged(let id, let level):
-            return notificationsChanged(id, of: user, muted: level == .muted)
+        case .notificationsChanged(let id, _):
+            return notificationsChanged([id], of: user)
+        case .groupNotificationsChanged:
+            // Groups that keep the default follow it; those the Hub has not seen yet start from it anyway.
+            return notificationsChanged(Array(pushedUnread.keys).filter { bots?.isGroup($0, of: user) == true }, of: user)
         default: return
         }
         // What waits unread when the Hub first sees a conversation is not news, however soon a reply follows.
         if pushedUnread[conversation] == nil, !read {
-            pushedUnread[conversation] = (try? bots?.unread(in: conversation)) ?? 0
+            pushedUnread[conversation] = (try? bots?.notifyingUnread(in: conversation, for: user)) ?? 0
             return
         }
         pendingPushes[conversation]?.cancel()
@@ -511,10 +514,11 @@ import os
     }
 
     /// Tells the user's devices that are away how many replies wait unread, once more have come,
-    /// and takes it back once they are read.
+    /// and takes it back once they are read. Only replies that notify count: those naming the user in a group
+    /// set to Mentions only, and none in a muted group.
     private func updatePushes(_ conversation: UUID, of user: UUID, read: Bool) async {
         pendingPushes[conversation] = nil
-        guard let pushes, let unread = try? bots?.unread(in: conversation) else { return }
+        guard let pushes, let unread = try? bots?.notifyingUnread(in: conversation, for: user) else { return }
         let known = pushedUnread[conversation]
         pushedUnread[conversation] = unread
         let devices = access.devices.filter { $0.user == user && $0.pushTopic != nil }
@@ -523,7 +527,7 @@ import os
                 do { try await pushes.withdraw(topic: device.pushTopic!, conversation: conversation) }
                 catch { Self.pushLog.error("Could not take back a notification: \(error.localizedDescription, privacy: .public)") }
             }
-        } else if let known, unread > known, bots?.isMuted(conversation) != true {
+        } else if let known, unread > known {
             let away = devices.filter { !isFollowing($0) }
             Self.pushLog.notice("\(unread, privacy: .public) unread: notifying \(away.count, privacy: .public) of \(devices.count, privacy: .public) devices that asked, the rest are connected")
             for device in away {
@@ -565,12 +569,16 @@ import os
         withdrawPushes(of: conversation, for: user)
     }
 
-    /// A muted group takes back what its devices away show, and tells them nothing more. Unmuted, what
-    /// waits unread then is not news; the next reply is.
-    private func notificationsChanged(_ conversation: UUID, of user: UUID, muted: Bool) {
-        pendingPushes.removeValue(forKey: conversation)?.cancel()
-        pushedUnread[conversation] = (try? bots?.unread(in: conversation)) ?? 0
-        if muted { withdrawPushes(of: conversation, for: user) }
+    /// Groups that notify differently start again from what notifies now: a muted group, or one in Mentions only
+    /// with no reply naming the user, takes back what its devices away show. What waits unread then is not news;
+    /// the next reply that notifies is.
+    private func notificationsChanged(_ conversations: [UUID], of user: UUID) {
+        for conversation in conversations {
+            pendingPushes.removeValue(forKey: conversation)?.cancel()
+            let unread = (try? bots?.notifyingUnread(in: conversation, for: user)) ?? 0
+            pushedUnread[conversation] = unread
+            if unread == 0 { withdrawPushes(of: conversation, for: user) }
+        }
     }
 
     private func withdrawPushes(of conversation: UUID, for user: UUID) {
@@ -745,6 +753,9 @@ import os
         case .setNotifications(let change):
             try hubBots().setNotifications(change.notifications, conversation: change.conversationID, for: try user(key))
             return .done
+        case .setGroupNotifications(let level):
+            try hubBots().setGroupNotifications(level, for: try user(key))
+            return .status(status(for: try paired(key)))
         case .pushTopic(let registration):
             let topic = registration.topic.flatMap { (1...128).contains($0.count) ? $0 : nil }
             access.setPushTopic(topic, for: try paired(key))
@@ -1106,7 +1117,8 @@ import os
                           isAdmin: !access.isPersonal && user?.isAdmin == true, canShareBots: !access.isPersonal && bots != nil,
                           userID: user?.id, avatar: user?.avatar, imageModel: bots?.imageModel, keepsAnnotations: bots != nil,
                           signsInToBrowsers: browsers != nil, ringsThroughPush: callPusher != nil && bots != nil,
-                          callPushExpiresAt: device.callPush?.expiresAt, explainsPauses: bots != nil, mutesGroups: bots != nil)
+                          callPushExpiresAt: device.callPush?.expiresAt, explainsPauses: bots != nil, mutesGroups: bots != nil,
+                          notifiesMentions: bots != nil, groupNotifications: user.flatMap { bots?.groupNotifications(for: $0) })
     }
 
     /// Opens the port on the router, then keeps it open.

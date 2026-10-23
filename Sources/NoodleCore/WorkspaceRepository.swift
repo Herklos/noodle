@@ -92,10 +92,18 @@ public struct WorkspaceRepository: Sendable {
             .unreadConversationIDs
     }
 
-    public func saveUnreadConversationIDs(_ ids: Set<UUID>) throws {
+    /// Unread groups with a reply that names the person, which a group set to Mentions only counts.
+    public func loadMentionedConversationIDs() throws -> Set<UUID> {
+        guard FileManager.default.fileExists(atPath: conversationStateURL.path) else { return [] }
+        return try read(ConversationReadState.self, from: conversationStateURL).mentionedConversationIDs ?? []
+    }
+
+    /// With `mentioned` nil, the unread conversations that named the person still do.
+    public func saveUnreadConversationIDs(_ ids: Set<UUID>, mentioned: Set<UUID>? = nil) throws {
         try prepare()
+        let mentioned = try mentioned ?? loadMentionedConversationIDs()
         try write(
-            ConversationReadState(unreadConversationIDs: ids),
+            ConversationReadState(unreadConversationIDs: ids, mentionedConversationIDs: mentioned.intersection(ids)),
             to: conversationStateURL
         )
     }
@@ -115,19 +123,19 @@ public struct WorkspaceRepository: Sendable {
         rootURL.appendingPathComponent("pinned-conversations.json")
     }
 
-    /// Groups whose replies notify nothing and count as nothing unread.
-    public func loadMutedConversationIDs() throws -> Set<UUID> {
-        guard FileManager.default.fileExists(atPath: mutedConversationsURL.path) else { return [] }
-        return try read(MutedConversations.self, from: mutedConversationsURL).conversationIDs
+    /// How this Mac's own groups notify the person.
+    public func loadGroupNotifications() throws -> GroupNotificationSettings {
+        guard FileManager.default.fileExists(atPath: groupNotificationsURL.path) else { return GroupNotificationSettings() }
+        return try read(GroupNotificationSettings.self, from: groupNotificationsURL)
     }
 
-    public func saveMutedConversationIDs(_ ids: Set<UUID>) throws {
+    public func saveGroupNotifications(_ settings: GroupNotificationSettings) throws {
         try prepare()
-        try write(MutedConversations(conversationIDs: ids), to: mutedConversationsURL)
+        try write(settings, to: groupNotificationsURL)
     }
 
-    private var mutedConversationsURL: URL {
-        rootURL.appendingPathComponent("muted-conversations.json")
+    private var groupNotificationsURL: URL {
+        rootURL.appendingPathComponent("group-notifications.json")
     }
 
     public var harnessProfiles: HarnessProfileStore { HarnessProfileStore(root: rootURL) }
@@ -1704,18 +1712,30 @@ private struct PinnedConversations: Codable {
     let conversationIDs: [UUID]
 }
 
-private struct MutedConversations: Codable {
-    var version = 1
-    let conversationIDs: Set<UUID>
+/// How this Mac's own groups notify the person: each group's own level, and the one for groups that keep the default.
+public struct GroupNotificationSettings: Codable, Equatable, Sendable {
+    public var version = 1
+    /// "all", "mentions" or "muted", for each group with a level of its own.
+    public var levels: [UUID: String]
+    /// For groups that keep the default: "all", or "mentions" for only when the person's name is mentioned.
+    public var inGroups: String
+
+    public init(levels: [UUID: String] = [:], inGroups: String = "all") {
+        self.levels = levels
+        self.inGroups = inGroups
+    }
 }
 
 private struct ConversationReadState: Codable {
     let version: Int
     let unreadConversationIDs: Set<UUID>
+    /// Missing in files from before Mentions only, which reads as none.
+    let mentionedConversationIDs: Set<UUID>?
 
-    init(unreadConversationIDs: Set<UUID>) {
+    init(unreadConversationIDs: Set<UUID>, mentionedConversationIDs: Set<UUID>) {
         version = 1
         self.unreadConversationIDs = unreadConversationIDs
+        self.mentionedConversationIDs = mentionedConversationIDs.isEmpty ? nil : mentionedConversationIDs
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import HubLink
 import NoodleCore
 import XCTest
 @testable import Noodle
@@ -153,10 +154,58 @@ import XCTest
 
         f.store.reload()
         XCTAssertTrue(f.store.isMuted(group.id))
-        XCTAssertEqual(try f.repository.loadMutedConversationIDs(), [group.id])
+        XCTAssertEqual(try f.repository.loadGroupNotifications().levels, [group.id: "muted"])
         f.store.setMuted(false, conversationID: group.id)
         XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directB.id])
-        XCTAssertEqual(try f.repository.loadMutedConversationIDs(), [])
+        XCTAssertEqual(try f.repository.loadGroupNotifications().levels, [:])
+    }
+
+    /// In Mentions only, a group's replies still show unread, but it counts on the Dock only once a reply names the
+    /// person, by full name or first name, until it is read. Choosing it for all groups covers groups on the default,
+    /// a group's own level wins, and it all stays after a reload. Bots' own conversations notify every reply.
+    func testMentionsOnlyCountsOnlyRepliesNamingThePerson() throws {
+        let f = try fixture(), group = try f.group(name: "Launch team"), now = Date()
+        f.store.ownerName = { "Petko Petkov" }
+        XCTAssertTrue(f.store.canNotifyMentions(group))
+        XCTAssertFalse(f.store.canNotifyMentions(f.directA))
+        let say = { (conversation: BotConversation, body: String, seconds: Double) in
+            try f.repository.append(ChatMessage(conversationID: conversation.id, author: .agent(f.a.id), body: body,
+                                                createdAt: now.addingTimeInterval(seconds), delivery: .delivered))
+            f.store.refreshTranscripts()
+        }
+        f.store.groupNotifications = .mentions
+        XCTAssertEqual(f.store.notifications(of: group.id), .mentions)
+        XCTAssertEqual(f.store.notifications(of: f.directA.id), .all)
+        try say(group, "Shipped. Petkov signed it, `petko` approved.", 10)
+        try say(f.directA, "Hello", 20)
+        XCTAssertTrue(f.store.hasUnreadMessages(in: group))
+        XCTAssertEqual(f.store.sidebarSections(.unreadSection).unread.map(\.id).sorted { $0.uuidString < $1.uuidString },
+                       [group.id, f.directA.id].sorted { $0.uuidString < $1.uuidString }, "Other replies still show unread")
+        XCTAssertEqual(f.store.badgedConversationIDs, [f.directA.id])
+        XCTAssertFalse(f.store.notifies(f.store.messages(for: group).last!))
+
+        try say(group, "petko, can you check?", 30)
+        XCTAssertTrue(f.store.notifies(f.store.messages(for: group).last!))
+        XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directA.id])
+        f.store.reload()
+        XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directA.id], "The mention is kept")
+        XCTAssertEqual(try f.repository.loadGroupNotifications().inGroups, "mentions")
+        f.store.markConversationRead(group.id)
+        try say(group, "Anyone?", 40)
+        XCTAssertEqual(f.store.badgedConversationIDs, [f.directA.id], "Read, the mention is gone")
+
+        f.store.setNotifications(.all, conversationID: group.id)
+        XCTAssertEqual(f.store.chosenNotifications(of: group.id), .all)
+        XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directA.id], "The group's own level wins")
+        f.store.setNotifications(.muted, conversationID: group.id)
+        try say(group, "Petko Petkov, urgent!", 50)
+        XCTAssertEqual(f.store.badgedConversationIDs, [f.directA.id], "Muted is silent even for a mention")
+        XCTAssertFalse(f.store.notifies(f.store.messages(for: group).last!))
+        f.store.setNotifications(.default, conversationID: group.id)
+        XCTAssertNil(f.store.chosenNotifications(of: group.id))
+        XCTAssertEqual(f.store.badgedConversationIDs, [group.id, f.directA.id])
+        f.store.groupNotifications = .all
+        XCTAssertEqual(try f.repository.loadGroupNotifications(), GroupNotificationSettings())
     }
 
     func testSectionsOrderByLastMessageNotByOtherChanges() throws {

@@ -443,8 +443,9 @@ import XCTest
         XCTAssertEqual(pinned, [ada.id, eli.id])
     }
 
-    /// The Mac's own muted groups are the phone's: muting on the phone mutes on the Mac, and muting on the Mac reaches the phone.
-    func testMutedGroupsAreTheMacsOwn() async throws {
+    /// The Mac's own group levels are the phone's: muting a group or choosing Mentions only for all groups on the
+    /// phone does so on the Mac, and changing them on the Mac reaches the phone.
+    func testGroupNotificationsAreTheMacsOwn() async throws {
         let (f, made) = try await fixture(bots: ["Eli", "Ada"])
         let group = try f.repository.createGroup(named: "House", publicDescription: "", participantIDs: made.map(\.id),
                                                  existingAgents: try f.repository.loadAgents())
@@ -452,19 +453,30 @@ import XCTest
         f.personal.onNotificationsEdited = { edited += 1 }
 
         _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .muted)))
-        XCTAssertEqual(try f.repository.loadMutedConversationIDs(), [group.id])
+        XCTAssertEqual(try f.repository.loadGroupNotifications().levels, [group.id: "muted"])
         XCTAssertEqual(edited, 1)
         guard case .groups(let muted) = try await f.device.request(.groups) else { return XCTFail("no groups") }
         XCTAssertEqual(muted.first { $0.id == group.id }?.notifications, .muted)
+        guard case .status(let status) = try await f.device.request(.setGroupNotifications(.mentions)) else { return XCTFail("no status") }
+        XCTAssertEqual(status.groupNotifications, .mentions)
+        XCTAssertEqual(try f.repository.loadGroupNotifications().inGroups, "mentions")
+        XCTAssertEqual(edited, 2)
 
         let events = try await f.device.subscribe()
         // Once the Hub answers, it has the subscription.
         _ = try await f.device.request(.bots)
-        try f.repository.saveMutedConversationIDs([])
+        try f.repository.saveGroupNotifications(GroupNotificationSettings())
         f.personal.notificationsChanged()
+        var heard: [LinkEvent] = []
         for try await event in events {
-            if case .notificationsChanged(group.id, let level) = event { XCTAssertEqual(level, .all); break }
+            switch event {
+            case .notificationsChanged, .groupNotificationsChanged: heard.append(event)
+            default: break
+            }
+            if heard.count == 2 { break }
         }
+        XCTAssertEqual(heard, [.notificationsChanged(conversationID: group.id, notifications: .default),
+                               .groupNotificationsChanged(notifications: .all)])
         guard case .groups(let unmuted) = try await f.device.request(.groups) else { return XCTFail("no groups") }
         XCTAssertNil(unmuted.first { $0.id == group.id }?.notifications)
     }

@@ -90,6 +90,11 @@ private actor FakeHub {
 
     func data(of id: UUID) -> Data? { files[id]?.data }
 
+    func botSays(_ body: String, in conversationID: UUID) {
+        messages.append(LinkMessage(id: UUID(), conversationID: conversationID, author: .bot(bot.id), body: body,
+                                    createdAt: Date(), delivered: true))
+    }
+
     func botSays(_ body: String) {
         messages.append(LinkMessage(id: UUID(), conversationID: bot.conversationID, author: .bot(bot.id), body: body,
                                     createdAt: Date(), delivered: true))
@@ -1546,6 +1551,45 @@ private actor RecordedSubscriptions: PushSubscriptions {
 
         try await chats.apply(.notificationsChanged(conversationID: house.id, notifications: .all))
         #expect(chats.badgedConversations == [scout.conversationID, house.id])
+    }
+
+    /// A group in Mentions only, set on its own or for all groups, counts on the icon only once a reply names the user,
+    /// though its other replies still show unread. Muted is silent even for a mention.
+    @Test func aGroupInMentionsOnlyCountsOnlyItsMentions() async throws {
+        let hub = FakeHub()
+        let hubs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: hubs.appendingPathComponent(UUID().uuidString))
+        defer { server.stop() }
+        try await chats.reload()
+        let house = await hub.addGroup(named: "House", saying: "Dinner at eight. Petkov cooks.")
+        let thread = HubThread.group(house)
+        await hub.botSays("Done")
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        let following = Task { await chats.follow() }
+        defer { following.cancel() }
+        for _ in 0..<100 where !chats.isConnected { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.badgedConversations == [scout.conversationID, house.id])
+
+        try await chats.apply(.groupNotificationsChanged(notifications: .mentions))
+        #expect(chats.groupNotifications == .mentions)
+        #expect(chats.notifications(of: thread) == .mentions)
+        #expect(chats.notifications(of: scout) == .all)
+        #expect(chats.countsAsUnread(thread), "Its replies still show unread")
+        #expect(chats.badgedConversations == [scout.conversationID])
+
+        await hub.botSays("petko, the table is set.", in: house.id)
+        try await chats.reload()
+        #expect(chats.hasUnreadMention(thread))
+        #expect(chats.badgedConversations == [scout.conversationID, house.id])
+
+        try await chats.apply(.notificationsChanged(conversationID: house.id, notifications: .muted))
+        #expect(chats.badgedConversations == [scout.conversationID], "Muted is silent even for a mention")
+        try await chats.apply(.notificationsChanged(conversationID: house.id, notifications: .default))
+        #expect(chats.chosenNotifications(of: thread) == nil)
+        #expect(chats.badgedConversations == [scout.conversationID, house.id])
+        chats.markRead(thread)
+        #expect(chats.badgedConversations == [scout.conversationID])
     }
 
     @Test func aNotificationLeadsToItsConversation() {

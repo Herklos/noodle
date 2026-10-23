@@ -77,6 +77,29 @@ import Observation
         remember(status)
     }
 
+    /// Sets how this user's groups that keep the default notify them, for all their devices. It shows at once,
+    /// and goes back when the Hub refuses.
+    public func setGroupNotifications(_ level: LinkNotifications) async throws {
+        let before = status?.groupNotifications
+        groupNotificationsChanged(to: level)
+        do {
+            guard case .status(let status) = try await request(.setGroupNotifications(level)) else {
+                throw LinkError("The Hub sent an unexpected answer.")
+            }
+            remember(status)
+        } catch {
+            if var status { status.groupNotifications = before; remember(status) }
+            throw error
+        }
+    }
+
+    /// This user changed how their groups notify them, on this device or another.
+    public func groupNotificationsChanged(to level: LinkNotifications) {
+        guard var status, status.groupNotifications != level else { return }
+        status.groupNotifications = level
+        remember(status)
+    }
+
     /// The other people on the Hub, with the pictures this device keeps of them.
     public func people() async throws -> [LinkPerson] {
         guard case .people(let people) = try await request(.people) else { throw LinkError("The Hub sent an unexpected answer.") }

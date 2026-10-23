@@ -62,10 +62,16 @@ final class NoodleStore {
         }
     }
     private(set) var pinnedConversationIDs: [UUID] = []
-    /// This Mac's own groups that notify nothing and count as nothing unread. Those of a joined Hub are kept there.
-    private(set) var mutedConversationIDs: Set<UUID> = [] {
+    /// How this Mac's own groups notify. Those of a joined Hub are kept there.
+    private(set) var groupNotificationSettings = GroupNotificationSettings() {
         didSet { updateDockBadge() }
     }
+    /// Unread groups with a reply that names the person, which a group set to Mentions only counts on the Dock.
+    private(set) var mentionedConversationIDs: Set<UUID> = [] {
+        didSet { updateDockBadge() }
+    }
+    /// The name that mentions the person in this Mac's own groups: the Mac account's full name.
+    @ObservationIgnored var ownerName: () -> String = { NSFullUserName() }
     /// The space the sidebar shows: a joined Hub's by its key, so it is kept when the Hub is left and joined again,
     /// or one the person made by its ID; nil shows All.
     private(set) var space: String? = UserDefaults.standard.string(forKey: NoodleStore.spaceKey)
@@ -639,12 +645,25 @@ final class NoodleStore {
         pinnedConversationIDs = ((try? repository.loadPinnedConversationIDs()) ?? []).filter(known.contains)
     }
 
-    /// Whether a group notifies nothing and counts as nothing unread: on a joined Hub as the Hub keeps it, for every
-    /// device. Bots' own conversations always notify.
-    func isMuted(_ conversationID: UUID) -> Bool {
-        if let mirror = hubMirror(forConversation: conversationID) { return mirror.mutedConversations.contains(conversationID) }
-        return mutedConversationIDs.contains(conversationID)
+    /// How a conversation notifies: a group as set on its own, or else as set for all groups, on a joined Hub as the
+    /// Hub keeps it for every device. Bots' own conversations notify every reply.
+    func notifications(of conversationID: UUID) -> LinkNotifications {
+        guard conversations.first(where: { $0.id == conversationID })?.kind == .group else { return .all }
+        if let mirror = hubMirror(forConversation: conversationID) {
+            return LinkNotifications.effective(mirror.notifications(of: conversationID), inGroups: mirror.groupNotifications)
+        }
+        return LinkNotifications.effective(groupNotificationSettings.levels[conversationID].map(LinkNotifications.init(rawValue:)),
+                                           inGroups: groupNotifications)
     }
+
+    /// How a group was set to notify on its own; nil keeps the default.
+    func chosenNotifications(of conversationID: UUID) -> LinkNotifications? {
+        if let mirror = hubMirror(forConversation: conversationID) { return mirror.notifications(of: conversationID) }
+        return groupNotificationSettings.levels[conversationID].map(LinkNotifications.init(rawValue:))
+    }
+
+    /// Whether a group notifies nothing and counts as nothing unread.
+    func isMuted(_ conversationID: UUID) -> Bool { notifications(of: conversationID) == .muted }
 
     /// Groups only, and on a joined Hub only one that keeps mutes.
     func canMute(_ conversation: BotConversation) -> Bool {
@@ -652,35 +671,84 @@ final class NoodleStore {
         return hubMirror(forConversation: conversation.id).map(\.mutesGroups) ?? true
     }
 
+    /// Whether a group may be set to Mentions only: on a joined Hub, only one that knows it.
+    func canNotifyMentions(_ conversation: BotConversation) -> Bool {
+        guard conversation.kind == .group else { return false }
+        return hubMirror(forConversation: conversation.id).map(\.notifiesMentions) ?? true
+    }
+
+    /// How a group set to the default notifies, for the level menu.
+    func defaultNotifications(of conversationID: UUID) -> LinkNotifications {
+        hubMirror(forConversation: conversationID)?.groupNotifications ?? groupNotifications
+    }
+
     func setMuted(_ muted: Bool, conversationID: UUID) {
-        guard muted != isMuted(conversationID),
-              let conversation = conversations.first(where: { $0.id == conversationID }), canMute(conversation) else { return }
+        setNotifications(muted ? .muted : .default, conversationID: conversationID)
+    }
+
+    /// Sets how a group notifies, `default` keeping the level for all groups.
+    func setNotifications(_ level: LinkNotifications, conversationID: UUID) {
+        guard level != (chosenNotifications(of: conversationID) ?? .default),
+              let conversation = conversations.first(where: { $0.id == conversationID }), canMute(conversation),
+              level == .muted || level == .default || canNotifyMentions(conversation) else { return }
         // The mirror tells `onNotificationsChanged` at once, and again if the Hub refuses.
         if let mirror = hubMirror(forConversation: conversationID) {
             Task {
-                do { try await mirror.setMuted(muted, conversation: conversationID) }
+                do { try await mirror.setNotifications(level, conversation: conversationID) }
                 catch { errorMessage = error.localizedDescription }
             }
             return
         }
-        if muted { withdrawNotifications(of: conversationID) }
-        var updated = mutedConversationIDs
-        if muted { updated.insert(conversationID) } else { updated.remove(conversationID) }
+        var updated = groupNotificationSettings
+        updated.levels[conversationID] = level == .default ? nil : level.rawValue
+        saveGroupNotifications(updated)
+    }
+
+    /// How this Mac's own groups that keep the default notify: every reply, or only those naming the person.
+    /// Choosing it here also chooses it on each joined Hub that knows Mentions only.
+    var groupNotifications: LinkNotifications {
+        get { groupNotificationSettings.inGroups == LinkNotifications.mentions.rawValue ? .mentions : .all }
+        set {
+            guard newValue == .all || newValue == .mentions else { return }
+            for mirror in hubMirrors where mirror.notifiesMentions && mirror.groupNotifications != newValue {
+                Task {
+                    do { try await mirror.setGroupNotifications(newValue) }
+                    catch { errorMessage = error.localizedDescription }
+                }
+            }
+            guard newValue != groupNotifications else { return }
+            var updated = groupNotificationSettings
+            updated.inGroups = newValue.rawValue
+            saveGroupNotifications(updated)
+        }
+    }
+
+    private func saveGroupNotifications(_ updated: GroupNotificationSettings) {
         do {
-            try repository.saveMutedConversationIDs(updated)
-            mutedConversationIDs = updated
+            try repository.saveGroupNotifications(updated)
+            applyGroupNotifications(updated)
             thisMac.hub?.notificationsChanged()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    /// The owner muted or unmuted a group on another of their devices, through This Mac as a Hub.
+    /// Groups that became muted take back what they showed, and those that now notify only mentions take back
+    /// what did not name the person.
+    private func applyGroupNotifications(_ updated: GroupNotificationSettings) {
+        let before = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, notifications(of: $0.id)) })
+        groupNotificationSettings = updated
+        for (id, level) in before where level != notifications(of: id) && notifications(of: id) != .all {
+            withdrawNotifications(of: id)
+        }
+    }
+
+    /// The owner changed how groups notify on another of their devices, through This Mac as a Hub.
     private func reloadMutes() {
         let known = Set(conversations.map(\.id))
-        let muted = ((try? repository.loadMutedConversationIDs()) ?? []).intersection(known)
-        muted.subtracting(mutedConversationIDs).forEach(withdrawNotifications)
-        mutedConversationIDs = muted
+        var stored = (try? repository.loadGroupNotifications()) ?? GroupNotificationSettings()
+        stored.levels = stored.levels.filter { known.contains($0.key) }
+        applyGroupNotifications(stored)
     }
 
     /// Takes back the replies a group showed in Notification Center.
@@ -689,9 +757,19 @@ final class NoodleStore {
         NoodleNotifications.withdraw(conversation: conversationID)
     }
 
-    /// Whether a conversation shows in Unread and counts on the Dock: unread, and not a muted group, whose row only dims its dot.
+    /// Whether a conversation shows in Unread: unread, and not a muted group, whose row only dims its dot.
     func countsAsUnread(_ conversation: BotConversation) -> Bool {
         hasUnreadMessages(in: conversation) && !isMuted(conversation.id)
+    }
+
+    /// The name that mentions the person in a conversation: as its Hub lists them, or this Mac account's full name.
+    func mentionName(in conversationID: UUID) -> String {
+        hubMirror(forConversation: conversationID)?.mentionName ?? ownerName()
+    }
+
+    /// Whether a new message notifies the person, as its conversation is set to.
+    func notifies(_ message: ChatMessage) -> Bool {
+        notifications(of: message.conversationID).notifies(message.body, name: mentionName(in: message.conversationID))
     }
 
     func reload() {
@@ -753,18 +831,21 @@ final class NoodleStore {
                 try repository.savePinnedConversationIDs(pinnedConversationIDs)
                 thisMac.hub?.pinsChanged()
             }
-            let storedMutedIDs = try repository.loadMutedConversationIDs()
-            mutedConversationIDs = storedMutedIDs.intersection(knownConversationIDs)
-            if mutedConversationIDs != storedMutedIDs {
-                try repository.saveMutedConversationIDs(mutedConversationIDs)
+            let storedNotifications = try repository.loadGroupNotifications()
+            var keptNotifications = storedNotifications
+            keptNotifications.levels = storedNotifications.levels.filter { knownConversationIDs.contains($0.key) }
+            groupNotificationSettings = keptNotifications
+            if keptNotifications != storedNotifications {
+                try repository.saveGroupNotifications(keptNotifications)
                 thisMac.hub?.notificationsChanged()
             }
             // Members out of reach stay stored, so a space is never pruned here.
             spaceList.reload()
             let storedUnreadIDs = try repository.loadUnreadConversationIDs()
             unreadConversationIDs = storedUnreadIDs.intersection(knownConversationIDs)
+            mentionedConversationIDs = try repository.loadMentionedConversationIDs().intersection(unreadConversationIDs)
             if unreadConversationIDs != storedUnreadIDs {
-                try repository.saveUnreadConversationIDs(unreadConversationIDs)
+                try repository.saveUnreadConversationIDs(unreadConversationIDs, mentioned: mentionedConversationIDs)
             }
             runtime.refresh(agents: agents)
             refreshAppShortcuts()
@@ -903,8 +984,8 @@ final class NoodleStore {
                 mirror.onChange = { [weak self] in self?.hubBotsChanged() }
                 mirror.onRead = { [weak self] in self?.readElsewhere($0, upTo: $1) }
                 mirror.onBackgroundChanged = { [weak self] in self?.reloadBackground(of: $0) }
-                mirror.onNotificationsChanged = { [weak self, weak mirror] id in
-                    if mirror?.mutedConversations.contains(id) == true { self?.withdrawNotifications(of: id) }
+                mirror.onNotificationsChanged = { [weak self] id in
+                    if self?.notifications(of: id) != .all { self?.withdrawNotifications(of: id) }
                     self?.updateDockBadge()
                 }
                 mirror.onCallRinging = { [weak self] in self?.ringHubCall($0) }
@@ -1828,8 +1909,17 @@ final class NoodleStore {
         unreadConversationIDs.contains(conversation.id)
     }
 
-    /// The unread conversations the Dock counts: muted groups are left out.
-    var badgedConversationIDs: Set<UUID> { unreadConversationIDs.filter { !isMuted($0) } }
+    /// The unread conversations the Dock counts: muted groups are left out, and a group in Mentions only counts once
+    /// a reply names the person.
+    var badgedConversationIDs: Set<UUID> {
+        unreadConversationIDs.filter {
+            switch notifications(of: $0) {
+            case .muted: false
+            case .mentions: mentionedConversationIDs.contains($0)
+            default: true
+            }
+        }
+    }
 
     func updateDockBadge() {
         let badged = badgedConversationIDs
@@ -1840,6 +1930,7 @@ final class NoodleStore {
         guard let conversationID,
               unreadConversationIDs.contains(conversationID) else { return }
         unreadConversationIDs.remove(conversationID)
+        mentionedConversationIDs.remove(conversationID)
         persistUnreadConversationIDs()
         shareRead(conversationID)
     }
@@ -1882,6 +1973,7 @@ final class NoodleStore {
               let messages = try? repository.loadMessages(conversationID: conversationID),
               !messages.contains(where: { if case .agent = $0.author { $0.createdAt > upTo } else { false } }) else { return }
         unreadConversationIDs.remove(conversationID)
+        mentionedConversationIDs.remove(conversationID)
         persistUnreadConversationIDs()
     }
 
@@ -2492,27 +2584,32 @@ final class NoodleStore {
     private func registerUnreadMessages(_ messages: [ChatMessage]) {
         guard !messages.isEmpty else { return }
 
-        var updated = unreadConversationIDs
+        var updated = unreadConversationIDs, mentioned = mentionedConversationIDs
         var viewed: Set<UUID> = []
         for message in messages {
             if conversationWindows.isViewing(message.conversationID) {
                 updated.remove(message.conversationID)
+                mentioned.remove(message.conversationID)
                 viewed.insert(message.conversationID)
             } else {
                 updated.insert(message.conversationID)
+                if case .agent = message.author, LinkMention.mentions(message.body, name: mentionName(in: message.conversationID)) {
+                    mentioned.insert(message.conversationID)
+                }
             }
         }
         // Read as it arrived, so the person's other devices show it read too.
         viewed.forEach(shareRead)
 
-        guard updated != unreadConversationIDs else { return }
-        unreadConversationIDs = updated
+        guard updated != unreadConversationIDs || mentioned != mentionedConversationIDs else { return }
+        if mentioned != mentionedConversationIDs { mentionedConversationIDs = mentioned }
+        if updated != unreadConversationIDs { unreadConversationIDs = updated }
         persistUnreadConversationIDs()
     }
 
     private func persistUnreadConversationIDs() {
         do {
-            try repository.saveUnreadConversationIDs(unreadConversationIDs)
+            try repository.saveUnreadConversationIDs(unreadConversationIDs, mentioned: mentionedConversationIDs)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -2520,8 +2617,8 @@ final class NoodleStore {
 
     private func postNotifications(for messages: [ChatMessage]) {
         guard connectsServices else { return }
-        // A muted group is silent.
-        let messages = messages.filter { !isMuted($0.conversationID) }
+        // A muted group is silent, and one in Mentions only speaks up only for the person's name.
+        let messages = messages.filter(notifies)
         guard !messages.isEmpty else { return }
         let presentsNotifications = NoodleNotifications.shouldPresentActivity
         if MessageReceivedSound.playsInApp(newMessages: messages.count,

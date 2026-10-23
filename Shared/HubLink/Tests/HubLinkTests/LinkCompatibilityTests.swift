@@ -201,6 +201,27 @@ final class LinkCompatibilityTests: XCTestCase {
         XCTAssertEqual(LinkProtocol.decodeEvent(LinkProtocol.encode(event)), event)
     }
 
+    /// A Hub from before Mentions only offers neither it nor a level for all groups; one that does reads both ways.
+    func testMentionsOnlyReadsAcrossAppVersions() throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
+        let old = try decode(LinkStatus.self, #"{"hubName":"Mac mini","mutesGroups":true}"#)
+        XCTAssertFalse(old.notifiesMentions)
+        XCTAssertNil(old.groupNotifications)
+
+        var status = old
+        status.notifiesMentions = true
+        status.groupNotifications = .mentions
+        XCTAssertEqual(try decode(LinkStatus.self, String(decoding: try LinkProtocol.encoder.encode(status), as: UTF8.self)), status)
+        let group = try decode(LinkGroup.self,
+            #"{"id":"\#(id)","draft":{"name":"House","publicDescription":"","botIDs":[]},"createdAt":0,"notifications":"mentions"}"#)
+        XCTAssertEqual(group.notifications, .mentions)
+
+        let request = try decode(LinkRequest.self, #"{"setGroupNotifications":{"_0":"mentions"}}"#)
+        XCTAssertEqual(request, .setGroupNotifications(.mentions))
+        let event = LinkEvent.groupNotificationsChanged(notifications: .mentions)
+        XCTAssertEqual(LinkProtocol.decodeEvent(LinkProtocol.encode(event)), event)
+    }
+
     func testFieldsAddedLaterMayBeMissing() throws {
         let id = UUID(), conversation = UUID()
         let message = try decode(LinkMessage.self,

@@ -110,6 +110,8 @@ public struct HubUser: Identifiable, Codable, Hashable, Sendable {
     public var isSuspended: Bool = false
     /// The picture they chose, its image kept apart under its digest. Nil shows their initials.
     public var avatar: LinkAvatar?
+    /// How their groups that keep the default notify them. Nil for every reply.
+    public var groupNotifications: LinkNotifications?
 
     public init(id: UUID = UUID(), name: String, plan: UUID = HubPlan.defaultID, canPairDevices: Bool = true, isAdmin: Bool = false) {
         self.id = id
@@ -119,7 +121,7 @@ public struct HubUser: Identifiable, Codable, Hashable, Sendable {
         self.isAdmin = isAdmin
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, plan, canPairDevices, isAdmin, isSuspended, avatar }
+    private enum CodingKeys: String, CodingKey { case id, name, plan, canPairDevices, isAdmin, isSuspended, avatar, groupNotifications }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -130,6 +132,7 @@ public struct HubUser: Identifiable, Codable, Hashable, Sendable {
         isAdmin = try c.decodeIfPresent(Bool.self, forKey: .isAdmin) ?? false
         isSuspended = try c.decodeIfPresent(Bool.self, forKey: .isSuspended) ?? false
         avatar = try c.decodeIfPresent(LinkAvatar.self, forKey: .avatar)
+        groupNotifications = try c.decodeIfPresent(LinkNotifications.self, forKey: .groupNotifications)
     }
 }
 
@@ -385,6 +388,15 @@ public struct HubCallPush: Codable, Hashable, Sendable {
         guard kept != old.avatar else { return }
         update(user) { $0.avatar = kept }
         note("\(old.name) changed their picture", about: [user.id])
+    }
+
+    /// Sets how the user's groups that keep the default notify them: every reply, or only those naming them.
+    public func setGroupNotifications(_ level: LinkNotifications, for user: HubUser) throws {
+        guard level == .all || level == .mentions else { throw LinkError("Choose All Messages or Mentions Only.") }
+        guard let old = current(user) else { return }
+        let kept: LinkNotifications? = level == .all ? nil : level
+        guard kept != old.groupNotifications else { return }
+        update(user) { $0.groupNotifications = kept }
     }
 
     /// The user's picture, its image left out.

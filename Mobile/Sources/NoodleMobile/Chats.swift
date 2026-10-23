@@ -296,11 +296,33 @@ enum HubThread: HubConversation {
         return seen[conversation.conversationID].map { reply.createdAt > $0 } ?? true
     }
 
-    /// The conversations the app's icon counts: those listed with a reply not read yet, muted groups
-    /// left out. Nil while the live stream is down, since replies may have come that this phone has not heard of.
+    /// The conversations the app's icon counts: those listed with a reply not read yet, muted groups left out, and
+    /// groups in Mentions only once a reply names the user. Nil while the live stream is down, since replies may have
+    /// come that this phone has not heard of.
     var badgedConversations: Set<UUID>? {
-        isConnected ? Set(listedThreads.filter { countsAsUnread($0) }.map(\.conversationID)) : nil
+        isConnected ? Set(listedThreads.filter { countsOnIcon($0) }.map(\.conversationID)) : nil
     }
+
+    /// Whether a conversation counts on the app's icon, as it is set to notify.
+    func countsOnIcon(_ conversation: some HubConversation) -> Bool {
+        switch notifications(of: conversation) {
+        case .muted: false
+        case .mentions: hasUnreadMention(conversation)
+        default: isUnread(conversation)
+        }
+    }
+
+    /// Whether a bot named the user since the conversation was last opened here.
+    func hasUnreadMention(_ conversation: some HubConversation) -> Bool {
+        guard let seen else { return false }
+        let since = seen[conversation.conversationID] ?? .distantPast, name = mentionName
+        return messages(of: conversation).contains {
+            if case .bot = $0.author { $0.createdAt > since && LinkMention.mentions($0.body, name: name) } else { false }
+        }
+    }
+
+    /// The name that mentions the user, as the Hub lists them.
+    var mentionName: String { pairing.status?.userName ?? pairing.hub?.userName ?? "" }
 
     /// Whether a conversation shows in Unread and counts on the icon: unread, and not a muted group, whose row only dims its dot.
     func countsAsUnread(_ conversation: some HubConversation) -> Bool {
@@ -308,32 +330,63 @@ enum HubThread: HubConversation {
     }
 
     /// Whether a group notifies nothing, for all the user's devices. Bots' own conversations always notify.
-    func isMuted(_ conversation: some HubConversation) -> Bool {
-        groups.first { $0.id == conversation.conversationID }?.isMuted == true
+    func isMuted(_ conversation: some HubConversation) -> Bool { notifications(of: conversation) == .muted }
+
+    /// How a conversation notifies, for all the user's devices: a group as set on its own, or else as set for all
+    /// groups. Bots' own conversations notify every reply.
+    func notifications(of conversation: some HubConversation) -> LinkNotifications {
+        guard let group = groups.first(where: { $0.id == conversation.conversationID }) else { return .all }
+        return LinkNotifications.effective(group.notifications, inGroups: groupNotifications)
+    }
+
+    /// How a group was set to notify on its own; nil keeps the default.
+    func chosenNotifications(of conversation: some HubConversation) -> LinkNotifications? {
+        groups.first { $0.id == conversation.conversationID }?.notifications
     }
 
     /// Whether the Hub keeps mutes; an older one does not.
     var mutesGroups: Bool { pairing.status?.mutesGroups == true }
 
+    /// Whether the Hub knows Mentions only; an older one only mutes.
+    var notifiesMentions: Bool { pairing.status?.notifiesMentions == true }
+
+    /// How the user's groups that keep the default notify them.
+    var groupNotifications: LinkNotifications { pairing.status?.groupNotifications ?? .all }
+
     /// Mutes or unmutes a group on the Hub, for every device. It shows at once, and goes back when the Hub refuses.
     func toggleMute(_ conversation: some HubConversation) async throws {
+        try await setNotifications(isMuted(conversation) ? .default : .muted, of: conversation)
+    }
+
+    /// Sets how a group notifies, `default` keeping the level for all groups, on the Hub, for every device. It shows at
+    /// once, and goes back when the Hub refuses. A Hub that only mutes takes All Messages for unmuting.
+    func setNotifications(_ level: LinkNotifications, of conversation: some HubConversation) async throws {
         let id = conversation.conversationID
         guard let group = groups.first(where: { $0.id == id }) else { return }
-        let before = group.notifications ?? .all, level: LinkNotifications = group.isMuted ? .all : .muted
-        setNotifications(level, of: id)
+        let sent = !notifiesMentions && level != .muted ? .all : level
+        let before = group.notifications ?? .default
+        setNotifications(sent, of: id)
         // The Hub takes back what it showed too; this clears it at once.
-        if level == .muted { await HubNotifications.clearDelivered(conversation: id) }
+        if notifications(of: conversation) != .all { await HubNotifications.clearDelivered(conversation: id) }
         do {
-            _ = try await pairing.request(.setNotifications(LinkNotificationsChange(conversationID: id, notifications: level)))
+            _ = try await pairing.request(.setNotifications(LinkNotificationsChange(conversationID: id, notifications: sent)))
         } catch {
             setNotifications(before, of: id)
             throw error
         }
     }
 
+    /// Sets how the user's groups that keep the default notify them, for every device.
+    func setGroupNotifications(_ level: LinkNotifications) async throws {
+        try await pairing.setGroupNotifications(level)
+        for group in groups where notifications(of: HubThread.group(group)) != .all {
+            await HubNotifications.clearDelivered(conversation: group.id)
+        }
+    }
+
     private func setNotifications(_ level: LinkNotifications, of conversationID: UUID) {
         guard let index = groups.firstIndex(where: { $0.id == conversationID }) else { return }
-        groups[index].notifications = level == .all ? nil : level
+        groups[index].notifications = level == .default ? nil : level
         saveCache()
     }
 
@@ -880,6 +933,9 @@ enum HubThread: HubConversation {
             return
         case .notificationsChanged(let id, let level):
             setNotifications(level, of: id)
+            return
+        case .groupNotificationsChanged(let level):
+            pairing.groupNotificationsChanged(to: level)
             return
         case .backgroundChanged(let id, let background):
             keep(background, for: id)
@@ -1499,7 +1555,7 @@ struct AgentsView: View {
                 }
             }
             .sheet(isPresented: $showingProfile) { HubsView(chats: chats) }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingSettings) { SettingsView(chats: chats) }
             .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
             // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
             .sheet(isPresented: $creating) {
@@ -1672,7 +1728,19 @@ struct AgentsView: View {
         } else {
             Button { togglePin(row) } label: { Label("Pin", systemImage: "pin.fill") }
         }
-        if row.thread.group != nil, row.chats.mutesGroups {
+        if row.thread.group != nil, row.chats.notifiesMentions {
+            Picker(selection: Binding(get: { row.chats.chosenNotifications(of: row.thread) ?? .default },
+                                      set: { level in setNotifications(level, row) })) {
+                Text(row.chats.groupNotifications == .mentions ? "Default (Mentions Only)" : "Default (All Messages)")
+                    .tag(LinkNotifications.default)
+                Text("All Messages").tag(LinkNotifications.all)
+                Text("Mentions Only").tag(LinkNotifications.mentions)
+                Text("Muted").tag(LinkNotifications.muted)
+            } label: {
+                Label("Notifications", systemImage: row.chats.isMuted(row.thread) ? "bell.slash.fill" : "bell.fill")
+            }
+            .pickerStyle(.menu)
+        } else if row.thread.group != nil, row.chats.mutesGroups {
             if row.chats.isMuted(row.thread) {
                 Button { toggleMute(row) } label: { Label("Unmute", systemImage: "bell.fill") }
             } else {
@@ -1702,6 +1770,13 @@ struct AgentsView: View {
     private func toggleMute(_ row: Row) {
         Task {
             do { try await row.chats.toggleMute(row.thread) }
+            catch { row.chats.error = error.localizedDescription }
+        }
+    }
+
+    private func setNotifications(_ level: LinkNotifications, _ row: Row) {
+        Task {
+            do { try await row.chats.setNotifications(level, of: row.thread) }
             catch { row.chats.error = error.localizedDescription }
         }
     }

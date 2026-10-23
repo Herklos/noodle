@@ -100,6 +100,8 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
     /// muted groups are Noodle's own.
     private let notificationsURL: URL?
     private lazy var notifications: [UUID: LinkNotifications] = loadNotifications()
+    /// How This Mac as a Hub's groups that keep the default notify the owner, as Noodle keeps it.
+    private lazy var personalGroupNotifications: LinkNotifications = loadPersonalGroupNotifications()
     /// Runs when a device muted or unmuted a group kept in Noodle's own file, so Noodle reads them again.
     public var onNotificationsEdited: (() -> Void)?
 
@@ -1468,42 +1470,107 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
         try JSONEncoder().encode(pins).write(to: pinsURL, options: .atomic)
     }
 
-    /// Mutes or unmutes one of the user's groups and tells their devices. Their bots' own conversations always notify.
+    /// Sets how one of the user's groups notifies them, `default` keeping their level for all groups, and tells
+    /// their devices. Their bots' own conversations always notify.
     public func setNotifications(_ level: LinkNotifications, conversation id: UUID, for user: HubUser) throws {
         _ = try ownedGroup(id, by: user)
-        let kept: LinkNotifications? = level == .muted ? .muted : nil
+        let kept: LinkNotifications?
+        switch level {
+        case .all, .mentions, .muted: kept = level
+        case .default: kept = nil
+        default: throw LinkError("This Hub doesn’t know that notification level.")
+        }
         guard notifications[id] != kept else { return }
         guard notificationsURL != nil else {
-            var muted = try repository.loadMutedConversationIDs()
-            if kept == nil { muted.remove(id) } else { muted.insert(id) }
-            try repository.saveMutedConversationIDs(muted)
+            var settings = try repository.loadGroupNotifications()
+            settings.levels[id] = kept?.rawValue
+            try repository.saveGroupNotifications(settings)
             notificationsChanged(for: user)
             onNotificationsEdited?()
             return
         }
         notifications[id] = kept
         try saveNotifications()
-        onChange?(user.id, .notificationsChanged(conversationID: id, notifications: kept ?? .all))
+        onChange?(user.id, .notificationsChanged(conversationID: id, notifications: kept ?? .default))
+    }
+
+    /// Sets how the user's groups that keep the default notify them, and tells their devices.
+    public func setGroupNotifications(_ level: LinkNotifications, for user: HubUser) throws {
+        guard notificationsURL != nil else {
+            guard level == .all || level == .mentions else { throw LinkError("Choose All Messages or Mentions Only.") }
+            var settings = try repository.loadGroupNotifications()
+            guard settings.inGroups != level.rawValue else { return }
+            settings.inGroups = level.rawValue
+            try repository.saveGroupNotifications(settings)
+            notificationsChanged(for: user)
+            onNotificationsEdited?()
+            return
+        }
+        let before = groupNotifications(for: user)
+        try access.setGroupNotifications(level, for: user)
+        guard groupNotifications(for: user) != before else { return }
+        onChange?(user.id, .groupNotificationsChanged(notifications: level))
+    }
+
+    /// How the user's groups that keep the default notify them: on This Mac as a Hub, as Noodle keeps it.
+    public func groupNotifications(for user: HubUser) -> LinkNotifications {
+        guard notificationsURL != nil else { return personalGroupNotifications }
+        return access.users.first { $0.id == user.id }?.groupNotifications ?? .all
+    }
+
+    /// How a conversation notifies its owner: a group as they set it, or else as they set all groups. A bot's own conversation notifies every reply.
+    public func notifications(of conversation: BotConversation, for user: HubUser) -> LinkNotifications {
+        guard conversation.kind == .group else { return .all }
+        return LinkNotifications.effective(notifications[conversation.id], inGroups: groupNotifications(for: user))
     }
 
     /// Whether a group's replies notify none of its owner's devices.
     public func isMuted(_ conversationID: UUID) -> Bool { notifications[conversationID] == .muted }
 
-    /// Noodle's own muted groups changed: tells the user's devices each group that was muted or unmuted.
+    /// How many of the bots' replies its owner has not read that notify them: every one, those naming them in Mentions
+    /// only, none muted. What a device away hears of.
+    public func notifyingUnread(in conversationID: UUID, for userID: UUID) throws -> Int {
+        guard let user = access.users.first(where: { $0.id == userID }),
+              let conversation = try repository.loadConversations().first(where: { $0.id == conversationID }) else {
+            return try unread(in: conversationID)
+        }
+        let level = notifications(of: conversation, for: user)
+        guard level != .all else { return try unread(in: conversationID) }
+        let mark = readMarks[conversationID] ?? .distantPast, name = mentionName(of: user)
+        return try repository.loadMessages(conversationID: conversationID).filter {
+            if case .agent = $0.author { $0.createdAt > mark && level.notifies($0.body, name: name) } else { false }
+        }.count
+    }
+
+    /// The name that mentions the user: as the Hub lists them, or on This Mac as a Hub the Mac account's full name.
+    public func mentionName(of user: HubUser) -> String {
+        access.isPersonal ? NSFullUserName() : user.name
+    }
+
+    /// Noodle's own group levels changed: tells the user's devices each group whose level changed, and the level for all groups.
     public func notificationsChanged(for user: HubUser) {
-        let before = notifications
+        let before = notifications, beforeInGroups = personalGroupNotifications
         notifications = loadNotifications()
+        personalGroupNotifications = loadPersonalGroupNotifications()
         for id in Set(before.keys).union(notifications.keys) where before[id] != notifications[id] {
-            onChange?(user.id, .notificationsChanged(conversationID: id, notifications: notifications[id] ?? .all))
+            onChange?(user.id, .notificationsChanged(conversationID: id, notifications: notifications[id] ?? .default))
+        }
+        if notificationsURL == nil, personalGroupNotifications != beforeInGroups {
+            onChange?(user.id, .groupNotificationsChanged(notifications: personalGroupNotifications))
         }
     }
 
     private func loadNotifications() -> [UUID: LinkNotifications] {
         guard let notificationsURL else {
-            let muted = (try? repository.loadMutedConversationIDs()) ?? []
-            return Dictionary(uniqueKeysWithValues: muted.map { ($0, .muted) })
+            let levels = (try? repository.loadGroupNotifications().levels) ?? [:]
+            return levels.mapValues(LinkNotifications.init(rawValue:))
         }
         return (try? JSONDecoder().decode([UUID: LinkNotifications].self, from: Data(contentsOf: notificationsURL))) ?? [:]
+    }
+
+    private func loadPersonalGroupNotifications() -> LinkNotifications {
+        guard notificationsURL == nil, let settings = try? repository.loadGroupNotifications() else { return .all }
+        return settings.inGroups == LinkNotifications.mentions.rawValue ? .mentions : .all
     }
 
     private func saveNotifications() throws {
@@ -1729,6 +1796,12 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
     public func canOpen(_ conversationID: UUID, for user: UUID) -> Bool {
         guard let user = access.users.first(where: { $0.id == user }) else { return false }
         return (try? ownedConversation(conversationID, by: user)) != nil
+    }
+
+    /// Whether a conversation is one of the user's groups, which may notify differently from their bots' own.
+    public func isGroup(_ id: UUID, of user: UUID) -> Bool {
+        guard let user = access.users.first(where: { $0.id == user }) else { return false }
+        return (try? ownedGroup(id, by: user)) != nil
     }
 
     private func ownedGroup(_ id: UUID, by user: HubUser) throws -> BotConversation {

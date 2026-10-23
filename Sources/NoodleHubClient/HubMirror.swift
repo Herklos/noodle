@@ -60,7 +60,7 @@ import Observation
     @ObservationIgnored public var onRead: ((_ conversation: UUID, _ upTo: Date) -> Void)?
     /// Runs with a conversation here whose background changed to the Hub's.
     @ObservationIgnored public var onBackgroundChanged: ((_ conversation: UUID) -> Void)?
-    /// Runs with a group here that was muted or unmuted, here or on another device.
+    /// Runs with a group here whose notifications changed, here or on another device, or with each group when the level for all groups did.
     @ObservationIgnored public var onNotificationsChanged: ((_ conversation: UUID) -> Void)?
     /// One of this Mac's user's bots on the Hub is calling them, with the bot and conversation here.
     @ObservationIgnored public var onCallRinging: ((AgentCallRequest) -> Void)?
@@ -393,26 +393,47 @@ import Observation
     /// Whether the Hub can mute groups; an older one cannot.
     public var mutesGroups: Bool { pairing.status?.mutesGroups == true }
 
+    /// Whether the Hub knows Mentions only, for a group and for all of them; an older one only mutes.
+    public var notifiesMentions: Bool { pairing.status?.notifiesMentions == true }
+
+    /// How this Hub's groups that keep the default notify its user.
+    public var groupNotifications: LinkNotifications { pairing.status?.groupNotifications ?? .all }
+
+    /// The name that mentions this Hub's user, as the Hub lists them.
+    public var mentionName: String { pairing.status?.userName ?? pairing.hub?.userName ?? "" }
+
     /// The local copies of this Hub's groups its user muted.
     public var mutedConversations: Set<UUID> { Set(groups.filter { $0.notifications == .muted }.map(\.conversation)) }
 
-    /// Mutes or unmutes a group on the Hub, for every device of its user. It shows here at once,
-    /// and goes back when the Hub refuses.
-    public func setMuted(_ muted: Bool, conversation: UUID) async throws {
+    /// How the local copy of a group on this Hub was set to notify. Nil keeps the default.
+    public func notifications(of conversation: UUID) -> LinkNotifications? {
+        groups.first { $0.conversation == conversation }?.notifications
+    }
+
+    /// Sets how a group notifies, `default` keeping the level for all groups, on the Hub, for every device of its user.
+    /// It shows here at once, and goes back when the Hub refuses. A Hub that only mutes takes All Messages for unmuting.
+    public func setNotifications(_ level: LinkNotifications, conversation: UUID) async throws {
         guard let entry = groups.first(where: { $0.conversation == conversation }) else { throw LinkError("This group is not on the Hub.") }
-        let before = entry.notifications, level: LinkNotifications = muted ? .muted : .all
-        guard (before == .muted) != muted else { return }
-        setNotifications(level, remote: entry.remote)
+        let sent = !notifiesMentions && level != .muted ? .all : level
+        let before = entry.notifications
+        guard before != (sent == .default ? nil : sent) else { return }
+        setNotifications(sent, remote: entry.remote)
         do {
-            _ = try await pairing.request(.setNotifications(LinkNotificationsChange(conversationID: entry.remote, notifications: level)))
+            _ = try await pairing.request(.setNotifications(LinkNotificationsChange(conversationID: entry.remote, notifications: sent)))
         } catch {
             setNotifications(before, remote: entry.remote)
             throw error
         }
     }
 
+    /// Sets how this Hub's groups that keep the default notify its user, for every device.
+    public func setGroupNotifications(_ level: LinkNotifications) async throws {
+        defer { groups.forEach { onNotificationsChanged?($0.conversation) } }
+        try await pairing.setGroupNotifications(level)
+    }
+
     private func setNotifications(_ level: LinkNotifications?, remote id: UUID) {
-        let kept = level == .all ? nil : level
+        let kept = level == .default ? nil : level
         guard let index = groups.firstIndex(where: { $0.remote == id }), groups[index].notifications != kept else { return }
         groups[index].notifications = kept
         saveGroups()
@@ -713,6 +734,9 @@ import Observation
                         setPinnedAt(pinnedAt, remote: id)
                     case .notificationsChanged(let id, let level):
                         setNotifications(level, remote: id)
+                    case .groupNotificationsChanged(let level):
+                        pairing.groupNotificationsChanged(to: level)
+                        groups.forEach { onNotificationsChanged?($0.conversation) }
                     case .backgroundChanged(let id, let background):
                         // One that cannot be fetched now is tried again at the next sync.
                         try? await copyBackground(background, of: id)
@@ -1168,7 +1192,7 @@ import Observation
                                                       participantIDs: localAgents(group.draft.botIDs),
                                                       existingAgents: try repository.loadAgents())
         groups.append(GroupEntry(remote: group.id, conversation: conversation.id, synced: 0, pinnedAt: group.pinnedAt,
-                                 notifications: group.isMuted ? .muted : nil))
+                                 notifications: group.notifications))
         saveGroups()
         guard let archivedAt = group.archivedAt else { return conversation }
         return try repository.setConversationArchived(true, conversationID: conversation.id, now: archivedAt)
