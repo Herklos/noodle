@@ -328,9 +328,13 @@ import WebKit
             return popup?.web
         }
         catch {
-            // Only a person looking at the tab in a browser window is alerted; otherwise it is a bot's
-            // page, and the bot finds out from its tab.
-            guard web.window === surface, let runtime else { runtime?.failure = error.localizedDescription; return nil }
+            // Only a person who just clicked or typed in the tab in a shown browser window is alerted.
+            // Otherwise it is a bot's page, also when the browser window shows the bot's tab, and the
+            // bot finds out from its tab.
+            guard let runtime else { return nil }
+            if humanInput, let window = web.window, window !== surface, window.isVisible {
+                runtime.failure = error.localizedDescription; return nil
+            }
             let full = (try? runtime.library.profile(browserID).tabs.count >= BrowserRuntime.tabLimit) == true
             info.error = full ? BrowserRuntime.botTabLimit : error.localizedDescription; runtime.saveTab(self)
             return nil
