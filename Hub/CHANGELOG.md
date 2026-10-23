@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-10-23
+
 ### Fixed
 
 - The Hub uses less memory: the pictures on shared browser tab, computer and noodlet cards are read when a device asks for them instead of being kept for every conversation.

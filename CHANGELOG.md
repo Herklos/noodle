@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.74.1] - 2026-10-23
+
 ### Fixed
 
 - Noodle uses tens of megabytes less memory: the pictures on shared browser tab, computer and noodlet cards are read when a card is shown instead of all being kept from launch.
