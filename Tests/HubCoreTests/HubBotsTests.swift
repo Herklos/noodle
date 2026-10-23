@@ -476,7 +476,7 @@ import XCTest
         XCTAssertEqual(whileMuted, 1, "A muted group notifies nothing")
 
         // Unmuted, what waited is not news; the next reply is.
-        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .all)))
+        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .default)))
         guard case .groups(let unmuted) = try await f.device.request(.groups) else { return XCTFail("no groups") }
         XCTAssertNil(unmuted.first?.notifications)
         _ = try f.hub.repository.sendAgentMessage(agentID: bot.id, conversationID: group.id, body: "Shall I warm it?")
@@ -498,6 +498,70 @@ import XCTest
         do {
             _ = try await other.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .muted)))
             XCTFail("Muted another user's group")
+        } catch {}
+    }
+
+    /// In Mentions only, a device away hears only of replies naming the user, whether the group or all their groups
+    /// are set so. Choosing it takes back what was shown, a group's own level wins, and Muted is silent even for a mention.
+    func testMentionsOnlyNotifiesOnlyWhenTheUserIsNamed() async throws {
+        let pushes = RecordedPushes()
+        let f = try await fixture(pushes: pushes)
+        let bot = try await createBot(f)
+        let group = try await createGroup(f, of: [bot])
+        let say = { (body: String) in
+            _ = try f.hub.repository.sendAgentMessage(agentID: bot.id, conversationID: group.id, body: body)
+            f.hub.bots.checkForChanges()
+        }
+        try say("Already here.")
+        _ = try await f.device.request(.pushTopic(LinkPushTopic(topic: "phone-topic")))
+        try say("Dinner is served.")
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != 2 { try await Task.sleep(for: .milliseconds(100)) }
+        let shown = await pushes.unread("phone-topic", group.id)
+        XCTAssertEqual(shown, 2)
+
+        guard case .status(let status) = try await f.device.request(.setGroupNotifications(.mentions)) else { return XCTFail("no status") }
+        XCTAssertTrue(status.notifiesMentions)
+        XCTAssertEqual(status.groupNotifications, .mentions)
+        XCTAssertEqual(f.hub.access.users.first { $0.id == f.ada.id }?.groupNotifications, .mentions)
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != nil { try await Task.sleep(for: .milliseconds(100)) }
+        let afterChoosing = await pushes.unread("phone-topic", group.id)
+        XCTAssertNil(afterChoosing, "Nothing waiting names Ada, so what was shown goes")
+
+        try say("Adam would like soup from Canada.")
+        try await Task.sleep(for: .milliseconds(300))
+        let unnamed = await pushes.published.count
+        XCTAssertEqual(unnamed, 1, "A reply not naming Ada notifies nothing")
+        try say("Ada, the soup is ready.")
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != 1 { try await Task.sleep(for: .milliseconds(100)) }
+        let named = await pushes.unread("phone-topic", group.id)
+        XCTAssertEqual(named, 1, "Only the reply naming her counts")
+
+        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .all)))
+        guard case .groups(let listed) = try await f.device.request(.groups) else { return XCTFail("no groups") }
+        XCTAssertEqual(listed.first?.notifications, .all)
+        try say("More bread?")
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != 5 { try await Task.sleep(for: .milliseconds(100)) }
+        let everyReply = await pushes.unread("phone-topic", group.id)
+        XCTAssertEqual(everyReply, 5, "The group's own All Messages wins")
+
+        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .muted)))
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != nil { try await Task.sleep(for: .milliseconds(100)) }
+        try say("Ada, are you there?")
+        try await Task.sleep(for: .milliseconds(300))
+        let whileMuted = await pushes.published.count
+        XCTAssertEqual(whileMuted, 3, "Muted is silent even for a mention")
+
+        _ = try await f.device.request(.setNotifications(LinkNotificationsChange(conversationID: group.id, notifications: .default)))
+        guard case .groups(let reset) = try await f.device.request(.groups) else { return XCTFail("no groups") }
+        XCTAssertNil(reset.first?.notifications)
+        try say("Ada?")
+        for _ in 0..<50 where await pushes.unread("phone-topic", group.id) != 3 { try await Task.sleep(for: .milliseconds(100)) }
+        let byDefault = await pushes.unread("phone-topic", group.id)
+        XCTAssertEqual(byDefault, 3, "Back on the default, the mentions waiting count")
+
+        do {
+            _ = try await f.device.request(.setGroupNotifications(.muted))
+            XCTFail("Muted every group")
         } catch {}
     }
 

@@ -4,7 +4,7 @@
 
 ### Added
 
-- Mute a group: touch and hold it and choose Mute. A muted group sends no notifications, stays out of Unread and isn't counted on the app icon. Its row shows a grey dot when there are new replies. The mute applies to all your devices. Hubs that can't mute groups don't show the option.
+- Choose how a group notifies you: touch and hold it and choose Notifications, then Default, All Messages, Mentions Only or Muted. In Mentions Only, a reply notifies you and counts on the app icon only when it names you, by your full name or your first name alone as the Hub lists you; other replies still show unread. A muted group sends no notifications, not even for your name, stays out of Unread and isn't counted on the app icon; its row shows a grey dot when there are new replies. Settings has In Groups, Notify Me For, for the groups on Default. The choices apply to all your devices. One-to-one chats always notify. A Hub that can only mute groups shows Mute and Unmute, and older Hubs show neither.
 
 ### Changed
 
@@ -20,7 +20,8 @@
 - Open a bot's info and tap Harness: check the harnesses are listed under the bot's Hub name, each profile's name shows under its harness, the current one has a checkmark, and only that Hub's harnesses are offered. Choose another: check the row shows it.
 - With two Hubs joined, tap New Bot, then Harness: check each Hub's harnesses are under its name. Choose one on the other Hub: check the Hub row follows, and the bot is made there.
 - Open a PDF a bot sent, scroll to its second page and tap Mark Up: check that page shows, not a black screen, and a box dragged on it goes with the comment. Do the same with a .docx: check its first page shows. Check Mark Up on a picture still works as before.
-- Touch and hold a group and choose Mute. Have a bot reply there while Noodle is closed: check no notification arrives, the app icon doesn't count it, and the group isn't under Unread but shows a grey dot. Check the group shows as muted on your Mac too. Choose Unmute: check the next reply notifies again.
+- In Settings, choose In Groups, Notify Me For: Only When My Name Is Mentioned. Have a bot reply in a group without your name while Noodle is closed: check no notification arrives and the icon doesn't count it, but the group shows unread. Have it reply with your first name: check it notifies. Check your Mac shows the group in Mentions Only too.
+- Touch and hold a group and choose Notifications, then Muted. Have a bot reply there while Noodle is closed: check no notification arrives, the app icon doesn't count it, and the group isn't under Unread but shows a grey dot. Check the group shows as muted on your Mac too. Choose Unmute: check the next reply notifies again.
 - In a car with CarPlay or Bluetooth, have a bot call you and answer on the car's screen: check you hear the bot through the car's speakers, never the phone speaker. Call a bot with Speaker on, then connect CarPlay or AirPods during the call: check the call moves there and stays there.
 
 ## [0.43.1] - 2026-10-23

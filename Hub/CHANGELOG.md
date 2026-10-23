@@ -5,6 +5,7 @@
 ### Added
 
 - Groups can be muted from any device. A muted group sends no notification to devices that are away, and what it already showed is taken back. Unmuting it notifies again from the next reply. Bots' own conversations always notify.
+- Groups can be set to Mentions only, one at a time or all at once, from any device. Devices that are away are then notified only of replies that name the user as the Hub lists them, by full name or first name alone, not inside code. A muted group stays silent even for a mention.
 
 ## [0.40.0] - 2026-10-22
 

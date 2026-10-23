@@ -160,6 +160,10 @@ public enum LinkRequest: Codable, Equatable, Sendable {
     /// Sets how one of this user's groups notifies them, for all their devices. The Hub pushes
     /// `notificationsChanged`. Only a Hub whose status says `mutesGroups` knows it.
     case setNotifications(LinkNotificationsChange)
+    /// Sets how this user's groups that keep the default notify them, `all` or `mentions`, for all their devices.
+    /// The Hub pushes `groupNotificationsChanged` and answers with `status`. Only a Hub whose status says
+    /// `notifiesMentions` knows it.
+    case setGroupNotifications(LinkNotifications)
     /// Where this device hears of unread replies while it is away from the Hub, or nil to stop.
     case pushTopic(LinkPushTopic)
     /// Lets the Hub ring this device through Noodle Push while it is away or Noodle is closed, or with no
@@ -671,6 +675,8 @@ public enum LinkEvent: Codable, Equatable, Sendable {
     case pinChanged(conversationID: UUID, pinnedAt: Date?)
     /// This user changed how one of their groups notifies them, on one of their devices.
     case notificationsChanged(conversationID: UUID, notifications: LinkNotifications)
+    /// This user changed how their groups that keep the default notify them, on one of their devices.
+    case groupNotificationsChanged(notifications: LinkNotifications)
     /// This user's connections, their sign-in or their bots changed.
     case connectionsChanged
     /// Open this page in the browser to sign a connection in, then send `finishSignIn`.
@@ -1100,12 +1106,17 @@ public struct LinkStatus: Codable, Equatable, Sendable {
     /// Whether the Hub keeps how each group notifies its user, as `LinkGroup.notifications`, and takes
     /// `setNotifications`, so a device may offer to mute a group.
     public var mutesGroups: Bool
+    /// Whether the Hub knows Mentions only, for a group and for all of them, and takes `setGroupNotifications`.
+    public var notifiesMentions: Bool
+    /// How this user's groups that keep the default notify them. Nil for every reply.
+    public var groupNotifications: LinkNotifications?
 
     public init(hubName: String, userName: String, planName: String, harnesses: [LinkHarness], endpoints: [LinkEndpoint],
                 protocolVersion: Int = LinkProtocol.version, canPairDevices: Bool = false, isAdmin: Bool = false,
                 canShareBots: Bool = false, userID: UUID? = nil, avatar: LinkAvatar? = nil, imageModel: String? = nil,
                 keepsAnnotations: Bool = false, signsInToBrowsers: Bool = false, ringsThroughPush: Bool = false,
-                callPushExpiresAt: Date? = nil, explainsPauses: Bool = false, mutesGroups: Bool = false) {
+                callPushExpiresAt: Date? = nil, explainsPauses: Bool = false, mutesGroups: Bool = false,
+                notifiesMentions: Bool = false, groupNotifications: LinkNotifications? = nil) {
         self.hubName = hubName
         self.userName = userName
         self.planName = planName
@@ -1124,11 +1135,14 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         self.callPushExpiresAt = callPushExpiresAt
         self.explainsPauses = explainsPauses
         self.mutesGroups = mutesGroups
+        self.notifiesMentions = notifiesMentions
+        self.groupNotifications = groupNotifications
     }
 
     private enum CodingKeys: String, CodingKey {
         case hubName, userName, planName, harnesses, endpoints, protocolVersion, canPairDevices, isAdmin, canShareBots, userID, avatar, imageModel,
-             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt, explainsPauses, mutesGroups
+             keepsAnnotations, signsInToBrowsers, ringsThroughPush, callPushExpiresAt, explainsPauses, mutesGroups,
+             notifiesMentions, groupNotifications
     }
 
     public init(from decoder: Decoder) throws {
@@ -1151,6 +1165,8 @@ public struct LinkStatus: Codable, Equatable, Sendable {
         callPushExpiresAt = try c.decodeIfPresent(Date.self, forKey: .callPushExpiresAt)
         explainsPauses = try c.decode(.explainsPauses, or: false)
         mutesGroups = try c.decode(.mutesGroups, or: false)
+        notifiesMentions = try c.decode(.notifiesMentions, or: false)
+        groupNotifications = try c.decodeIfPresent(LinkNotifications.self, forKey: .groupNotifications)
     }
 }
 
@@ -1418,7 +1434,8 @@ public struct LinkGroup: Codable, Equatable, Identifiable, Sendable {
     public var background: LinkBackground?
     /// When its user pinned it, which orders pins. Nil when not pinned, or from a Hub without pins.
     public var pinnedAt: Date?
-    /// How it notifies its user. Nil for every reply, or from a Hub that does not mute groups.
+    /// How it notifies its user. Nil keeps the user's level for all groups: every reply from a Hub without
+    /// Mentions only.
     public var notifications: LinkNotifications?
 
     public init(id: UUID, draft: LinkGroupDraft, createdAt: Date, readUpTo: Date? = nil, archivedAt: Date? = nil,
@@ -1446,8 +1463,28 @@ public struct LinkNotifications: RawRepresentable, Codable, Hashable, Sendable {
 
     /// Every reply notifies and counts as unread.
     public static let all = LinkNotifications(rawValue: "all")
-    /// No reply notifies or counts towards the unread badge; new replies still show in the list.
+    /// Only replies naming the user notify and count towards the unread badge; others still show unread in the list.
+    public static let mentions = LinkNotifications(rawValue: "mentions")
+    /// No reply notifies or counts towards the unread badge, not even one naming the user; new replies still show in the list.
     public static let muted = LinkNotifications(rawValue: "muted")
+    /// Sent in `setNotifications` for a group to keep the user's level for all groups again. Never kept.
+    public static let `default` = LinkNotifications(rawValue: "default")
+
+    /// How a group with `level`, nil keeping the default, notifies a user whose groups notify `inGroups`.
+    /// A level this app does not know notifies every reply.
+    public static func effective(_ level: LinkNotifications?, inGroups: LinkNotifications?) -> LinkNotifications {
+        if let level, level != .default { return [.mentions, .muted].contains(level) ? level : .all }
+        return inGroups == .mentions ? .mentions : .all
+    }
+
+    /// Whether a reply saying `text` notifies the user called `name` at this level.
+    public func notifies(_ text: String, name: String) -> Bool {
+        switch self {
+        case .muted: false
+        case .mentions: LinkMention.mentions(text, name: name)
+        default: true
+        }
+    }
 }
 
 /// A group, by its conversation's ID, and how it should notify its user.

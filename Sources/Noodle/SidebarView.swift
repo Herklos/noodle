@@ -89,7 +89,17 @@ struct SidebarView: View {
         } else {
             Button("Pin") { store.setPinned(true, conversationID: conversation.id) }
         }
-        if store.canMute(conversation) {
+        if store.canNotifyMentions(conversation) {
+            Picker("Notifications", selection: Binding(
+                get: { store.chosenNotifications(of: conversation.id) ?? .default },
+                set: { store.setNotifications($0, conversationID: conversation.id) })) {
+                Text(store.defaultNotifications(of: conversation.id) == .mentions ? "Default (Mentions Only)" : "Default (All Messages)")
+                    .tag(LinkNotifications.default)
+                Text("All Messages").tag(LinkNotifications.all)
+                Text("Mentions Only").tag(LinkNotifications.mentions)
+                Text("Muted").tag(LinkNotifications.muted)
+            }
+        } else if store.canMute(conversation) {
             if store.isMuted(conversation.id) {
                 Button("Unmute") { store.setMuted(false, conversationID: conversation.id) }
             } else {

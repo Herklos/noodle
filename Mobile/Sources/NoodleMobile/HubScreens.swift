@@ -1084,6 +1084,8 @@ struct QRScanner: UIViewControllerRepresentable {
 
 /// Options for the whole app, whichever Hub is shown.
 struct SettingsView: View {
+    /// The joined Hubs, which keep how the user's groups notify them.
+    var chats: [HubChats] = []
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AttachmentLayout.key) private var attachmentLayout = AttachmentLayout.standard.rawValue
     @AppStorage(MessageTextLayout.key) private var textLayout = MessageTextLayout.standard.rawValue
@@ -1096,6 +1098,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Every joined Hub that knows Mentions only takes the same choice; the first one shows it.
+                let mentioning = chats.filter(\.notifiesMentions)
+                if let shown = mentioning.first {
+                    Section {
+                        Picker("In Groups, Notify Me For", selection: Binding(get: { shown.groupNotifications },
+                                                                             set: { setGroupNotifications($0, on: mentioning) })) {
+                            Text("All Messages").tag(LinkNotifications.all)
+                            Text("Only When My Name Is Mentioned").tag(LinkNotifications.mentions)
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    } header: {
+                        Text("In Groups, Notify Me For")
+                    }
+                }
                 Section {
                     Picker("Sort Conversations", selection: $conversationOrder) {
                         ForEach(ConversationOrder.allCases) { Text($0.name).tag($0.rawValue) }
@@ -1162,6 +1179,17 @@ struct SettingsView: View {
             // Again on coming back from the list, which may have deleted some.
             .onAppear {
                 Task { downloaded = await Task.detached { DownloadedNoodlet.all().reduce(0) { $0 + $1.byteCount } }.value }
+            }
+        }
+    }
+}
+
+extension SettingsView {
+    fileprivate func setGroupNotifications(_ level: LinkNotifications, on chats: [HubChats]) {
+        for hub in chats where hub.groupNotifications != level {
+            Task {
+                do { try await hub.setGroupNotifications(level) }
+                catch { hub.error = error.localizedDescription }
             }
         }
     }

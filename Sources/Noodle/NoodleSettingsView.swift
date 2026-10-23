@@ -139,6 +139,14 @@ struct GeneralSettingsView: View {
                 .help("The line under each bot’s or group’s name. Without a description, it shows the latest message.")
             }
             Section {
+                Picker("In groups, notify me for", selection: Binding(get: { store.groupNotifications },
+                                                                      set: { store.groupNotifications = $0 })) {
+                    Text("All messages").tag(LinkNotifications.all)
+                    Text("Only when my name is mentioned").tag(LinkNotifications.mentions)
+                }
+                .help("Your name is your full name, or your first name alone. One-to-one chats always notify, and a group can have its own setting in its menu in the sidebar.")
+            }
+            Section {
                 Toggle("Keep Mac awake while agents work", isOn: Binding(
                     get: { store.runtime.preventIdleSleepWhileWorking },
                     set: { store.runtime.configurePreventIdleSleepWhileWorking($0) }
