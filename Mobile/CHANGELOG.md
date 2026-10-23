@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-10-23
+
 ### Fixed
 
 - Taps in the padding around the message text now focus the input, so the visible message field responds above and below its text too.
