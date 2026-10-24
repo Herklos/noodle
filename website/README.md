@@ -8,7 +8,15 @@ Plain HTML, CSS and a few lines of JavaScript. There's no build step. Copy the f
 - `applet/index.html`: the Noodle Applet page, led by games, linked from the Applet section
 - `styles.css`: all styles, including dark mode and phone layouts
 - `app.js`: fades the nav logo and Download button in once you scroll past the hero buttons
-- `assets/`: the app symbols, AI harness logos, favicon, the screenshots, `stage-wallpaper.avif`, the blurred wallpaper behind the hero (the other screenshots sit on muted tiles drawn in `styles.css`), `social-card.jpg`, the link preview for X, Slack and others, and `social-card-computer.jpg`, `social-card-browser.jpg` and `social-card-applet.jpg`, the previews for the three app pages. Screenshots and photos are AVIF; the link previews stay JPEG and `favicon.png` stays PNG, because `oauth/client.json` points sign-in services at it. Give each AVIF even width and height: Chrome shows nothing for a large one with an odd side
+- `assets/`: the app symbols, AI harness logos, favicon, the screenshots, `stage-wallpaper.avif`, the blurred wallpaper behind the hero (the other screenshots sit on muted tiles drawn in `styles.css`), `social-card.jpg`, the link preview for X, Slack and others, and `social-card-computer.jpg`, `social-card-browser.jpg` and `social-card-applet.jpg`, the previews for the three app pages. Screenshots and photos are AVIF; the link previews stay JPEG, 2400 × 1260 and under 150 KB. `favicon.png` stays PNG at 1024 px, because `oauth/client.json` points sign-in services at it; the pages' tab icon is the 32 px `favicon-32.png`. Give each AVIF even width and height: Chrome shows nothing for a large one with an odd side
+
+## Phone-sized screenshots
+
+Every screenshot over 40 KB has a smaller copy beside it, `NAME-small.avif`, so phones don't download the desktop size. Make it as wide as the image shows on a 440 pt phone at 3x (the `sizes` width at 396 px, times 3), keep its height in proportion and both sides even, and encode it at the same quality as the full image. List both in `srcset` with their widths, and set `sizes` to the width the image shows at in `styles.css`, never less: a window in a `stage-one` takes its size from `sizes`, so a smaller value shrinks it.
+
+    <img class="win" src="assets/NAME.avif" srcset="assets/NAME-small.avif 900w, assets/NAME.avif 1242w" sizes="(max-width: 1124px) calc(75vw - 33px), 810px" width="1242" height="862" loading="lazy" decoding="async" alt="…" />
+
+The first screenshot in each page's hero has `fetchpriority="high"`. Every other screenshot has `decoding="async"`, and those below the hero also `loading="lazy"`.
 
 ## Screenshots still to add
 
