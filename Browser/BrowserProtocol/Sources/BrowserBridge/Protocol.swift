@@ -27,11 +27,13 @@ public enum BrowserOperation: String, Codable, CaseIterable, Sendable {
     /// A person watching a browser live asking for the sign-in fields of the page they see, once, and
     /// filling them with what they typed or picked from their passwords. Bots never do either.
     case signInForm = "sign-in-form", signInFill = "sign-in-fill"
+    /// Noodle or Noodle Hub asking which tabs its bots opened and then left unused, each told once.
+    case idle = "browser-idle"
     public var timeout: Int { isFileTransfer ? 600 : 60 }
     public var isFileTransfer: Bool { self == .upload || self == .download || self == .screenshot }
-    public var isManagement: Bool { [.create, .update, .delete, .surfaceStream, .setOwner, .borrow, .signInForm, .signInFill].contains(self) }
+    public var isManagement: Bool { [.create, .update, .delete, .surfaceStream, .setOwner, .borrow, .signInForm, .signInFill, .idle].contains(self) }
     public var needsTab: Bool { ![.list, .status, .tabs, .open, .downloads, .download, .history, .bookmarks, .bookmarkAdd, .bookmarkUpdate, .bookmarkRemove, .create, .update, .delete, .setOwner, .borrow,
-        .signInForm, .signInFill].contains(self) }
+        .signInForm, .signInFill, .idle].contains(self) }
     /// What bots may call.
     public static var agentCases: [Self] { allCases.filter { !$0.isManagement } }
     /// What apps outside Noodle may call: what bots may, apart from posting into a conversation,
@@ -143,9 +145,12 @@ public struct BrowserTabInfo: Codable, Identifiable, Equatable, Sendable {
     /// When a person, a bot or someone watching live last used the tab. Tabs unused for
     /// long enough are closed.
     public var lastUsed: Date?
+    /// The bot that opened the tab; nil for a person, or an app outside Noodle. Only that bot is told the tab went unused.
+    public var openedBy: UUID?
     public init(id: UUID = UUID(), title: String = "New Tab", url: String = "about:blank", loading: Bool = false, error: String? = nil,
-                lastUsed: Date? = nil) {
+                lastUsed: Date? = nil, openedBy: UUID? = nil) {
         self.id = id; self.title = title; self.url = url; self.loading = loading; self.error = error; self.lastUsed = lastUsed
+        self.openedBy = openedBy
     }
 }
 public struct BrowserDownloadInfo: Codable, Identifiable, Equatable, Sendable {
@@ -197,6 +202,8 @@ public struct BrowserRequest: Codable, Sendable {
     public var owner: BrowserOwner?
     /// For signInFill alone: what the person typed or picked. Its description leaves the values out.
     public var signIn: BrowserSignInValues?
+    /// The bot asking, as Noodle's broker knows it; nil for a person or an app outside Noodle.
+    public var agentID: UUID?
     public init(_ operation: BrowserOperation, browserID: UUID? = nil, tabID: UUID? = nil) {
         self.operation = operation; self.browserID = browserID; self.tabID = tabID
     }
@@ -209,7 +216,7 @@ public struct BrowserRequest: Codable, Sendable {
     public func validate() throws {
         try validateWebMCP()
         guard version == 1 else { throw BrowserError("Update Noodle and Noodle Browser to compatible versions.") }
-        guard [.list, .create, .borrow].contains(operation) || browserID != nil else { throw BrowserError("Specify --browser UUID.") }
+        guard [.list, .create, .borrow, .idle].contains(operation) || browserID != nil else { throw BrowserError("Specify --browser UUID.") }
         if [.create, .update].contains(operation) {
             let name = profile?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !name.isEmpty, name.count <= 120 else { throw BrowserError("Enter a browser name of 1–120 characters.") }
@@ -284,11 +291,23 @@ public struct BrowserResponse: Codable, Sendable {
     public var totalCount: Int?
     public var offset: Int?
     public var limit: Int?
+    /// For idle: tabs the caller's bots opened and then left unused, one notice per bot.
+    public var idle: [BrowserIdleNotice]?
     public var error: String?
     public init(error: String? = nil) { self.error = error }
     public func checked() throws -> Self {
         if let error { throw BrowserError(error) }
         guard version == 1 else { throw BrowserError("Incompatible Browser protocol.") }
         return self
+    }
+}
+
+/// Tabs a bot opened and then left unused, with the note it is given.
+public struct BrowserIdleNotice: Codable, Equatable, Sendable {
+    public var agentID: UUID
+    public var tabIDs: [UUID]
+    public var note: String
+    public init(agentID: UUID, tabIDs: [UUID], note: String) {
+        self.agentID = agentID; self.tabIDs = tabIDs; self.note = note
     }
 }

@@ -10,12 +10,14 @@
 ### Changed
 
 - Shortcuts' Open Chat with Agent is now Open Chat, as on the Mac, and opens a group's chat too.
+- In a Hub's Users, admins have an Admin tag in the accent colour beside their name, and suspended people a Suspended tag in orange, instead of grey text after their plan.
 
 ### What to Test
 
 - In Shortcuts, add Send to Agent, choose a group, leave Message empty and add a file: check it arrives in the group as "Sent 1 attachment" with the file. Run it to a bot with a message and Open Chat on: check the message arrives and the bot's chat opens. Run it with neither a message nor files: check it asks what to send.
 - Add Open Chat and choose a group: check the group's chat opens. Run a Shortcut made with Open Chat with Agent before updating: check it still opens its bot's chat, or asks for the bot if it lost it.
 - Ask Siri "Call <bot> with Noodle", "Open chat with <group> in Noodle" and "Send to <bot> with Noodle": check each works. Check Call Agent and the Agent control on the Action Button still call the bot.
+- Open a Hub where you are an admin and choose Users: check admins show an Admin tag in the accent colour and suspended people a Suspended tag in orange beside their name, and the line below shows only the plan.
 
 ## [0.44.0] - 2026-10-23
 

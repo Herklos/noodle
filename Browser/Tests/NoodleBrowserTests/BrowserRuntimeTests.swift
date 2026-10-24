@@ -129,6 +129,59 @@ final class BrowserRuntimeTests: XCTestCase {
         let opened = try await runtime.perform(.init(.open, browserID: a.id))
         XCTAssertNotNil(try used(XCTUnwrap(opened.tabID)))
     }
+    /// A bot is told once, in one note, about the tabs it opened and then left unused, so it can
+    /// close them. Tabs a person opened, and the Hub's tabs when Noodle asks, are never reported.
+    @MainActor func testBotsAreToldOnceAboutTabsTheyOpenedAndLeftUnused() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), identity = BrowserBuildIdentity.current
+        let now = Date(), hour: TimeInterval = 3600, bot = UUID(), other = UUID()
+        var a = try library.create(name: "Research"), hub = try library.create(name: "Hub"), paused = try library.create(name: "Paused")
+        let docs = BrowserTabInfo(title: "Docs", url: "https://example.com/docs", lastUsed: now - 7 * hour, openedBy: bot)
+        let news = BrowserTabInfo(title: "News", url: "https://example.com/news", lastUsed: now - 8 * hour, openedBy: bot)
+        let recent = BrowserTabInfo(lastUsed: now - hour, openedBy: bot)
+        let person = BrowserTabInfo(lastUsed: now - 9 * hour)
+        let theirs = BrowserTabInfo(title: "Theirs", url: "https://example.com/theirs", lastUsed: now - 7 * hour, openedBy: other)
+        a.tabs = [docs, news, recent, person, theirs]; try library.update(a)
+        hub.hub = true; hub.tabs = [BrowserTabInfo(lastUsed: now - 9 * hour, openedBy: bot)]; try library.update(hub)
+        paused.paused = true; paused.tabs = [BrowserTabInfo(lastUsed: now - 9 * hour, openedBy: bot)]; try library.update(paused)
+        let runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+
+        let notices = runtime.idleNotices(hub: false, at: now)
+        XCTAssertEqual(notices.map(\.agentID), [bot, other])
+        XCTAssertEqual(notices.first?.tabIDs, [docs.id, news.id])
+        let note = try XCTUnwrap(notices.first?.note)
+        for part in ["Docs", "https://example.com/docs", docs.id.uuidString, "News", a.id.uuidString, "close"] {
+            XCTAssertTrue(note.contains(part), "\(part) missing from: \(note)")
+        }
+        XCTAssertFalse(note.contains("Theirs"))
+        XCTAssertEqual(notices.last?.tabIDs, [theirs.id])
+        XCTAssertEqual(runtime.idleNotices(hub: false, at: now + hour), [], "Told once per idle stretch")
+
+        // Using a tab starts a new stretch, reported again once it too has gone unused long enough.
+        runtime.touch(browserID: a.id, tabID: docs.id, now: now + hour)
+        XCTAssertEqual(runtime.idleNotices(hub: false, at: now + 2 * hour), [])
+        XCTAssertEqual(runtime.idleNotices(hub: false, at: now + 7 * hour).map(\.tabIDs), [[docs.id, recent.id]])
+
+        // The Hub hears about its own browsers alone, over the connection.
+        let answer = try await runtime.perform(.init(.idle), caller: identity.hubID)
+        XCTAssertEqual(answer.idle?.map(\.tabIDs), [[hub.tabs[0].id]])
+    }
+    /// The bot that opens a tab is recorded with it.
+    @MainActor func testATabRecordsTheBotThatOpenedIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), a = try library.create(name: "A"), bot = UUID()
+        let runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        var open = BrowserRequest(.open, browserID: a.id); open.agentID = bot
+        let opened = try await runtime.perform(open)
+        XCTAssertEqual(opened.tabs?.first?.openedBy, bot)
+        let byPerson = try await runtime.perform(.init(.open, browserID: a.id))
+        XCTAssertEqual(try library.profile(a.id).tabs.map(\.openedBy), [bot, nil])
+        XCTAssertNotNil(byPerson.tabID)
+    }
     /// Bots opening tab after tab are told to close some before the browser fills up.
     @MainActor func testOpeningManyTabsAsksToCloseSome() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

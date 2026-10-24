@@ -17,8 +17,40 @@ import XCTest
         }
         let container = ComputerSession(Computer(name: "Container", kind: .container))
         container.phase = .running; XCTAssertFalse(container.canDelete)
-        container.phase = .failed("Unknown state"); XCTAssertFalse(container.canDelete)
+        container.phase = .failed("Unknown state"); XCTAssertTrue(container.canDelete)
         container.phase = .stopped; XCTAssertTrue(container.canDelete)
+    }
+
+    func testAFailedStartWithNothingLeftRunningCanBeDeleted() {
+        let session = ComputerSession(Computer(name: "Failed", kind: .container))
+        session.recordStartupFailure(ComputerError("The container did not start."))
+        XCTAssertEqual(session.phase, .failed("The container did not start."))
+        XCTAssertTrue(session.canDelete)
+    }
+
+    func testAFailedComputerThatStillHoldsARuntimeCannotBeDeleted() {
+        let session = ComputerSession(Computer(name: "Windows", kind: .windows))
+        session.windowsRuntime = NSObject()
+        session.phase = .failed("Could not stop Windows")
+        XCTAssertFalse(session.canDelete)
+        session.windowsRuntime = nil
+        XCTAssertTrue(session.canDelete)
+    }
+
+    func testAStartThatRanOutOfDiskSpaceSaysSo() {
+        let posix = NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))
+        let wrapped = NSError(domain: "Containerization", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "unpack failed", NSUnderlyingErrorKey: posix])
+        let outOfSpace = "This Mac is out of free space. Free some in Settings → Storage, then start again."
+        for error in [wrapped, NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)] {
+            let session = ComputerSession(Computer(name: "Full", kind: .container))
+            session.recordStartupFailure(error)
+            XCTAssertEqual(session.phase, .failed(outOfSpace))
+            XCTAssertTrue(session.canDelete)
+        }
+        let other = ComputerSession(Computer(name: "Other", kind: .container))
+        other.recordStartupFailure(ComputerError("Timed out"))
+        XCTAssertEqual(other.phase, .failed("Timed out"))
     }
 
     func testFailedDesktopDeletionReachesLifecycleOnceAndRetainsRecordOnFailure() async throws {

@@ -9,6 +9,11 @@ All notable changes to Noodle are documented here, following
 ### Added
 
 - More Shortcuts actions: Open Chat opens your chat with a bot or group, and Call Agent calls a bot, opening your chat with it instead when it can't take calls. Send to Agent can send files, with or without a message, copied into the conversation as dropped files are, and can open the chat after sending.
+- Bots are told about Noodle Browser tabs they opened and then left unused for six hours, so they can close the ones they no longer need, as they are about computers they left running. Needs the latest Noodle Browser.
+
+### Changed
+
+- In a Hub's Users in Settings, admins have an Admin tag in the accent colour beside their name, and suspended people a Suspended tag in orange, instead of grey text after their plan.
 
 ### Fixed
 

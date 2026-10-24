@@ -90,3 +90,19 @@ import Observation
         return response
     }
 }
+
+/// What the Hub, the Mac and the iPhone tag a person with beside their name in Users, in this order.
+public enum LinkUserTag: String, CaseIterable, Identifiable, Sendable {
+    case admin = "Admin", suspended = "Suspended"
+
+    public var id: Self { self }
+    public var title: String { rawValue }
+
+    public static func tags(isAdmin: Bool, isSuspended: Bool) -> [Self] {
+        (isAdmin ? [.admin] : []) + (isSuspended ? [.suspended] : [])
+    }
+}
+
+public extension LinkUser {
+    var tags: [LinkUserTag] { LinkUserTag.tags(isAdmin: isAdmin, isSuspended: isSuspended) }
+}

@@ -169,7 +169,7 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self, !Task.isCancelled else { return }
                 round += 1
-                if round.isMultiple(of: 60) { await self.checkIdleComputers() }
+                if round.isMultiple(of: 60) { await self.checkIdleComputers(); await self.checkIdleBrowsers() }
                 self.tokenLimits?.checkExpired()
                 if let agents = try? self.repository.loadAgents() {
                     self.runtime.reconcile(agents: agents, repository: self.repository)
@@ -187,6 +187,11 @@ public struct HubUnlentModel: Identifiable, Hashable, Sendable {
             guard let agent = notice.agentID else { continue }
             runtime.wake(agent, note: notice.note, repository: repository)
         }
+    }
+
+    /// Asks each bot to close tabs it opened and then left unused.
+    public func checkIdleBrowsers() async {
+        for notice in await browsers.idle() { runtime.wake(notice.agentID, note: notice.note, repository: repository) }
     }
 
     /// Tells devices what changes, for bots something else runs: Noodle, serving its own owner.

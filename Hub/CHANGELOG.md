@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bots are told about Noodle Browser tabs they opened and then left unused for six hours, so they can close the ones they no longer need, as they are about computers they left running. Needs the latest Noodle Browser.
+
+### Changed
+
+- Admins stand out in Settings › Users: an Admin tag in the accent colour beside their name, and Suspended in orange for people who are suspended, instead of grey text after their plan.
+
 ## [0.41.1] - 2026-10-23
 
 ### Fixed

@@ -69,7 +69,11 @@ enum ComputerDisplayMode: String {
         // A failed Local Mac connection does not prove that its account logged
         // out. The lifecycle service stops and verifies it before removal.
         if computer.kind == .localMac { return !phase.busy }
-        return phase == .stopped && virtual == nil && container == nil && localMac == nil && windowsRuntime == nil && sshRuntime == nil
+        // A start that failed has already torn down its runtime, so it can go as a
+        // stopped one can. One still holding a runtime, such as a failed stop, cannot.
+        let idle: Bool
+        if case .failed = phase { idle = true } else { idle = phase == .stopped }
+        return idle && virtual == nil && container == nil && localMac == nil && windowsRuntime == nil && sshRuntime == nil
     }
     var virtual: VirtualComputer?
     /// A WindowsComputer, which needs macOS 27; see `windows`.
@@ -157,9 +161,20 @@ enum ComputerDisplayMode: String {
             phase = .setupRequired(setup.registration)
             return
         }
-        phase = .failed(error.localizedDescription)
+        phase = .failed(Self.outOfSpace(error) ? Self.outOfSpaceMessage : error.localizedDescription)
         localMacSetupStatus = (error as? LocalMacSetupRequired)?.registration
         append("\n\(error.localizedDescription)\n")
+    }
+    static let outOfSpaceMessage = "This Mac is out of free space. Free some in Settings → Storage, then start again."
+    /// Whether the error, or one it wraps, is the disk running out of space.
+    static func outOfSpace(_ error: Error) -> Bool {
+        var next: NSError? = error as NSError
+        while let current = next {
+            if current.domain == NSPOSIXErrorDomain, current.code == Int(ENOSPC) { return true }
+            if current.domain == NSCocoaErrorDomain, current.code == NSFileWriteOutOfSpaceError { return true }
+            next = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 }
 

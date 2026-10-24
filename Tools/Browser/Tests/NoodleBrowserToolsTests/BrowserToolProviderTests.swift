@@ -9,7 +9,7 @@ final class BrowserToolProviderTests: XCTestCase {
         var staged: [Data] = []
         var respond: (BrowserRequest, URL?) throws -> BrowserResponse = { _, _ in BrowserResponse() }
     }
-    private let mine = UUID(), secret = UUID(), tab = UUID()
+    private let mine = UUID(), secret = UUID(), tab = UUID(), bot = UUID()
     private var root: URL!
     private var transport: Transport!
     private var provider: BrowserToolProvider!
@@ -43,7 +43,7 @@ final class BrowserToolProviderTests: XCTestCase {
         let request = ToolBridgeRequest(session: "s", action: .call, provider: provider.manifest.id, tool: tool,
                                         arguments: try JSONSerialization.data(withJSONObject: arguments))
         let data = try await ToolBroker.perform(request, registry: registry, assignments: { [mine] in ["browser": [mine.uuidString]] },
-                                                context: ToolCallContext(agentID: UUID(), workspace: workspace),
+                                                context: ToolCallContext(agentID: bot, workspace: workspace),
                                                 host: ToolHostServices(isMember: { _, id in conversations.contains(id) }, post: { [box] post, _, id in box.add(post, id) }))
         posts = box.values
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -107,6 +107,7 @@ final class BrowserToolProviderTests: XCTestCase {
                        ["click", mine.uuidString, tab.uuidString, "#buy", "f1"])
         XCTAssertEqual(request.clickCount, 2)
         XCTAssertNil(request.transferID, "only a file transfer chooses a staging location")
+        XCTAssertEqual(request.agentID, bot, "Noodle Browser knows which bot asked")
     }
 
     func testUnassignedBrowsersNeverReachTheSocketAndListsAreFiltered() async throws {
@@ -203,7 +204,7 @@ final class BrowserToolProviderTests: XCTestCase {
     func testManagingBrowsersGoesThroughTheConnectionButIsNoBotTool() async throws {
         let listed = try await provider.tools(context: .init(agentID: UUID(), workspace: workspace))
         let names = Set(try ToolDescriptor.list(mcp: listed).map(\.name))
-        for operation in [BrowserOperation.create, .update, .delete] {
+        for operation in [BrowserOperation.create, .update, .delete, .idle] {
             XCTAssertTrue(operation.isManagement)
             XCTAssertFalse(names.contains(operation.rawValue), operation.rawValue)
         }
@@ -220,6 +221,7 @@ final class BrowserToolProviderTests: XCTestCase {
         XCTAssertNoThrow(try update.validate())
         XCTAssertThrowsError(try BrowserRequest(.delete).validate())
         XCTAssertNoThrow(try BrowserRequest(.delete, browserID: UUID()).validate())
+        XCTAssertNoThrow(try BrowserRequest(.idle).validate(), "Noodle asks about every browser at once")
         XCTAssertEqual(BrowserBuildIdentity.identify("com.pdparchitect.noodle.hub.local"), .development)
         XCTAssertTrue(BrowserBuildIdentity.production.clientIDs.contains("com.pdparchitect.noodle.hub"))
     }

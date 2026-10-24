@@ -109,9 +109,12 @@ struct HubUsersSettingsView: View {
         HStack(spacing: 10) {
             HubPersonBadge(user: user, access: access, size: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(user.name).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(user.name).lineLimit(1)
+                    ForEach(LinkUserTag.tags(isAdmin: user.isAdmin, isSuspended: user.isSuspended)) { UserTag(tag: $0) }
+                }
                 if let plan = access.plans.first(where: { $0.id == user.plan }) {
-                    Text(([user.isSuspended ? "\(plan.name) · Suspended" : (user.isAdmin ? "\(plan.name) · Admin" : plan.name)] + [tokens(of: user)].compactMap { $0 }).joined(separator: " · "))
+                    Text(([plan.name] + [tokens(of: user)].compactMap { $0 }).joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
@@ -595,5 +598,20 @@ struct HubPersonBadge: View {
         IconBadge(appearance: IconAppearance(symbol: avatar.symbol, colour: avatar.colour, image: image),
                   symbol: "person.fill", size: size, showsShadow: false, initials: LinkAvatar.initials(of: user.name))
             .task(id: user.avatar?.imageDigest) { image = access.picture(of: user.id) }
+    }
+}
+
+/// Admin in the accent colour or Suspended in orange, beside a person's name in Users.
+private struct UserTag: View {
+    let tag: LinkUserTag
+
+    var body: some View {
+        Text(tag.title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(tag == .admin ? Color.accentColor : Color.orange, in: Capsule())
+            .fixedSize()
     }
 }

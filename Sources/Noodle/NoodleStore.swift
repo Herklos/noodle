@@ -278,6 +278,9 @@ final class NoodleStore {
             toolAssignments.replace("browser", with: assigned)
             tools.synchronizeSkills()
         }
+        browsers.onIdle = { [runtime = self.runtime, repository = self.repository] notices in
+            for notice in notices { runtime.wake(notice.agentID, note: notice.note, repository: repository) }
+        }
         // Calendar and Reminders are the providers Noodle hosts itself: macOS grants this
         // access to the app the person sees, never to a tool extension. See Tools/AGENTS.md.
         let calendarStore = EventKitCalendarStore(), reminderStore = EventKitReminderStore()

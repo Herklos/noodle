@@ -5,6 +5,8 @@
 ### Fixed
 
 - Clicking back into a window no longer leaves it ignoring every click until you move it. When macOS didn't bring the app forward on the first click, the next click now goes through.
+- A computer that failed to start can be deleted. It stayed in Needs attention with Delete dimmed, although nothing of it was running. A computer that failed to stop and may still be running still has to be stopped first.
+- A computer that cannot start because this Mac is out of disk space says so, and points to Settings → Storage to free some.
 
 ## [0.33.1] - 2026-10-22
 

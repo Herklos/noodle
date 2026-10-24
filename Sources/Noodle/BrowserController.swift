@@ -19,6 +19,8 @@ import SwiftUI
     /// Receives each agent's assigned browser IDs for the tool broker, now and on every change.
     @ObservationIgnored var onAssignmentsChange: (([UUID: Set<String>]) -> Void)? { didSet { publishAssignments() } }
     private func publishAssignments() { onAssignmentsChange?(registry.toolAssignments(readable: readable)) }
+    /// Hands on tabs bots opened and then left unused, so each bot is asked to close its own.
+    @ObservationIgnored var onIdle: (([BrowserIdleNotice]) -> Void)?
     init(repository: WorkspaceRepository, connection: (@Sendable (BrowserRequest) async throws -> BrowserResponse)? = nil) {
         self.repository = repository; self.connection = connection
         do { registry = try BrowserAssignments.load(root: repository.rootURL) }
@@ -30,8 +32,11 @@ import SwiftUI
     func start(agents: [AgentRecord], monitoring: Bool = true) {
         guard monitoring, monitor == nil else { return }
         monitor = Task { [weak self] in
+            var round = 0
             while !Task.isCancelled {
                 await self?.refresh(launchIfNeeded: false)
+                round += 1
+                if round.isMultiple(of: 20) { await self?.checkIdle() }
                 try? await Task.sleep(for: .seconds(3))
             }
         }
@@ -65,6 +70,11 @@ import SwiftUI
             if readable, registry.browsers != browsers { var next = registry; next.browsers = browsers; try next.save(root: repository.rootURL); registry = next }
             available = true; if readable { failure = nil }
         } catch { available = false; if launchIfNeeded { failure = error.localizedDescription } }
+    }
+    /// Never launches Noodle Browser: its tabs only go unused while it is open.
+    func checkIdle() async {
+        guard let idle = try? await call(.init(.idle), launchIfNeeded: false).checked().idle, !idle.isEmpty else { return }
+        onIdle?(idle)
     }
     /// Makes a browser in Noodle Browser and lists it here.
     func create(_ draft: BrowserDraft) async throws -> RemoteBrowser {
