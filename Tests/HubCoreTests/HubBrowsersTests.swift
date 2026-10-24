@@ -53,6 +53,7 @@ import XCTest
                     break
                 }
                 response.browsers = browsers
+                if request.operation == .idle { response.idle = pendingIdle; pendingIdle = [] }
                 if request.operation == .list { response.features = features }
                 return response
             }
@@ -60,6 +61,13 @@ import XCTest
 
         /// Whom Noodle Browser was last told a browser is kept for.
         func owner(of id: UUID) -> BrowserOwner? { lock.withLock { browsers.first { $0.id == id }?.owner } }
+
+        /// What Noodle Browser reports next as tabs bots left unused.
+        var idle: [BrowserIdleNotice] {
+            get { lock.withLock { pendingIdle } }
+            set { lock.withLock { pendingIdle = newValue } }
+        }
+        private var pendingIdle: [BrowserIdleNotice] = []
 
         /// False for one from before owners, which cannot read the request.
         var knowsOwners = true
@@ -85,6 +93,20 @@ import XCTest
         hub.access.move(ada, to: family)
         hub.access.move(bob, to: family)
         return (hub, ada, bob)
+    }
+
+    func testABotIsToldOfTabsItLeftOpenAndUnused() async throws {
+        let (hub, ada, _) = try hub()
+        let alfred = try hub.bots.create(LinkBotDraft(name: "Alfred", provider: "claude-code"), for: ada)
+        browser.idle = [BrowserIdleNotice(agentID: alfred.id, tabIDs: [UUID()], note: "Docs is unused"),
+                        BrowserIdleNotice(agentID: UUID(), tabIDs: [UUID()], note: "Not a bot here")]
+        await hub.bots.checkIdleBrowsers()
+        var notes: [String] = []
+        for _ in 0..<50 where notes.isEmpty {
+            notes += try hub.repository.listWakes(agentID: alfred.id).due.map(\.note)
+            if notes.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        XCTAssertEqual(notes, ["Docs is unused"])
     }
 
     /// Noodle Browser lists the Hub's browsers under the people they are kept for.

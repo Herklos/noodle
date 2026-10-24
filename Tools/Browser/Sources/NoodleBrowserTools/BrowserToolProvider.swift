@@ -85,6 +85,8 @@ public struct BrowserToolProvider: ToolProvider {
             }
             let options = try JSONSerialization.jsonObject(with: arguments) as? [String: Any] ?? [:]
             var request = try Self.request(operation, options: options, files: files)
+            // Noodle Browser records which bot opened a tab, to tell that bot alone when it goes unused.
+            request.agentID = context.agentID
             try request.validate()
             let response: BrowserResponse
             if operation.isFileTransfer {

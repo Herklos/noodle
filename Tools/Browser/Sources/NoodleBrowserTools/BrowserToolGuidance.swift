@@ -36,7 +36,7 @@ enum BrowserToolGuidance {
         case .bookmarkUpdate: "Edit --bookmark UUID using --title TEXT and/or --url HTTP[S]_URL. The bookmark must belong to this browser."
         case .bookmarkRemove: "Delete --bookmark UUID from this browser."
         // Never offered to bots: Noodle and the Hub manage browsers.
-        case .create, .update, .delete, .surfaceStream, .setOwner, .borrow, .signInForm, .signInFill: ""
+        case .create, .update, .delete, .surfaceStream, .setOwner, .borrow, .signInForm, .signInFill, .idle: ""
         case .present: "Capture and send a clickable browser preview card using --conversation UUID and optional --message TEXT; requires --browser UUID and --tab UUID. Returns attachmentID after sending; keeps the browser window in the background."
         }
     }

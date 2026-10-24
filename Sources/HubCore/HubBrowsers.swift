@@ -157,6 +157,11 @@ import NoodleCore
         access.owner(ofBot: bot) == user.id ? registry.assigned(to: bot) : []
     }
 
+    /// Tabs the Hub's bots opened and then left unused, each told once.
+    public func idle() async -> [BrowserIdleNotice] {
+        (try? await call(BrowserRequest(.idle)).checked().idle) ?? []
+    }
+
     /// Drops a deleted bot's grants.
     public func forget(bot: UUID) {
         guard registry.agents[bot.uuidString] != nil else { return }

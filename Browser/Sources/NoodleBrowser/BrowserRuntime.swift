@@ -94,6 +94,8 @@ import WebKit
         guard BrowserOperation.externalCases.contains(input.operation) else { throw BrowserError("Apps outside Noodle cannot do that.") }
         let caller = try await external.admit(launcher).id
         var request = input
+        // Only Noodle's broker says which bot asks.
+        request.agentID = nil
         let lendable = { [library] in library.profiles.filter { $0.hub != true } }
         switch request.operation {
         case .list:
@@ -133,11 +135,11 @@ import WebKit
         }
     }
     func saveTab(_ tab: BrowserTab) { library.updateTab(tab.info, browserID: tab.browserID) }
-    @discardableResult func makeTab(browserID: UUID, configuration: WKWebViewConfiguration? = nil, restoring: BrowserTabInfo? = nil) throws -> BrowserTab {
+    @discardableResult func makeTab(browserID: UUID, configuration: WKWebViewConfiguration? = nil, restoring: BrowserTabInfo? = nil, openedBy: UUID? = nil) throws -> BrowserTab {
         guard !deleting.contains(browserID) else { throw BrowserError("This browser is being deleted.") }
         var profile = try library.profile(browserID)
         guard profile.tabs.count < Self.tabLimit || restoring != nil else { throw BrowserError("This browser has reached its 100-tab limit.") }
-        let info = restoring ?? BrowserTabInfo(lastUsed: Date())
+        let info = restoring ?? BrowserTabInfo(lastUsed: Date(), openedBy: openedBy)
         if let tab = tabs[info.id] { return tab }
         let tab = BrowserTab(browserID: browserID, info: info, runtime: self, configuration: configuration)
         if restoring == nil {
@@ -237,9 +239,7 @@ import WebKit
             var expired: [UUID] = [], stamped = false
             for index in profile.tabs.indices {
                 let info = profile.tabs[index], tab = tabs[info.id]
-                let inUse = isWatched(profile.id) || tab?.dialog != nil
-                    || tab.map { $0.web.window != nil && $0.web.window !== $0.surface && $0.web.window?.isVisible == true } == true
-                guard let used = info.lastUsed, !inUse else {
+                guard let used = info.lastUsed, !inUse(browserID: profile.id, tabID: info.id) else {
                     profile.tabs[index].lastUsed = now; tab?.info.lastUsed = now; stamped = true; continue
                 }
                 if now.timeIntervalSince(used) >= age { expired.append(info.id) }
@@ -249,6 +249,26 @@ import WebKit
                 for id in expired { try closeTab(browserID: profile.id, tabID: id) }
             } catch { failure = error.localizedDescription }
         }
+    }
+    /// A tab on screen, being watched or waiting on a dialog.
+    private func inUse(browserID: UUID, tabID: UUID) -> Bool {
+        let tab = tabs[tabID]
+        return isWatched(browserID) || tab?.dialog != nil
+            || tab.map { $0.web.window != nil && $0.web.window !== $0.surface && $0.web.window?.isVisible == true } == true
+    }
+    private var idle = BrowserIdleWatch()
+    /// What Noodle, or the Hub when `hub`, is told once: tabs its bots opened and then left unused.
+    /// A paused browser is left out, since its bots cannot close tabs in it.
+    func idleNotices(hub: Bool, at now: Date = Date()) -> [BrowserIdleNotice] {
+        let profiles = library.profiles
+        idle.keep(Set(profiles.flatMap { $0.tabs.map(\.id) }))
+        var candidates: [BrowserIdleWatch.Tab] = []
+        for profile in profiles where (profile.hub == true) == hub && !profile.paused && !deleting.contains(profile.id) {
+            for info in profile.tabs where info.openedBy != nil && !inUse(browserID: profile.id, tabID: info.id) {
+                candidates.append(.init(browser: profile.name, browserID: profile.id, info: info))
+            }
+        }
+        return idle.due(candidates, at: now)
     }
     /// How many days a tab may go unused before it closes, from Settings > General. None never closes them.
     static func tabExpiry(_ defaults: UserDefaults) -> TimeInterval? {
@@ -340,6 +360,10 @@ import WebKit
             response.browsers = library.profiles.map(\.remote); response.features = [SurfaceSocket.feature, BrowserSignInForm.feature]; return response
         }
         let hub = caller == BrowserBuildIdentity.current.hubID
+        if request.operation == .idle {
+            response.idle = idleNotices(hub: hub)
+            return response
+        }
         if request.operation == .create, let draft = request.profile {
             var made = try library.create(name: draft.name, description: draft.description,
                                           symbol: draft.symbol ?? "globe", colour: draft.colour)
@@ -438,7 +462,7 @@ import WebKit
         }
         if request.operation == .open {
             guard profile.tabs.count < Self.tabLimit else { throw BrowserError(Self.botTabLimit) }
-            let tab = try makeTab(browserID: id)
+            let tab = try makeTab(browserID: id, openedBy: request.agentID)
             tab.attend(for: agentAttention)
             if let url = request.url { tab.navigate(try BrowserRequest.navigationURL(url)) }
             response.tabID = tab.id; response.tabs = [tab.info]
