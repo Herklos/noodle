@@ -91,6 +91,7 @@ import NoodleCore
             model.request = try XCTUnwrap(fixture.runtime.kick(agent: agent, repository: fixture.repository), title)
             let sheet = try await waitForSheet(window)
             let button = try XCTUnwrap(descendants(sheet.contentView).compactMap { $0 as? NSButton }.first { $0.title == title }, title)
+            let started = fixture.factory.processes.count
             button.performClick(nil)
             for _ in 0..<100 where !window.sheets.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
             try await Task.sleep(for: .milliseconds(300))
@@ -98,6 +99,7 @@ import NoodleCore
             XCTAssertNil(model.request, "\(title) left the request set")
             if title == "Retry Now" {
                 // The harness still needs a sign-in: the bot waits again, and nothing presents the alert by itself.
+                XCTAssertEqual(fixture.factory.processes.count, started + 1, "Retry Now did not restart the bot")
                 let restarted = try XCTUnwrap(fixture.factory.processes.last)
                 restarted.transition(.failed, failure: .authenticationRequired)
                 try await Task.sleep(for: .milliseconds(300))
