@@ -17,6 +17,7 @@ import SwiftUI
     private(set) var needsDocumentPreviewUpdate = false
     @ObservationIgnored private let repository: WorkspaceRepository
     @ObservationIgnored private let socket: URL?
+    @ObservationIgnored private let team: String?
     @ObservationIgnored private var readable = true
     @ObservationIgnored private var monitor: Task<Void, Never>?
     @ObservationIgnored private var agents: [AgentRecord] = []
@@ -24,6 +25,9 @@ import SwiftUI
     @ObservationIgnored private var launch: Task<Void, Error>?
     @ObservationIgnored private let applicationLookup: @MainActor () -> URL?
     @ObservationIgnored private let linkOpener: (URL, URL) async throws -> Void
+    /// Starts Computer quietly; tests stand in for it, and only then is a test socket's provider launched.
+    @ObservationIgnored private let launcher: (@MainActor (URL) async throws -> Void)?
+    @ObservationIgnored private let providerRunning: @MainActor () -> Bool
     /// Injectable connection boundary for deterministic broker failure tests.
     /// Normal app construction always uses the authenticated signed-app socket.
     @ObservationIgnored private let connection: (@Sendable (ComputerRequest) async throws -> ComputerResponse)?
@@ -31,7 +35,7 @@ import SwiftUI
     /// Hands on computers bots started and then left running unused, so each bot is asked to stop its own.
     @ObservationIgnored var onIdle: (([ComputerIdleNotice]) -> Void)?
 
-    init(repository: WorkspaceRepository, socket: URL? = nil,
+    init(repository: WorkspaceRepository, socket: URL? = nil, team: String? = nil,
          applicationLookup: @escaping @MainActor () -> URL? = { ComputerApplication.locate() },
          linkOpener: @escaping (URL, URL) async throws -> Void = { document, application in
              let configuration = NSWorkspace.OpenConfiguration()
@@ -41,11 +45,18 @@ import SwiftUI
              configuration.promptsUserIfNeeded = false
              _ = try await NSWorkspace.shared.open([document], withApplicationAt: application, configuration: configuration)
          },
-         connection: (@Sendable (ComputerRequest) async throws -> ComputerResponse)? = nil) {
+         connection: (@Sendable (ComputerRequest) async throws -> ComputerResponse)? = nil,
+         launcher: (@MainActor (URL) async throws -> Void)? = nil,
+         providerRunning: @escaping @MainActor () -> Bool = {
+             !NSRunningApplication.runningApplications(withBundleIdentifier: ComputerConnection.providerID).isEmpty
+         }) {
         self.repository = repository
         self.socket = socket
+        self.team = team
         self.applicationLookup = applicationLookup
         self.linkOpener = linkOpener
+        self.launcher = launcher
+        self.providerRunning = providerRunning
         self.connection = connection
         do { registry = try ComputerAssignments.load(root: repository.rootURL) }
         catch { readable = false; failure = "Could not read Computer assignments; they were not changed." }
@@ -119,19 +130,24 @@ import SwiftUI
     }
     private func connect(_ request: ComputerRequest, launchIfNeeded: Bool) async throws -> ComputerResponse {
         if let connection { return try await connection(request) }
-        let endpoint = try socket ?? ComputerConnection.socketURL(), team = try ComputerConnection.signingTeam()
+        let endpoint = try socket ?? ComputerConnection.socketURL(), team = try team ?? ComputerConnection.signingTeam()
         do { return try await ComputerConnection.call(request, socket: endpoint, team: team) }
-        catch let error as ComputerBridgeError where error.unavailable && launchIfNeeded && socket == nil {
-            try await launchProvider()
+        catch let error as ComputerBridgeError where error.unavailable && launchIfNeeded && (socket == nil || launcher != nil) {
+            // A running Computer may still be starting, so it gets the same wait. Opening it
+            // again cannot wake one that stopped answering; macOS only shows "not responding".
+            let running = providerRunning()
+            if !running { try await launchProvider() }
             // Only connect failures are retried. A sent mutation with an uncertain
             // result is never repeated automatically.
-            for attempt in 0..<40 {
+            for _ in 0..<40 {
                 do { return try await ComputerConnection.call(request, socket: endpoint, team: team) }
-                catch let error as ComputerBridgeError where error.unavailable && attempt < 39 {
+                catch let error as ComputerBridgeError where error.unavailable {
                     try await Task.sleep(for: .milliseconds(250))
                 }
             }
-            throw ComputerBridgeError("Computer did not become ready.")
+            throw ComputerBridgeError(running
+                ? "\(ComputerBuildIdentity.current.appName) is open but not answering. Quit it and open it again."
+                : "Computer did not become ready.")
         }
     }
     private func launchProvider() async throws {
@@ -140,6 +156,7 @@ import SwiftUI
             guard let url = self.applicationLookup() else {
                 throw ComputerBridgeError("Install \(ComputerBuildIdentity.current.appName) to use computers with your bots.")
             }
+            if let launcher = self.launcher { try await launcher(url); return }
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = false; configuration.hides = true
             configuration.allowsRunningApplicationSubstitution = false

@@ -18,6 +18,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - Clicking back into a window no longer leaves it ignoring every click until you move it. When macOS didn't bring the app forward on the first click, the next click now goes through.
+- When Noodle Computer is open but stops answering, Noodle no longer keeps trying to open it, which stacked up "not responding" alerts. Bots and Settings now say it isn't answering and should be quit and opened again.
 
 ## [0.74.1] - 2026-10-23
 
