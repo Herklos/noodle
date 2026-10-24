@@ -45,6 +45,39 @@ final class LibraryTests: XCTestCase {
         XCTAssertTrue(library.entries.contains { $0.title == "Late" })
     }
 
+    /// Walking every place and bot workspace every two seconds kept Applet at a quarter of a core
+    /// while nothing changed, so the watch walks again only once something has.
+    @MainActor func testTheWatchDoesNotWalkAgainWhileNothingChanged() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "AppletLibraryTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let library = botLibrary(root: root, defaults: defaults)
+        final class Count: @unchecked Sendable { var walks = 0 }
+        let count = Count(), walk = library.walk
+        library.walk = { count.walks += 1; return walk($0, $1, $2) }
+
+        await library.refreshIfChanged()
+        await library.refreshIfChanged()
+
+        XCTAssertEqual(count.walks, 0)
+    }
+
+    /// A change in a folder the library walks brings what changed in at the next tick.
+    @MainActor func testTheWatchWalksAgainOnceAFolderChanged() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "AppletLibraryTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let library = botLibrary(root: root, defaults: defaults)
+        _ = try botNoodlet(try htmlNoodlet("Late"), named: "Late", owner: "bot", root: root)
+
+        library.foldersChanged()
+        await library.refreshIfChanged()
+
+        XCTAssertTrue(library.entries.contains { $0.title == "Late" })
+    }
+
     @MainActor func testNoodletsBotsKeepInTheirFoldersAreFoundWhereTheyAre() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString

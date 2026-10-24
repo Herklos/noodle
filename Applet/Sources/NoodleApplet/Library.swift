@@ -55,6 +55,54 @@ struct BotFolder: Equatable {
   }
 }
 
+/// Reports changes anywhere under a set of existing folders, on the main queue.
+@MainActor private final class FolderWatch {
+  private let changed: () -> Void
+  private var stream: FSEventStreamRef?
+  private var paths: [String] = []
+
+  init(changed: @escaping () -> Void) { self.changed = changed }
+
+  /// Watches `paths` instead of what it watched before, and says whether they differ; the same
+  /// paths keep the stream running.
+  @discardableResult func watch(_ paths: [String]) -> Bool {
+    guard paths != self.paths else { return false }
+    defer { self.paths = paths }
+    stop()
+    guard !paths.isEmpty else { return true }
+    var context = FSEventStreamContext(
+      version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+    guard
+      let stream = FSEventStreamCreate(
+        nil,
+        { _, info, _, _, _, _ in
+          guard let info else { return }
+          MainActor.assumeIsolated { Unmanaged<FolderWatch>.fromOpaque(info).takeUnretainedValue().changed() }
+        }, &context, paths as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 1,
+        FSEventStreamCreateFlags(kFSEventStreamCreateFlagNone))
+    else { return true }
+    FSEventStreamSetDispatchQueue(stream, .main)
+    FSEventStreamStart(stream)
+    self.stream = stream
+    return true
+  }
+
+  private func stop() {
+    guard let stream else { return }
+    FSEventStreamStop(stream)
+    FSEventStreamInvalidate(stream)
+    FSEventStreamRelease(stream)
+    self.stream = nil
+  }
+
+  deinit {
+    guard let stream else { return }
+    FSEventStreamStop(stream)
+    FSEventStreamInvalidate(stream)
+    FSEventStreamRelease(stream)
+  }
+}
+
 /// Someone on Noodle Hub, as their bot's agent.json names them.
 struct HubPerson: Hashable, Identifiable, Decodable {
   let id: UUID
@@ -84,6 +132,9 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   private var registrations: [Registration] = []
   private var timer: Timer?
   private var refreshing = false
+  private var watch: FolderWatch?
+  private var changed = false
+  private var walked = Date()
   /// Finds the noodlets in places and bots' folders. Replaced in tests.
   var walk: @Sendable (_ places: [URL], _ botFolders: [URL], _ thumbnails: URL) -> Discovery = AppletLibrary.discover
   private var links: NoodletRegistry?
@@ -157,8 +208,10 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     persistRegistrations()
     scan()
     if watchChanges {
+      watch = FolderWatch { [weak self] in self?.foldersChanged() }
+      watch?.watch(watchedPaths())
       timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-        Task { @MainActor in await self?.refresh() }
+        Task { @MainActor in await self?.refreshIfChanged() }
       }
     }
   }
@@ -204,6 +257,8 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     }
   }
   func scan() {
+    changed = false
+    walked = Date()
     let places = forget()
     apply(walk(places, botFolders.map(\.url), root.appendingPathComponent("Thumbnails", isDirectory: true)).entries)
   }
@@ -213,9 +268,28 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     guard !refreshing else { return }
     refreshing = true
     defer { refreshing = false }
+    // Cleared before the walk: a change while it runs brings another.
+    changed = false
+    walked = Date()
     let places = forget(), folders = botFolders.map(\.url), walk = walk
     let thumbnails = root.appendingPathComponent("Thumbnails", isDirectory: true)
     apply(await Task.detached { walk(places, folders, thumbnails) }.value.entries)
+  }
+  /// Something changed under a folder the library walks, so the next tick walks again.
+  func foldersChanged() { changed = true }
+  /// What the watch timer runs: a walk only once something changed, and now and then anyway in
+  /// case a change went unreported. Walking everything every two seconds cost a quarter of a core.
+  func refreshIfChanged() async {
+    if watch?.watch(watchedPaths()) == true { changed = true }
+    guard changed || Date().timeIntervalSince(walked) >= 60 else { return }
+    await refresh()
+  }
+  /// The folders the walk looks in that exist: FSEvents reports nothing under one made later,
+  /// so the watch starts on it once it appears.
+  private func watchedPaths() -> [String] {
+    ([documents, root.appendingPathComponent("Thumbnails", isDirectory: true)]
+      + registrations.map(\.url) + botFolders.map(\.url)).map(\.path)
+      .filter { FileManager.default.fileExists(atPath: $0) }
   }
   /// Deletes what noodlets no longer anywhere Applet looks saved, as when one was deleted or moved
   /// outside Applet. Nothing goes when the walk could not look everywhere, nor for noodlets `inUse`.
