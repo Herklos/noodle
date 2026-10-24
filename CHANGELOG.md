@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- The sign-in, recovery and usage-limit alerts that appear when you press Kick no longer come back after you choose Open Harness Settings, Retry Now, Cancel or any other button. Each answer now closes the alert for good.
+
 ## [0.75.0] - 2026-10-24
 
 ### Added

@@ -66,6 +66,47 @@ import NoodleCore
         XCTAssertEqual(fixture.factory.processes.count, 2)
     }
 
+    func testSignInConfirmationStaysDismissedAfterEveryButton() async throws {
+        let fixture = try RuntimeCoordinatorFixture()
+        defer { fixture.cleanUp() }
+        let agent = try fixture.agent("BB-189", harness: .claudeCode)
+        let store = NoodleStore(repository: fixture.repository, runtime: fixture.runtime, connectsServices: false)
+        defer { store.stopMonitoring() }
+        try fixture.start(agent).transition(.failed, failure: .authenticationRequired)
+        let model = KickDialogFixtureModel()
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 600, height: 420),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: KickDialogFixture(model: model).environment(store))
+        window.orderFront(nil)
+        defer {
+            for sheet in window.sheets { window.endSheet(sheet) }
+            window.close()
+            window.contentView = nil
+        }
+        try await Task.sleep(for: .milliseconds(100))
+
+        for title in ["Cancel", "Open Harness Settings", "Retry Now"] {
+            model.request = try XCTUnwrap(fixture.runtime.kick(agent: agent, repository: fixture.repository), title)
+            let sheet = try await waitForSheet(window)
+            let button = try XCTUnwrap(descendants(sheet.contentView).compactMap { $0 as? NSButton }.first { $0.title == title }, title)
+            button.performClick(nil)
+            for _ in 0..<100 where !window.sheets.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+            try await Task.sleep(for: .milliseconds(300))
+            XCTAssertTrue(window.sheets.isEmpty, "\(title) brought the alert back")
+            XCTAssertNil(model.request, "\(title) left the request set")
+            if title == "Retry Now" {
+                // The harness still needs a sign-in: the bot waits again, and nothing presents the alert by itself.
+                let restarted = try XCTUnwrap(fixture.factory.processes.last)
+                restarted.transition(.failed, failure: .authenticationRequired)
+                try await Task.sleep(for: .milliseconds(300))
+                XCTAssertTrue(window.sheets.isEmpty, "The alert returned by itself after a failed retry")
+            }
+        }
+        XCTAssertEqual(store.selectedSettingsTab, .harnesses)
+    }
+
     private func waitForSheet(_ window: NSWindow) async throws -> NSWindow {
         for _ in 0..<100 {
             if let sheet = window.sheets.first { return sheet }
