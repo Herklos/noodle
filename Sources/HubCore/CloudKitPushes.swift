@@ -24,30 +24,17 @@ public final class CloudKitPushes: HubPushPublisher {
 
     public func publish(topic: String, conversation: UUID, unread: Int) async throws {
         // The Hub alone writes these, so its copy always wins.
-        let results = try await database.modifyRecords(saving: [Self.record(topic: topic, conversation: conversation, unread: unread)],
+        let results = try await database.modifyRecords(saving: [LinkPush.record(topic: topic, conversation: conversation, unread: unread)],
                                                        deleting: [], savePolicy: .allKeys)
         // Each record's failure comes in its result rather than thrown.
         for result in results.saveResults.values { _ = try result.get() }
     }
 
     public func withdraw(topic: String, conversation: UUID) async throws {
-        let results = try await database.modifyRecords(saving: [], deleting: [Self.recordID(topic: topic, conversation: conversation)])
+        let results = try await database.modifyRecords(saving: [], deleting: [LinkPush.recordID(topic: topic, conversation: conversation)])
         for result in results.deleteResults.values {
             // Unknown: nothing was shown.
             do { try result.get() } catch let error as CKError where error.code == .unknownItem {}
         }
-    }
-
-    /// The same for every write about one device and conversation, so each replaces the last.
-    public static func recordID(topic: String, conversation: UUID) -> CKRecord.ID {
-        CKRecord.ID(recordName: LinkPush.recordName(topic: topic, conversation: conversation))
-    }
-
-    public static func record(topic: String, conversation: UUID, unread: Int) -> CKRecord {
-        let record = CKRecord(recordType: LinkPush.recordType, recordID: recordID(topic: topic, conversation: conversation))
-        record[LinkPush.topicField] = topic
-        record[LinkPush.conversationField] = conversation.uuidString
-        record[LinkPush.unreadField] = Int64(unread)
-        return record
     }
 }

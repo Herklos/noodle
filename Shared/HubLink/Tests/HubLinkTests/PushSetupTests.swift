@@ -1,6 +1,5 @@
 import CloudKit
 import Foundation
-import HubCore
 import HubLink
 import XCTest
 
@@ -8,7 +7,8 @@ import XCTest
 /// code writes and what the public releases' entitlements claim: the CloudKit container's schema and
 /// the Developer ID profiles. Those checks need a CloudKit management token and the profiles, so they
 /// are skipped without them; scripts/verify-push-setup.sh runs them with PUSH_SETUP_REQUIRED=1, where
-/// anything missing fails instead.
+/// anything missing fails instead. They live with the Hub link, which holds the record the Hub writes, so
+/// that script builds nothing else.
 final class PushSetupTests: XCTestCase {
     private static let apps = [
         (name: "Noodle", bundle: "com.pdparchitect.noodle", entitlements: "Support/Noodle-Release.entitlements"),
@@ -60,7 +60,7 @@ final class PushSetupTests: XCTestCase {
         let environment = try Self.environment(of: Self.apps[0].entitlements).lowercased()
         let team = try Self.team()
         let schema = try exportSchema(team: team, environment: environment)
-        let sample = CloudKitPushes.record(topic: "topic", conversation: UUID(), unread: 1)
+        let sample = LinkPush.record(topic: "topic", conversation: UUID(), unread: 1)
         let type = try XCTUnwrap(Self.recordType(sample.recordType, in: schema),
                                  "The \(environment) schema has no \(sample.recordType) record type. Deploy the schema to \(environment).")
         for key in sample.allKeys() {
@@ -190,8 +190,10 @@ final class PushSetupTests: XCTestCase {
         return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any], path)
     }
 
+    // Shared/HubLink/Tests/HubLinkTests/ is five levels down.
     private static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
 
     private static func plist(_ path: String) throws -> [String: Any] {
         let data = try Data(contentsOf: repository.appendingPathComponent(path))
