@@ -1,3 +1,4 @@
+import CloudKit
 import CryptoKit
 import Foundation
 import ImageIO
@@ -1544,6 +1545,21 @@ public enum LinkPush {
     public static func recordName(topic: String, conversation: UUID) -> String {
         let digest = SHA256.hash(data: Data("\(topic)\n\(conversation.uuidString)".utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The same for every write about one device and conversation, so each replaces the last.
+    public static func recordID(topic: String, conversation: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: recordName(topic: topic, conversation: conversation))
+    }
+
+    /// What the Hub writes about one device and conversation. It lives here, beside the fields, so that
+    /// scripts/verify-push-setup.sh can check it against CloudKit's schema while building only this package.
+    public static func record(topic: String, conversation: UUID, unread: Int) -> CKRecord {
+        let record = CKRecord(recordType: recordType, recordID: recordID(topic: topic, conversation: conversation))
+        record[topicField] = topic
+        record[conversationField] = conversation.uuidString
+        record[unreadField] = Int64(unread)
+        return record
     }
 }
 
