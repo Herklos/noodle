@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-24
+
 ### Added
 
 - Bots are told about Noodle Browser tabs they opened and then left unused for six hours, so they can close the ones they no longer need, as they are about computers they left running. Needs the latest Noodle Browser.

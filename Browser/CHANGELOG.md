@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-24
+
 ### Added
 
 - A bot is told about tabs it opened and then left unused for six hours, in one note listing them, so it can close the ones it no longer needs. Each tab is mentioned once until it is used again. Tabs you opened are never mentioned, and tabs still close after the days set in Settings › General. Needs a Noodle or Noodle Hub that says which bot opens a tab.

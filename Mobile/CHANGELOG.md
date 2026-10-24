@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-24
+
 ### Added
 
 - Send to Agent in Shortcuts sends a message, files or both to a bot or group, straight to its Hub as the share sheet does, and can open the chat after sending. The message can be left out when files are attached.
