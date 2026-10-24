@@ -776,9 +776,11 @@ struct UsersView: View {
                         HStack(spacing: 12) {
                             PersonAvatar(name: user.name, avatar: user.avatar, id: user.id, size: 36)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(user.name)
-                                let plan = users.planName(of: user) ?? ""
-                                Text(user.isSuspended ? "\(plan) · Suspended" : (user.isAdmin ? "\(plan) · Admin" : plan)).font(.subheadline).foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text(user.name)
+                                    ForEach(user.tags) { UserTag(tag: $0) }
+                                }
+                                Text(users.planName(of: user) ?? "").font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -1240,5 +1242,20 @@ struct DownloadedNoodletsView: View {
             await Task.detached { chosen.forEach { try? $0.delete() } }.value
             await load()
         }
+    }
+}
+
+/// Admin in the accent colour or Suspended in orange, beside a person's name in Users, as on the Hub.
+private struct UserTag: View {
+    let tag: LinkUserTag
+
+    var body: some View {
+        Text(tag.title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(tag == .admin ? Color.accentColor : Color.orange, in: Capsule())
+            .fixedSize()
     }
 }

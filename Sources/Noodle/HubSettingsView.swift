@@ -639,9 +639,11 @@ private struct HubUsersSheet: View {
         HStack(spacing: 10) {
             PersonBadge(name: user.name, avatar: user.avatar, id: user.id, size: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(user.name).lineLimit(1)
-                let plan = users.planName(of: user) ?? ""
-                Text(user.isAdmin ? "\(plan) · Admin" : plan).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(user.name).lineLimit(1)
+                    ForEach(user.tags) { UserTag(tag: $0) }
+                }
+                Text(users.planName(of: user) ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
             // Admins are managed on the Hub itself, so their rows only show them.
@@ -852,5 +854,20 @@ private struct QRCameraView: View {
             DispatchQueue.main.async { MainActor.assumeIsolated { found(text) } }
             return false
         } failed: { failed($0) }
+    }
+}
+
+/// Admin in the accent colour or Suspended in orange, beside a person's name in Users, as on the Hub.
+private struct UserTag: View {
+    let tag: LinkUserTag
+
+    var body: some View {
+        Text(tag.title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(tag == .admin ? Color.accentColor : Color.orange, in: Capsule())
+            .fixedSize()
     }
 }

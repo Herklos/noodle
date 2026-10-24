@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Admins stand out in Settings › Users: an Admin tag in the accent colour beside their name, and Suspended in orange for people who are suspended, instead of grey text after their plan.
+
 ## [0.41.1] - 2026-10-23
 
 ### Fixed
