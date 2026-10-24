@@ -22,6 +22,25 @@ import XCTest
         XCTAssertEqual(focuses, 1)
     }
 
+    /// macOS can decline the activation a focusing click asks for. Swallowing every later click
+    /// to ask again left the window ignoring clicks until it was moved.
+    func testClickAfterAFocusThatDidNotTakeGoesThrough() throws {
+        let window = fixture()
+        var focuses = 0
+        let guarder = WindowFocusGuard { _ in focuses += 1 }
+        XCTAssertNil(guarder.filter(try mouse(.leftMouseDown, window), applicationActive: false))
+        XCTAssertNil(guarder.filter(try mouse(.leftMouseUp, window), applicationActive: false))
+        let second = try mouse(.leftMouseDown, window)
+        XCTAssertTrue(guarder.filter(second, applicationActive: false) === second)
+        XCTAssertNotNil(guarder.filter(try mouse(.leftMouseUp, window), applicationActive: false))
+        XCTAssertEqual(focuses, 1)
+        // Once focus has taken and is lost again, the next focusing click is swallowed as usual.
+        window.hasKey = true
+        XCTAssertNotNil(guarder.filter(try mouse(.leftMouseDown, window), applicationActive: true))
+        XCTAssertNil(guarder.filter(try mouse(.leftMouseDown, window), applicationActive: false))
+        XCTAssertEqual(focuses, 2)
+    }
+
     /// A trackpad click also sends pressure events. Letting those through without their mouse-down and
     /// mouse-up left AppKit's gesture tracking holding every later click in the window.
     func testTrackpadPressureOfTheFocusingClickIsConsumedWithIt() throws {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Clicking back into a window no longer leaves it ignoring every click until you move it. When macOS didn't bring the app forward on the first click, the next click now goes through.
+
 ## [0.33.1] - 2026-10-22
 
 ### Fixed

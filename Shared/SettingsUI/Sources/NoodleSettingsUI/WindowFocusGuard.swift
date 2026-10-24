@@ -10,6 +10,9 @@ import AppKit
     private var suppressedButtons: Set<Int> = []
     /// A trackpad press consumed with its click; it ends with a stage-zero pressure event after the release.
     private var suppressingPressure = false
+    /// The window a swallowed click is focusing, and one whose focusing did not take.
+    private weak var focusing: NSWindow?
+    private weak var unfocused: NSWindow?
     private let focusedAt = NSMapTable<NSWindow, NSNumber>.weakToStrongObjects()
     private var activatedAt: TimeInterval = 0
     private let focus: @MainActor (NSWindow) -> Void
@@ -40,6 +43,8 @@ import AppKit
         NotificationCenter.default.removeObserver(self)
         suppressedButtons.removeAll()
         suppressingPressure = false
+        focusing = nil
+        unfocused = nil
         focusedAt.removeAllObjects()
         activatedAt = 0
     }
@@ -67,7 +72,13 @@ import AppKit
             if event.stage == 0 && !suppressedButtons.contains(0) { suppressingPressure = false }
             return nil
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            return suppressedButtons.remove(button) == nil ? event : nil
+            guard suppressedButtons.remove(button) != nil else { return event }
+            if let window = focusing {
+                let focused = window.isKeyWindow && (applicationActive || window.styleMask.contains(.nonactivatingPanel))
+                unfocused = focused ? nil : window
+                focusing = nil
+            }
+            return nil
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             return suppressedButtons.contains(button) ? nil : event
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
@@ -93,11 +104,18 @@ import AppKit
         let focusTime = max(focusedAt.object(forKey: window)?.doubleValue ?? 0,
                             nonactivating ? 0 : activatedAt)
         guard !hasFocus || event.timestamp < focusTime else { return event }
+        // macOS can decline the activation a swallowed click asks for, and swallowing every
+        // later click to ask again leaves the window ignoring clicks; AppKit activates for this one.
+        if !hasFocus && unfocused === window {
+            unfocused = nil
+            return event
+        }
 
         suppressedButtons.insert(button)
         if button == 0 { suppressingPressure = true }
         var target = window
         while let sheet = target.attachedSheet { target = sheet }
+        focusing = target
         focus(target)
         return nil
     }
