@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - The down arrow in a conversation waits until you have scrolled well above the latest message, as on iPhone, instead of showing when you are just a few lines short of it.
+- Signing in to Grok Build or Muse Code no longer opens your browser by itself. Noodle shows the sign-in code with Open Sign-In Page, so you open the page when you're ready.
 
 ## [0.76.0] - 2026-10-25
 
