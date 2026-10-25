@@ -2,7 +2,8 @@ import XCTest
 @testable import NoodleCore
 
 /// What Noodle still guarantees about bot packages now that the 0.13.0 and 0.14.0 migrations are
-/// gone: older and damaged packages are refused everywhere and never rewritten.
+/// gone: older and damaged packages are refused everywhere and never rewritten, and are set aside
+/// with why, so the other bots still load.
 final class AgentStorageCompatibilityTests: XCTestCase {
     private var root: URL!
     private var repository: WorkspaceRepository!
@@ -29,22 +30,50 @@ final class AgentStorageCompatibilityTests: XCTestCase {
         do { try body(); return "" } catch { return error.localizedDescription }
     }
 
-    func testAFlatWorkspaceIsRefusedWithTheReleaseThatUpgradesIt() throws {
+    /// A package from before 0.13.0: agent.json beside the bot's own files, without a marker.
+    private func flat() throws -> AgentRecord {
         let agent = AgentRecord(displayName: "Flat", harnessIdentifier: "codex")
         let layout = repository.storage(for: agent.id)
         try FileManager.default.createDirectory(at: layout.package, withIntermediateDirectories: true)
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(agent).write(to: layout.configuration)
         try Data("Durable memory".utf8).write(to: layout.package.appendingPathComponent("memory.md"))
-        XCTAssertTrue(message { _ = try repository.loadAgents() }.contains("0.13.0"))
+        return agent
+    }
+
+    /// The bots loading leaves out.
+    private func setAside() throws -> [SetAsideAgent] { try repository.loadAgentsSettingAside().setAside }
+
+    func testAFlatWorkspaceIsRefusedWithTheReleaseThatUpgradesIt() throws {
+        let agent = try flat(), layout = repository.storage(for: agent.id)
+        XCTAssertEqual(try repository.loadAgents(), [])
+        let refused = try XCTUnwrap(setAside().first)
+        XCTAssertEqual(refused.id, agent.id)
+        XCTAssertEqual(refused.displayName, "Flat")
+        XCTAssertEqual(refused.message, "This bot was made by a Noodle version older than 0.13.0. To upgrade it, back up your Noodle data, install Noodle 0.13.0 from https://github.com/pdparchitect/noodle/releases/tag/v0.13.0, open it, and accept each update it offers.")
+        XCTAssertEqual(refused.helpURL, AgentStorageError.upgradeStepsURL)
+        // Agent Host and Kick's recovery refuse it the same way.
+        XCTAssertEqual(message { try layout.validate() }, refused.message)
         XCTAssertThrowsError(try repository.synchronizeAgentWorkspace(agent))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: layout.package.path).sorted(), ["agent.json", "memory.md"])
+    }
+
+    /// One older bot used to make loading fail for all of them (issue #195).
+    func testAnOlderBotDoesNotKeepTheOthersFromLoading() throws {
+        let current = try repository.createAgent(named: "Current").agent
+        let old = try flat(), stored = try Data(contentsOf: repository.storage(for: old.id).configuration)
+        let later = try repository.createAgent(named: "Later").agent
+        XCTAssertEqual(Set(try repository.loadAgents().map(\.id)), [current.id, later.id])
+        XCTAssertEqual(try setAside().map(\.id), [old.id])
+        XCTAssertEqual(try Data(contentsOf: repository.storage(for: old.id).configuration), stored)
     }
 
     func testAPackageWithoutAStoredBackstoryIsRefusedEverywhere() throws {
         let agent = try withoutBackstory(), layout = repository.storage(for: agent.id)
         let original = try Data(contentsOf: layout.configuration)
-        XCTAssertTrue(message { _ = try repository.loadAgents() }.contains("0.14.0"))
+        XCTAssertEqual(try repository.loadAgents(), [])
+        XCTAssertEqual(try setAside().map(\.message), ["This bot was made by a Noodle version older than 0.14.0. To upgrade it, back up your Noodle data, install Noodle 0.14.0 from https://github.com/pdparchitect/noodle/releases/tag/v0.14.0, open it, and accept each update it offers."])
+        XCTAssertEqual(try setAside().map(\.displayName), ["Legacy"])
         XCTAssertThrowsError(try repository.loadAgentBackstory(agent))
         XCTAssertThrowsError(try repository.synchronizeAgentWorkspace(agent))
         XCTAssertThrowsError(try repository.updateAgentBackstory(agent, backstory: "Must not bypass the upgrade"))
@@ -67,7 +96,8 @@ final class AgentStorageCompatibilityTests: XCTestCase {
     func testAFutureLayoutIsRefused() throws {
         let created = try repository.createAgent(named: "Future"), layout = repository.storage(for: created.agent.id)
         try Data("{\"version\":99}".utf8).write(to: layout.package.appendingPathComponent(AgentStorageLayout.markerName))
-        XCTAssertTrue(message { _ = try repository.loadAgents() }.contains("storage version 99"))
+        XCTAssertEqual(try repository.loadAgents(), [])
+        XCTAssertEqual(try setAside().map(\.message), ["This bot uses storage version 99. Open a compatible version of Noodle."])
     }
 
     func testRedirectedWorkspaceAndIdentityMismatchAreRejected() throws {
@@ -75,12 +105,14 @@ final class AgentStorageCompatibilityTests: XCTestCase {
         let layout = repository.storage(for: created.agent.id)
         try FileManager.default.removeItem(at: layout.workspace)
         try FileManager.default.createSymbolicLink(at: layout.workspace, withDestinationURL: root)
-        XCTAssertThrowsError(try repository.loadAgents())
+        XCTAssertEqual(try repository.loadAgents(), [])
+        XCTAssertEqual(try setAside().map(\.id), [created.agent.id])
         XCTAssertThrowsError(try repository.synchronizeAgentWorkspace(created.agent))
         try FileManager.default.removeItem(at: layout.workspace)
         try FileManager.default.createDirectory(at: layout.workspace, withIntermediateDirectories: false)
         try FileManager.default.moveItem(at: layout.package, to: repository.agentsURL.appendingPathComponent(UUID().uuidString.lowercased()))
-        XCTAssertThrowsError(try repository.loadAgents())
+        XCTAssertEqual(try repository.loadAgents(), [])
+        XCTAssertEqual(try setAside().map(\.message), ["The bot identifier does not match its storage folder. Restore the original UUID folder name."])
     }
 
     /// A package written by hand, or cut short by a crash or a full disk, can hold only its
@@ -109,7 +141,9 @@ final class AgentStorageCompatibilityTests: XCTestCase {
             try FileManager.default.createDirectory(at: layout.package, withIntermediateDirectories: false)
             try Data("{\"version\":1}".utf8).write(to: layout.package.appendingPathComponent(AgentStorageLayout.markerName))
             try Data(configuration.utf8).write(to: layout.configuration)
-            XCTAssertThrowsError(try repository.loadAgents())
+            XCTAssertEqual(try repository.loadAgents(), [])
+            XCTAssertEqual(try setAside().map(\.id), [UUID(uuidString: layout.package.lastPathComponent)])
+            XCTAssertNil(try setAside().first?.displayName)
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: layout.package.path).sorted(),
                            [AgentStorageLayout.markerName, "agent.json"])
             try FileManager.default.removeItem(at: layout.package)
@@ -139,7 +173,7 @@ final class AgentStorageCompatibilityTests: XCTestCase {
 
         try FileManager.default.removeItem(at: layout.workspace)
         try FileManager.default.createSymbolicLink(at: layout.workspace, withDestinationURL: root)
-        XCTAssertThrowsError(try repository.loadAgents())
+        XCTAssertEqual(try repository.loadAgents(), [])
         try FileManager.default.removeItem(at: layout.workspace)
         try FileManager.default.createDirectory(at: layout.workspace, withIntermediateDirectories: false)
         XCTAssertEqual(try repository.loadAgents().map(\.displayName), ["Renamed"])

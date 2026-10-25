@@ -203,6 +203,29 @@ Noodle reads the [latest release feed](https://github.com/pdparchitect/noodle/re
 Its archive links point to immutable versioned releases. Publish only stable
 Noodle releases as the repository's latest release.
 
+## Bots from older versions
+
+Some releases convert how bots are stored, and later versions no longer do. A bot
+made before one of them can't start and says which version it needs, such as
+"This bot was made by a Noodle version older than 0.13.0". Your other bots keep
+working, and nothing in its folder is changed or deleted.
+
+To upgrade it:
+
+1. Quit Noodle and copy
+   `~/Library/Containers/com.pdparchitect.noodle/Data/Library/Application Support/Noodle`
+   somewhere safe.
+2. Open the release page of the version it names, such as
+   [Noodle 0.13.0](https://github.com/pdparchitect/noodle/releases/tag/v0.13.0),
+   download Noodle from it, replace Noodle in Applications with it, and open it.
+   It converts the bot.
+3. Noodle then offers updates one at a time. Accept each one until you're on the
+   latest version.
+
+If something goes wrong, put your copy back and
+[open an issue](https://github.com/pdparchitect/noodle/issues) with the version
+you had installed.
+
 ## Update milestones
 
 `Support/update-milestones.json` declares releases that users must run before
@@ -216,12 +239,14 @@ their signed archive entries and immutable URLs, adds Sparkle's
 installations therefore receive the required milestone first; ordinary patch
 releases can still be skipped. Noodle enables update checks only after storage
 loads successfully, so a milestone finishes its work before the next update is
-offered. Keep milestone assets publicly available.
+offered. A bot that cannot be loaded is set aside without holding updates back.
+Keep milestone assets publicly available.
 
 Code that only a milestone needs carries a `TODO(VERSION)` naming the release that
 may delete it, with its call site and tests. Before deleting it, verify that the
 enforced upgrade chain runs the milestone. Where skipping it could damage data, keep
-a startup check with a clear error naming the release to run first. Manual app
+a startup check with a clear error naming the release to run first and linking to
+[Bots from older versions](#bots-from-older-versions). Manual app
 downloads and clients predating Sparkle 2.9 can bypass feed prerequisites.
 
 Add milestones in ascending order rather than requiring every minor release.

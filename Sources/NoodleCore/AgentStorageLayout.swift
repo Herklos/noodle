@@ -48,7 +48,7 @@ public struct AgentStorageLayout: Sendable {
         try Self.requireDirectory(package)
         let marker = package.appendingPathComponent(Self.markerName)
         guard Self.exists(marker) else {
-            throw AgentStorageError("This bot needs a storage migration. Run Noodle 0.13.0 to upgrade its older workspace before starting it.")
+            throw AgentStorageError.madeBefore("0.13.0")
         }
         try Self.requireFile(marker)
         let state = try JSONDecoder().decode(Marker.self, from: Data(contentsOf: marker))
@@ -134,6 +134,19 @@ public struct AgentStorageLayout: Sendable {
 
 public struct AgentStorageError: LocalizedError {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    /// Where the steps that fix it are explained, when there are any.
+    public let helpURL: URL?
+    public init(_ message: String, helpURL: URL? = nil) { self.message = message; self.helpURL = helpURL }
     public var errorDescription: String? { message }
+
+    /// The user guide's steps for upgrading a bot made by an older version.
+    public static let upgradeStepsURL = URL(string: "https://github.com/pdparchitect/noodle/blob/main/docs/releases.md#bots-from-older-versions")!
+
+    /// For a bot made before `version`, an update milestone whose conversion later releases no longer
+    /// carry: that release converts it, and its successors follow one update at a time.
+    static func madeBefore(_ version: String) -> Self {
+        Self("This bot was made by a Noodle version older than \(version). To upgrade it, back up your Noodle data, "
+            + "install Noodle \(version) from https://github.com/pdparchitect/noodle/releases/tag/v\(version), "
+            + "open it, and accept each update it offers.", helpURL: upgradeStepsURL)
+    }
 }

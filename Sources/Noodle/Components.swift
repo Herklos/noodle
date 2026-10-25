@@ -138,8 +138,15 @@ extension NoodleStore {
         return mirror.pause(ofAgent: id)
     }
 
+    /// The bot of a direct conversation that could not be loaded, such as one made by an older version.
+    private func setAsideAgent(of conversation: BotConversation) -> SetAsideAgent? {
+        guard conversation.kind == .direct, let id = conversation.participantIDs.first else { return nil }
+        return setAsideAgents.first { $0.id == id }
+    }
+
     /// A bot's own conversation says why it waits; a group names the bots that wait.
     func pauseSummary(for conversation: BotConversation) -> String? {
+        if let setAside = setAsideAgent(of: conversation) { return setAside.helpURL == nil ? "Can't start" : "Needs an upgrade" }
         let waiting = Set(agentsWaitingForKick(in: conversation).map(\.id))
         let paused = shownParticipants(for: conversation).filter { waiting.contains($0.id) || hubPause(ofAgent: $0.id) != nil }
         guard let first = paused.first else { return nil }
@@ -151,6 +158,7 @@ extension NoodleStore {
 
     /// The full message behind the pause shown over a conversation.
     func pauseDetail(for conversation: BotConversation) -> String? {
+        if let setAside = setAsideAgent(of: conversation) { return setAside.message }
         if let agent = agentsWaitingForKick(in: conversation).first { return runtime.snapshot(for: agent.id).detail }
         return shownParticipants(for: conversation).lazy.compactMap { self.hubPause(ofAgent: $0.id)?.detail }.first
     }

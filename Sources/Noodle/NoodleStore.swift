@@ -126,6 +126,12 @@ final class NoodleStore {
     var editsSpaces = false
     private(set) var backgrounds: [UUID: ConversationBackground] = [:]
     var errorMessage: String?
+    /// A link the error alert offers beside OK, while `errorMessage` is still the message it belongs to.
+    var errorLink: ErrorLink?
+    /// Bots whose folders could not be loaded, such as ones made by an older version. They do not
+    /// start; the others do.
+    private(set) var setAsideAgents: [SetAsideAgent] = []
+    @ObservationIgnored private var announcedSetAsideAgents: [SetAsideAgent] = []
     /// Calls bots on this Mac placed that ring here now, oldest first.
     var ringingCalls: [AgentCallRequest] = []
     private(set) var storageReady = false
@@ -779,7 +785,7 @@ final class NoodleStore {
         storageReady = false
         do {
             try repository.prepare()
-            agents = try repository.loadAgents()
+            (agents, setAsideAgents) = try repository.loadAgentsSettingAside()
             // TODO(0.62.0): remove with AppleLocalModelStore.keepSystemModelForExistingBots. Milestone: 0.61.0.
             try AppleLocalModelStore(repository: repository.rootURL).keepSystemModelForExistingBots(agents)
             runtime.archivedAgentIDs = Set(agents.filter { $0.archivedAt != nil }.map(\.id))
@@ -854,6 +860,7 @@ final class NoodleStore {
             refreshAppShortcuts()
             storageReady = true
             dropCallsOfGoneBots()
+            announceSetAsideAgents()
 
             if let selectedConversationID,
                conversations.contains(where: { $0.id == selectedConversationID }) {
@@ -863,6 +870,17 @@ final class NoodleStore {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Says once why each newly set-aside bot can't start, with the steps that fix it when there are some.
+    /// One that loads again is forgotten, so it is told again if it is set aside again.
+    private func announceSetAsideAgents() {
+        let new = setAsideAgents.filter { !announcedSetAsideAgents.contains($0) }
+        announcedSetAsideAgents = setAsideAgents
+        guard !new.isEmpty else { return }
+        let message = new.map { "\($0.displayName ?? "A bot") can't start. \($0.message)" }.joined(separator: "\n\n")
+        errorLink = new.lazy.compactMap(\.helpURL).first.map { ErrorLink(message: message, title: "Upgrade Steps", url: $0) }
+        errorMessage = message
     }
 
     /// Bots that are not archived, the ones a message or a new group can reach.
@@ -2756,4 +2774,11 @@ final class NoodleStore {
 extension BotConversation {
     /// A conversation someone this Mac's bot is shared with keeps with it through a Hub is theirs; the bot reads it here.
     var isShownHere: Bool { guest == nil }
+}
+
+/// A button the error alert adds for one message, such as the steps that fix it.
+struct ErrorLink: Equatable {
+    let message: String
+    let title: String
+    let url: URL
 }

@@ -158,6 +158,7 @@ struct ConversationWindowView: View {
 @MainActor final class StoreErrorAlert {
     private let store: NoodleStore
     private let window: () -> NSWindow?
+    private let open: (URL) -> Void
     private var alert: NSAlert?
     private var keyObserver: NSObjectProtocol?
 
@@ -166,9 +167,10 @@ struct ConversationWindowView: View {
     init(store: NoodleStore, window: @escaping () -> NSWindow? = {
         guard let app = NSApp else { return nil }
         return app.keyWindow ?? app.mainWindow ?? app.orderedWindows.first { $0.isVisible && $0.canBecomeMain }
-    }) {
+    }, open: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) }) {
         self.store = store
         self.window = window
+        self.open = open
         // An error that arrived with no window open is shown once one is.
         keyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.show(self?.store.errorMessage) }
@@ -195,10 +197,14 @@ struct ConversationWindowView: View {
         alert.messageText = "Noodle"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
+        let link = store.errorLink.flatMap { $0.message == message ? $0 : nil }
+        if let link { alert.addButton(withTitle: link.title) }
         self.alert = alert
-        alert.beginSheetModal(for: parent) { [weak self] _ in
+        alert.beginSheetModal(for: parent) { [weak self] response in
             guard let self else { return }
             self.alert = nil
+            if let link, response == .alertSecondButtonReturn { self.open(link.url) }
+            if store.errorLink?.message == alert.informativeText { store.errorLink = nil }
             if store.errorMessage == alert.informativeText { store.errorMessage = nil } else { show(store.errorMessage) }
         }
     }
