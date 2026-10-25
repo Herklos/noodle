@@ -109,7 +109,11 @@ import Testing
         #expect(ConversationScroll.distanceFromEnd(geometry(end)) == 0)
         #expect(!ConversationScroll.isFarFromEnd(geometry(end)))
         #expect(!ConversationScroll.isPastEnd(geometry(end)))
-        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end)
+        // Going to the end aims past it by the insets, and the scroll view stops at the end, even when
+        // SwiftUI's sizes are behind the scroll view's.
+        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end + 116 + 90)
+        // On the iPhone simulator SwiftUI's sizes put the end 6 points below where the scroll view stops.
+        #expect(ConversationScroll.isAtBottom(geometry(end - 6)))
         #expect(!ConversationScroll.isAtBottom(geometry(end - 150)))
         #expect(ConversationScroll.distanceFromEnd(geometry(end - 150)) == 150)
         // A conversation shorter than the screen is at its end from the start, below the bars.
@@ -146,9 +150,10 @@ import Testing
             scroll.contentOffset.y = end - above
             await Self.layout(window)
             let geometry = try #require(recorded.geometry)
-            #expect(abs(ConversationScroll.distanceFromEnd(geometry) - above) <= 1, "\(above) points above the end: \(geometry)")
-            #expect(ConversationScroll.isAtBottom(geometry) == (above == 0), "\(above) points above the end: \(geometry)")
-            #expect(ConversationScroll.isFarFromEnd(geometry) == (above > ConversationScroll.scrollToLatestDistance))
+            let seen = "\(above) points above the end; \(Self.describe(scroll)); SwiftUI: \(geometry)"
+            #expect(abs(ConversationScroll.distanceFromEnd(geometry) - above) <= ConversationScroll.bottomSlack, "\(seen)")
+            #expect(ConversationScroll.isAtBottom(geometry) == (above == 0), "\(seen)")
+            #expect(ConversationScroll.isFarFromEnd(geometry) == (above > ConversationScroll.scrollToLatestDistance), "\(seen)")
         }
     }
 
@@ -179,6 +184,7 @@ import Testing
             LinkMessage(id: UUID(), conversationID: UUID(), author: index.isMultiple(of: 2) ? .you : .bot(UUID()),
                         body: String(repeating: "Line of a message. ", count: 1 + index % 5), createdAt: Date(), delivered: true)
         }
+        let recorded = ScrollTestGeometry()
         let conversation = NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 6) {
@@ -191,6 +197,7 @@ import Testing
                 .padding(.vertical, 8)
             }
             .modifier(ConversationScrolling(latest: messages.last))
+            .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in recorded.geometry = geometry }
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 56) }
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -203,13 +210,20 @@ import Testing
 
         let scrollView = try #require(Self.scrollView(in: window))
         let end = scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height
-        #expect(scrollView.contentOffset.x == -scrollView.adjustedContentInset.left)
-        #expect(abs(scrollView.contentOffset.y - end) <= 1)
+        let seen = "\(Self.describe(scrollView)); SwiftUI: \(recorded.geometry.map(String.init(describing:)) ?? "none")"
+        #expect(scrollView.contentOffset.x == -scrollView.adjustedContentInset.left, "\(seen)")
+        #expect(abs(scrollView.contentOffset.y - end) <= 1, "\(seen)")
     }
 
     private static func scrollView(in view: UIView) -> UIScrollView? {
         if let scrollView = view as? UIScrollView { return scrollView }
         return view.subviews.lazy.compactMap(scrollView(in:)).first
+    }
+
+    /// What the scroll view itself has, to set beside SwiftUI's geometry when a test fails.
+    @MainActor private static func describe(_ scroll: UIScrollView) -> String {
+        "UIScrollView: contentOffset \(scroll.contentOffset), contentSize \(scroll.contentSize), "
+            + "adjustedContentInset \(scroll.adjustedContentInset), bounds \(scroll.bounds)"
     }
 
     @MainActor private static func layout(_ window: UIWindow) async {
@@ -243,7 +257,7 @@ import Testing
         model.messages.append(message(from: .you))
         await Self.layout(window)
         let sentEnd = scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height
-        #expect(abs(scroll.contentOffset.y - sentEnd) <= 1, "Your own message should show at the end")
+        #expect(abs(scroll.contentOffset.y - sentEnd) <= 1, "Your own message should show at the end; \(Self.describe(scroll))")
         #expect(abs(scroll.contentOffset.x + scroll.adjustedContentInset.left) < 1)
     }
 

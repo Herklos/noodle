@@ -2047,10 +2047,13 @@ enum ConversationScroll {
 
         init(_ geometry: ScrollGeometry) {
             content = geometry.contentSize
-            viewport = ConversationScroll.viewport(of: geometry)
+            viewport = geometry.containerSize
             insets = geometry.contentInsets
         }
 
+        /// Where to scroll for the end. Against `containerSize`, which leaves out the insets, it lies past the
+        /// end by their height, and the scroll view stops at the end itself. Aimed at the end exactly, it
+        /// stopped short on iOS whenever SwiftUI's sizes were behind the scroll view's.
         var end: CGPoint {
             CGPoint(x: -insets.leading, y: max(content.height + insets.bottom - viewport.height, -insets.top))
         }
@@ -2064,14 +2067,20 @@ enum ConversationScroll {
         return wasAtBottom ? .top : nil
     }
 
+    /// How far short of the end still counts as at the bottom. SwiftUI's sizes can be a few points out from
+    /// the scroll view's: on the iPhone simulator, a conversation resting at its very end measured 6 points
+    /// above it, a row's spacing. Less than a line of text.
+    static let bottomSlack: CGFloat = 24
+
     /// Whether the end shows above the composer. A conversation shorter than the screen always is.
     static func isAtBottom(contentOffset: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat, bottomInset: CGFloat) -> Bool {
-        contentOffset + viewportHeight - bottomInset >= contentHeight - 2
+        contentOffset + viewportHeight - bottomInset >= contentHeight - bottomSlack
     }
 
     /// The scroll view's whole size, under the bars and the composer too. SwiftUI's `containerSize` leaves
     /// out the content insets, which put the end their height further down than it is: a conversation
-    /// resting at its end never counted as at the bottom, and going to the end went past it.
+    /// resting at its end never counted as at the bottom. On the iPhone simulator, a 540-point
+    /// `containerSize` with 68 and 98 points of insets came with a 706-point `visibleRect`.
     static func viewport(of geometry: ScrollGeometry) -> CGSize {
         let insets = geometry.contentInsets
         return CGSize(width: geometry.containerSize.width + insets.leading + insets.trailing,
@@ -2085,7 +2094,9 @@ enum ConversationScroll {
 
     /// How far the conversation is above its end, none at or past it.
     static func distanceFromEnd(_ geometry: ScrollGeometry) -> CGFloat {
-        max(Bounds(geometry).end.y - geometry.contentOffset.y, 0)
+        let end = max(geometry.contentSize.height + geometry.contentInsets.bottom - viewport(of: geometry).height,
+                      -geometry.contentInsets.top)
+        return max(end - geometry.contentOffset.y, 0)
     }
 
     static func isFarFromEnd(_ geometry: ScrollGeometry) -> Bool {
