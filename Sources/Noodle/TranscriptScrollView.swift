@@ -50,6 +50,8 @@ struct TranscriptScrollView<Content: View>: View {
     @State private var userIsScrolling = false
     @State private var userHasScrolled = false
     @State private var didRestoreInitialViewport = false
+    /// Changes only when the end comes into or out of sight, not for every scrolled pixel.
+    @State private var endIsInSight: Bool
 
     init(initialViewport: TranscriptViewport, lastMessageID: UUID?, lastMessageIsFromUser: Bool,
          bottomOverlayHeight: CGFloat, saveViewport: @escaping (TranscriptViewport) -> Void,
@@ -69,6 +71,7 @@ struct TranscriptScrollView<Content: View>: View {
         _position = State(initialValue: initialPosition)
         _viewportRecorder = State(initialValue: TranscriptViewportRecorder(initialViewport))
         _followsLatest = State(initialValue: initialViewport.isAtBottom)
+        _endIsInSight = State(initialValue: initialViewport.isAtBottom)
     }
 
     var body: some View {
@@ -113,7 +116,9 @@ struct TranscriptScrollView<Content: View>: View {
             let metrics = TranscriptScrollMetrics(
                 contentOffset: geometry.contentOffset.y,
                 contentHeight: geometry.contentSize.height,
-                viewportHeight: geometry.containerSize.height,
+                // containerSize leaves out the titlebar the transcript runs up behind,
+                // which would put the end that much further down than it is.
+                viewportHeight: geometry.visibleRect.height,
                 topInset: geometry.contentInsets.top,
                 bottomInset: geometry.contentInsets.bottom
             )
@@ -125,6 +130,7 @@ struct TranscriptScrollView<Content: View>: View {
             )
         } action: { _, updated in
             viewportRecorder.viewport = updated.viewport
+            if endIsInSight != updated.viewport.isAtBottom { endIsInSight = updated.viewport.isAtBottom }
             // A later layout change must not be mistaken for a user scroll.
             if userIsScrolling, followsLatest != updated.viewport.isAtBottom {
                 followsLatest = updated.viewport.isAtBottom
@@ -150,6 +156,15 @@ struct TranscriptScrollView<Content: View>: View {
                 viewportRecorder.lastUserViewport = finalViewport
                 saveViewport(finalViewport)
             }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            // Once the person has left the end and it is out of sight, as on iPhone.
+            let showsScrollToLatest = !followsLatest && !endIsInSight
+            ZStack {
+                if showsScrollToLatest { scrollToLatestButton.transition(.opacity.combined(with: .scale(scale: 0.8))) }
+            }
+            // Only the button fades: animating the transcript with it would move its rows too.
+            .animation(.easeOut(duration: 0.2), value: showsScrollToLatest)
         }
         .onChange(of: lastMessageID) { _, _ in
             // Initial hydration isn't a newly sent message, even if the last
@@ -183,6 +198,34 @@ struct TranscriptScrollView<Content: View>: View {
         }
         // Save the captured user checkpoint, never an outgoing view's resized
         // teardown geometry. This also covers switching chats during a gesture.
+    }
+
+    /// Above the composer, clear of the scroller.
+    private var scrollToLatestButton: some View {
+        Button(action: scrollToLatest) {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .help("Scroll to Latest")
+        .accessibilityLabel("Scroll to Latest")
+        .padding(.trailing, 18)
+        .padding(.bottom, bottomOverlayHeight + 10)
+    }
+
+    /// Back to the latest message, following new ones again.
+    private func scrollToLatest() {
+        onInteraction()
+        didRestoreInitialViewport = true
+        followsLatest = true
+        let latest = TranscriptViewport(offset: viewportRecorder.viewport.offset, isAtBottom: true)
+        viewportRecorder.lastUserViewport = latest
+        saveViewport(latest)
+        withAnimation { position.scrollTo(id: TranscriptScrollTarget.bottom, anchor: .bottom) }
     }
 
     private func readingViewport() -> TranscriptViewport {

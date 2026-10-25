@@ -6,8 +6,13 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- A conversation scrolled up to older messages shows a down arrow above the message field. Click it to go back to the latest message, and new ones follow again. It hides once the latest message shows.
+
 ### Fixed
 
+- A conversation scrolled back down to its latest message by hand follows new messages again. Before, Noodle left out the part of the conversation under the titlebar, so it thought you hadn't reached the end yet. Thanks to Emircan Sahin for finding this.
 - The alert that asks you to sign in again when you Kick a paused bot no longer comes back after you choose Open Harness Settings in the main window. Every button of Kick's alerts now closes it for good.
 - Text selected in a table can be annotated with the Add Annotation shortcut, in a conversation and in the whole table opened from its rows, instead of beeping.
 
