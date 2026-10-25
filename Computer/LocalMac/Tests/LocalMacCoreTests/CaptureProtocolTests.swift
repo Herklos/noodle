@@ -13,6 +13,25 @@ final class CaptureProtocolTests: XCTestCase {
             XCTAssertThrowsError(try LocalMacCapturePolicy.validateProtectedDisplays(ids))
         }
     }
+    func testNoSingleDisplayListsWhatTheAccountSees() {
+        typealias Seen = LocalMacCapturePolicy.SeenDisplay
+        let none = LocalMacCapturePolicy.noSingleDisplay([], protectedIDs: [1])
+        XCTAssertEqual(none.message, "This account has no display of its own to show.\nIt sees no displays.")
+        XCTAssertEqual(none.log, "This account has no display of its own to show. It sees no displays. Main desktop displays: 1.")
+        let shared = LocalMacCapturePolicy.noSingleDisplay([Seen(id: 1, isBuiltin: true, width: 1512, height: 982),
+            Seen(id: 4, isBuiltin: false, width: 2560, height: 1440)], protectedIDs: [1, 4])
+        XCTAssertEqual(shared.message, "This account has no display of its own to show.\n"
+            + "Displays it sees: 1 (built-in, 1512 × 982, main desktop); 4 (2560 × 1440, main desktop).")
+        XCTAssertEqual(shared.log, "This account has no display of its own to show. "
+            + "Displays it sees: 1 (built-in, 1512 × 982, main desktop); 4 (2560 × 1440, main desktop). Main desktop displays: 1, 4.")
+        let builtin = LocalMacCapturePolicy.noSingleDisplay([Seen(id: 7, isBuiltin: true, width: 1280, height: 800)], protectedIDs: [4])
+        XCTAssertEqual(builtin.message, "This account has no display of its own to show.\nDisplays it sees: 7 (built-in, 1280 × 800).")
+        let several = LocalMacCapturePolicy.noSingleDisplay([Seen(id: 5, isBuiltin: false, width: 1280, height: 800),
+            Seen(id: 6, isBuiltin: false, width: 1280, height: 800), Seen(id: 4, isBuiltin: false, width: 2560, height: 1440)],
+            protectedIDs: [4])
+        XCTAssertEqual(several.message, "This account has more than one display of its own, so none is shown.\n"
+            + "Displays it sees: 5 (1280 × 800); 6 (1280 × 800); 4 (2560 × 1440, main desktop).")
+    }
     func testCaptureAuthorizationSurvivesWireRoundTrip() throws {
         var request = LocalMacRequest(.stream); request.enabled = true
         XCTAssertThrowsError(try request.validate())

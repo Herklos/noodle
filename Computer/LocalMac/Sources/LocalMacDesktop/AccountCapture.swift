@@ -40,7 +40,11 @@ import OSLog
                     isBuiltin: CGDisplayIsBuiltin($0.displayID) != 0, protectedIDs: protectedDisplayIDs)) != nil
             }
             guard candidates.count == 1, let display = candidates.first else {
-                throw LocalMacError("Cannot identify a single display belonging only to this account.")
+                let seen = content.displays.map { LocalMacCapturePolicy.SeenDisplay(id: $0.displayID,
+                    isBuiltin: CGDisplayIsBuiltin($0.displayID) != 0, width: $0.width, height: $0.height) }
+                let report = LocalMacCapturePolicy.noSingleDisplay(seen, protectedIDs: protectedDisplayIDs)
+                log.error("\(report.log, privacy: .public)")
+                throw LocalMacError(report.message)
             }
             displayID = display.displayID; bounds = display.frame; protectedIDs = protectedDisplayIDs
             let filter = SCContentFilter(display: display, excludingWindows: [])
