@@ -158,10 +158,11 @@ extension NoodleStore {
 
 /// Over a conversation while one of its bots waits for Kick or a Hub's limit holds it: why, in a few words,
 /// and Kick for one on this Mac. In a group, Kick starts the first bot that waits; the next one shows once it is back.
+/// It sits in the toolbar, so its window presents the Kick alert: see `AgentKickConfirmation`.
 struct ConversationPauseControl: View {
     @Environment(NoodleStore.self) private var store
     let conversation: BotConversation
-    @State private var kickRequest: AgentKickRequest?
+    @Binding var kickRequest: AgentKickRequest?
 
     var body: some View {
         if let summary = store.pauseSummary(for: conversation) {
@@ -179,7 +180,6 @@ struct ConversationPauseControl: View {
                 }
             }
             .padding(.horizontal, 6)
-            .modifier(AgentKickConfirmation(store: store, request: $kickRequest))
         }
     }
 }

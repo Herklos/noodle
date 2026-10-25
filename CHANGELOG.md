@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- The alert that asks you to sign in again when you Kick a paused bot no longer comes back after you choose Open Harness Settings in the main window. Every button of Kick's alerts now closes it for good.
+
 ## [0.75.0] - 2026-10-24
 
 ### Added
