@@ -16,6 +16,7 @@ All notable changes to Noodle are documented here, following
 - The alert that asks you to sign in again when you Kick a paused bot no longer comes back after you choose Open Harness Settings in the main window. Every button of Kick's alerts now closes it for good.
 - Text selected in a table can be annotated with the Add Annotation shortcut, in a conversation and in the whole table opened from its rows, instead of beeping.
 - A bot made by a Noodle version older than 0.13.0 or 0.14.0 no longer keeps every other bot from starting, or Noodle from checking for updates. Only that bot waits, marked Needs an upgrade, and its message says how to upgrade it: back up your Noodle data, install the version it names from its release page, open it and accept each update. Upgrade Steps in the message opens the [full steps](docs/releases.md#bots-from-older-versions).
+- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed" on the Mac and on your iPhone, instead of showing as ready again after each automatic retry. Settings › Harnesses says sign-in is required and offers Sign In, though the saved login still looks valid. The bot comes back by itself after you sign in again or another bot's refresh gets the login working.
 
 ## [0.75.0] - 2026-10-24
 

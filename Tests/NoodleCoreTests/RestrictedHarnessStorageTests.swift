@@ -251,6 +251,39 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertTrue(String(decoding: try b.read(".credentials.json", limit: 4096), as: UTF8.self).contains("new-sign-in"))
     }
 
+    func testALoginThatFailedIsNotStartedAgainUntilItChanges() throws {
+        let (home, first, second) = try fixture()
+        var login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"spent"}}"#.utf8)
+        func prepare(_ workspace: URL) throws {
+            try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: workspace, loginHome: home) { _, _ in login }
+        }
+        // Asked before the start, without changing any copy.
+        func refused() -> Bool {
+            RestrictedHarnessStorage.refusedAgain(provider: .claudeCode, workspace: first, loginHome: home) { _, _ in login }
+        }
+        try prepare(first); try prepare(second)
+        XCTAssertFalse(refused())
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first)
+        XCTAssertTrue(refused())
+        XCTAssertThrowsError(try prepare(first)) {
+            XCTAssertTrue(ClaudeProtocol.isAuthenticationFailure($0.localizedDescription), "\($0.localizedDescription)")
+        }
+        // Another bot's refresh is a different login, so it gets a start.
+        let b = try WorkspaceMailbox(workspace: second, path: ".noodle/home/.claude")
+        try b.writeData(Data(#"{"claudeAiOauth":{"accessToken":"bot","refreshToken":"two"}}"#.utf8), named: ".credentials.json")
+        try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: second, loginHome: home)
+        XCTAssertFalse(refused())
+        try prepare(first)
+        // And so does a new sign-in, once the refreshed login failed too.
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first)
+        XCTAssertThrowsError(try prepare(first))
+        XCTAssertTrue(refused())
+        login = Data(#"{"claudeAiOauth":{"accessToken":"new-sign-in","refreshToken":"three"}}"#.utf8)
+        XCTAssertFalse(refused())
+        try prepare(first)
+        try prepare(first)
+    }
+
     func testALoginRefreshedInTheKeychainReachesRunningBotsWithoutARestart() throws {
         let (home, first, second) = try fixture()
         var login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"one"}}"#.utf8)

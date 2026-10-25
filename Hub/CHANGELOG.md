@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed", instead of showing as ready again after each automatic retry. It comes back by itself once the login works again.
+
 ## [0.42.0] - 2026-10-24
 
 ### Added

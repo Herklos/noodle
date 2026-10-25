@@ -1435,6 +1435,12 @@ public final class AgentRuntimeCoordinator {
                 self.signInAnnounced.remove(agentID)
                 self.forgetSignInRetries(agentID)
             }
+            // A start refused before the harness was ready reached no vendor, so it is not a try.
+            if previousPhase == .starting, snapshot.phase == .failed, snapshot.failure == .authenticationRequired,
+               let retries = self.signInRetries[agentID], retries > 0 {
+                self.signInRetries[agentID] = retries - 1
+                self.nextSignInCheck[agentID] = self.now().addingTimeInterval(Self.signInCheckInterval)
+            }
             let previous = self.snapshots[agentID]
             // A bot that continues on another harness does not pause.
             if snapshot.phase == .failed, previous?.phase != .failed || previous?.failure != snapshot.failure,

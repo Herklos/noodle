@@ -37,7 +37,14 @@ import XCTest
         snapshot.usageResetsAt = usageResetsAt
         launch.onSnapshot(snapshot)
     }
-    func start() { starts += 1; isAlive = true; transition(.ready) }
+    /// A start the host refuses: the runtime fails this way before it is ever ready.
+    var startFailure: AgentRuntimeFailure?
+    func start() {
+        starts += 1
+        guard let startFailure else { isAlive = true; transition(.ready); return }
+        transition(.starting)
+        transition(.failed, failure: startFailure)
+    }
     func stop(completion: @escaping (Bool) -> Void) {
         stops += 1
         stopCompletions.append(completion)
@@ -71,8 +78,10 @@ import XCTest
 
 @MainActor final class RuntimeFactoryFixture {
     var processes: [RuntimeProcessFixture] = []
+    var startFailure: AgentRuntimeFailure?
     func make(_ launch: AgentRuntimeLaunch) -> any AgentRuntimeProcess {
         let process = RuntimeProcessFixture(launch)
+        process.startFailure = startFailure
         processes.append(process)
         return process
     }

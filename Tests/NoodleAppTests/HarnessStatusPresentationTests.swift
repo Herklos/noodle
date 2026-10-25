@@ -116,6 +116,24 @@ import NoodleCore
         try await wait { self.enabled(signIn) }
     }
 
+    /// The account check only reads the saved login, so it still says signed in after the
+    /// vendor refused that login; a bot waiting for sign-in is what tells.
+    func testABotRefusedItsLoginShowsTheHarnessAsNeedingSignInThoughTheCheckSaysSignedIn() async throws {
+        let f = try fixture(), bot = try f.runtime.start(f.a)
+        let installed = HarnessInstallation(provider: .codex, executablePath: "/fixtures/codex")
+        HarnessPresentationCache.save([.codex: .init(installation: installed, authentication: .authenticated)], to: f.runtime.defaults)
+        let setup = HarnessSetupController(providers: [:], defaults: f.runtime.defaults)
+        let view = host(HarnessInstallationRow(store: f.store, installation: installed, liveInstallation: installed,
+            isRefreshing: false, setup: setup, install: {}).environment(f.store))
+        _ = try await control("Signed in", in: view)
+        XCTAssertFalse(hasControl("Sign In", in: view))
+        bot.transition(.failed, failure: .authenticationRequired)
+        _ = try await control("Sign-in required", in: view)
+        _ = try await control("Sign In", in: view)
+        bot.transition(.ready)
+        _ = try await control("Signed in", in: view)
+    }
+
     func testReconnectingAgentsShowElapsedTimeAndKickWithFailureTakingHeaderPriority() async throws {
         let f = try fixture(), first = try f.runtime.start(f.a), second = try f.runtime.start(f.b)
         let installed = HarnessInstallation(provider: .codex, executablePath: "/fixtures/codex")
