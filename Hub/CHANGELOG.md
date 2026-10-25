@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-25
+
 ### Changed
 
 - The Hub keeps its own sign-in for every harness, separate from Noodle and from the harness in Terminal on the same Mac, so they no longer use up each other's sign-ins. After updating, sign in once in Settings › Harness. Plans without a profile lend this Default sign-in. The copies of the Terminal sign-ins the Hub kept for its bots are deleted, and deleting a profile now also deletes the copy of it its bots shared.

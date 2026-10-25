@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.3] - 2026-10-25
+
 ### Changed
 
 - When a Local Mac cannot show its desktop because its account has no display of its own, or more than one, the message lists the displays the account sees: each one's number and size, whether it is built in and whether it belongs to the main desktop. The same list goes to the log, so a report can say what macOS gave the account. Which display may be shown is unchanged, and the main desktop is still never captured.

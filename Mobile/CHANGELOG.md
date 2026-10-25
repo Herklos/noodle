@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-25
+
 ### Added
 
 - A conversation scrolled up to older messages shows a down arrow above the message field. Tap it to go back to the latest message, and new ones follow again. It hides once the latest message shows.
