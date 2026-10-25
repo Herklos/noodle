@@ -272,19 +272,43 @@ import XCTest
         XCTAssertTrue(p.hasInterruptedWork)
         XCTAssertFalse(p.isAlive)
         XCTAssertTrue(f.failures.isEmpty, "Restarting cannot sign the user in")
-        XCTAssertEqual(try runtime.read("auth-failed-claude-code-.credentials.json.sha256", limit: 256), Data("login-key:spent".utf8),
-                       "The next start must know which login was refused")
+        let noted = String(decoding: try runtime.read("auth-failed-claude-code-.credentials.json.sha256", limit: 256), as: UTF8.self)
+        XCTAssertEqual(noted.split(separator: "\n").first, "login-key:spent", "The next start must know which login was refused")
+        XCTAssertNotNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: f.workspace))
     }
 
     /// The host refuses to start a bot again on the login Claude Code refused, so the bot keeps waiting for sign-in.
+    /// Nothing reached Claude Code, so the refusal is not noted again, and the runtime learns when it lapses.
     func testStartRefusedOnTheFailedLoginWaitsForSignIn() async throws {
         let f = try fixture(), wire = HarnessWire(), p = f.claude(wire, extended: false)
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: f.workspace).package, path: "runtime", create: true)
+        try runtime.writeData(Data("login-key:spent".utf8), named: "auth-seed-claude-code-.credentials.json.sha256")
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: f.workspace)
+        let noted = try runtime.read("auth-failed-claude-code-.credentials.json.sha256", limit: 256)
+        let lapse = try XCTUnwrap(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: f.workspace))
         wire.automaticStart = false
         p.start()
         wire.startReply?(0, "Not logged in: Claude Code refused this login and nobody has signed in since. Sign in to the harness, then retry.")
         try await f.wait { p.snapshot.phase == .failed }
         XCTAssertEqual(p.snapshot.failure, .authenticationRequired)
+        XCTAssertEqual(p.snapshot.signInRefusedUntil, lapse)
+        XCTAssertEqual(try runtime.read("auth-failed-claude-code-.credentials.json.sha256", limit: 256), noted,
+                       "A refused start is not another refusal of the login")
         XCTAssertTrue(f.failures.isEmpty, "Restarting cannot sign the user in")
+    }
+
+    /// A finished turn proves the login works, so a refusal noted earlier stops holding.
+    func testATurnThatWorksForgetsTheRefusedLogin() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire, extended: false)
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: f.workspace).package, path: "runtime", create: true)
+        try runtime.writeData(Data("login-key:spent".utf8), named: "auth-seed-claude-code-.credentials.json.sha256")
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: f.workspace,
+                                                 now: Date().addingTimeInterval(-24 * 60 * 60))
+        try await ready(f, wire, p); try confirm(wire)
+        p.notify(); try await f.wait { wire.count("user") == 1 }
+        XCTAssertNotNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: f.workspace))
+        try complete(wire); try await f.wait { p.canReceiveHeartbeat }
+        XCTAssertNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: f.workspace))
     }
 
     /// Claude Code rejects the turn once the plan's limit is used up; the turn is kept for whoever picks it up.

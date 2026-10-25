@@ -949,11 +949,12 @@ public final class AgentRuntimeCoordinator {
         }
         guard snapshot(for: agent.id).canKick else { return nil }
         connectionRecoveryAttempts[agent.id] = nil
-        forgetSignInRetries(agent.id)
+        // Retry Now resets the sign-in retries; until it is chosen, they keep their pace.
         if let failure = snapshot(for: agent.id).failure, failure != .recoveryFailed {
             return AgentKickRequest(agent: agent, failure: failure, runtimeID: runtimeIDs[agent.id],
                 lifecycleID: lifecycleID, extendedAccess: accessConfiguration.isExtended(for: agent))
         }
+        forgetSignInRetries(agent.id)
         restart(agent: agent, repository: repository,
             sessionRecovery: snapshot(for: agent.id).failure == .recoveryFailed ? sessionRecovery(.retry, for: agent) : nil,
             retryFailedStop: true)
@@ -968,15 +969,24 @@ public final class AgentRuntimeCoordinator {
 
     public func confirmKick(_ request: AgentKickRequest, repository: WorkspaceRepository) {
         let agent = request.agent
-        guard !isStoppingAll, !changingAccess.contains(agent.id),
-              lifecycleID == request.lifecycleID, runtimeIDs[agent.id] == request.runtimeID,
+        // A bot waiting for sign-in may have been started again in the background, and refused, while
+        // the alert was open; it still waits, so Retry Now retries. Other requests are for that runtime only.
+        guard !isStoppingAll, !changingAccess.contains(agent.id), lifecycleID == request.lifecycleID,
+              runtimeIDs[agent.id] == request.runtimeID || request.failure == .authenticationRequired,
               snapshot(for: agent.id).phase == .failed, snapshot(for: agent.id).failure == request.failure,
               processes[agent.id]?.runs(runningAgent(agent)) ?? true,
               accessConfiguration.isExtended(for: agent) == request.extendedAccess else { return }
+        forgetSignInRetries(agent.id)
         let recovery: SessionRecovery
         switch request.failure {
         case .missingSession(let sessionID): recovery = .replace(sessionID)
-        case .usageLimit, .authenticationRequired, .recoveryFailed: recovery = .retry
+        case .authenticationRequired:
+            // The person asked for this try, so the host must not refuse it on a refusal noted earlier.
+            if let provider = HarnessProvider(rawValue: runningAgent(agent).harnessIdentifier ?? "") {
+                RestrictedHarnessStorage.forgetRefusedLogin(provider: provider, workspace: repository.directory(for: agent))
+            }
+            recovery = .retry
+        case .usageLimit, .recoveryFailed: recovery = .retry
         case .safetyStop:
             restart(agent: agent, repository: repository, sessionRecovery: nil, retryFailedStop: true)
             return
@@ -1330,6 +1340,8 @@ public final class AgentRuntimeCoordinator {
     /// A bot parked on sign-in restarts by itself, as Kick would, once its harness reports a
     /// working login. The check runs no turn. A login that looks valid yet still fails is
     /// retried a few times with growing gaps, then only after the harness was seen signed out.
+    /// Where the refusal of a login is noted, the host refuses starts on it until that note
+    /// lapses, which spaces out the real tries, so the restarts go on.
     private func retryOnceSignedIn(_ agent: AgentRecord, repository: WorkspaceRepository) {
         guard let checkSignIn, !signInChecks.contains(agent.id), let runtimeID = runtimeIDs[agent.id],
               processes[agent.id]?.runs(runningAgent(agent)) == true else { return }
@@ -1345,15 +1357,28 @@ public final class AgentRuntimeCoordinator {
                   self.snapshot(for: agent.id).failure == .authenticationRequired else { return }
             if signedIn == false { self.signInRetries[agent.id] = nil }
             let retries = self.signInRetries[agent.id, default: 0]
-            guard signedIn == true, retries < Self.signInRetryLimit else { return }
+            guard signedIn == true,
+                  retries < Self.signInRetryLimit || self.refusedLogin(of: agent, repository: repository) != nil else { return }
             self.signInRetries[agent.id] = retries + 1
-            self.nextSignInCheck[agent.id] = self.now().addingTimeInterval(Self.signInCheckInterval * pow(2, Double(retries)))
+            self.nextSignInCheck[agent.id] = self.now().addingTimeInterval(
+                Self.signInCheckInterval * pow(2, Double(min(retries, Self.signInRetryLimit - 1))))
             self.restart(agent: agent, repository: repository, sessionRecovery: self.sessionRecovery(.retry, for: agent))
         }
     }
 
+    /// When the host lets a start on the login the bot's harness refused through again; nil when
+    /// none is noted. Only restricted starts are checked.
+    private func refusedLogin(of agent: AgentRecord, repository: WorkspaceRepository) -> Date? {
+        guard !accessConfiguration.isExtended(for: agent),
+              let provider = HarnessProvider(rawValue: runningAgent(agent).harnessIdentifier ?? "") else { return nil }
+        return RestrictedHarnessStorage.refusedUntil(provider: provider, workspace: repository.directory(for: agent))
+    }
+
     private static let signInCheckInterval: TimeInterval = 2 * 60
     private static let signInRetryLimit = 4
+    /// How often a bot whose starts the host refuses asks again before the refusal lapses,
+    /// which notices a new sign-in or another bot's refresh.
+    private static let refusedSignInCheckInterval: TimeInterval = 10 * 60
 
     private func forgetSignInRetries(_ agentID: UUID) {
         nextSignInCheck[agentID] = nil
@@ -1435,11 +1460,12 @@ public final class AgentRuntimeCoordinator {
                 self.signInAnnounced.remove(agentID)
                 self.forgetSignInRetries(agentID)
             }
-            // A start refused before the harness was ready reached no vendor, so it is not a try.
-            if previousPhase == .starting, snapshot.phase == .failed, snapshot.failure == .authenticationRequired,
-               let retries = self.signInRetries[agentID], retries > 0 {
-                self.signInRetries[agentID] = retries - 1
-                self.nextSignInCheck[agentID] = self.now().addingTimeInterval(Self.signInCheckInterval)
+            // A start the host refused reached no harness, so it is not a try. The bot asks again when
+            // the refusal lapses, and before that only every few minutes.
+            if snapshot.phase == .failed, snapshot.failure == .authenticationRequired, let until = snapshot.signInRefusedUntil {
+                if let retries = self.signInRetries[agentID], retries > 0 { self.signInRetries[agentID] = retries - 1 }
+                let wait = min(max(until.timeIntervalSince(self.now()), Self.signInCheckInterval), Self.refusedSignInCheckInterval)
+                self.nextSignInCheck[agentID] = self.now().addingTimeInterval(wait)
             }
             let previous = self.snapshots[agentID]
             // A bot that continues on another harness does not pause.

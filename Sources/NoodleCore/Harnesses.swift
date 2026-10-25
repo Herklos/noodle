@@ -303,6 +303,9 @@ public struct AgentRuntimeSnapshot: Codable, Hashable, Sendable {
     public var reconnectingSince: Date?
     /// When the harness said its usage comes back, for a usage limit; nil when it did not say.
     public var usageResetsAt: Date?
+    /// For a start refused before it reached the harness, because the harness already refused
+    /// the login and nobody has signed in since: when that refusal lapses.
+    public var signInRefusedUntil: Date?
 
     public var canKick: Bool { phase == .failed || reconnectingSince != nil }
 
@@ -326,7 +329,8 @@ public struct AgentRuntimeSnapshot: Codable, Hashable, Sendable {
         processIdentifier: Int32? = nil,
         failure: AgentRuntimeFailure? = nil,
         reconnectingSince: Date? = nil,
-        usageResetsAt: Date? = nil
+        usageResetsAt: Date? = nil,
+        signInRefusedUntil: Date? = nil
     ) {
         self.agentID = agentID
         self.phase = phase
@@ -335,6 +339,7 @@ public struct AgentRuntimeSnapshot: Codable, Hashable, Sendable {
         self.failure = failure
         self.reconnectingSince = reconnectingSince
         self.usageResetsAt = usageResetsAt
+        self.signInRefusedUntil = signInRefusedUntil
     }
 }
 

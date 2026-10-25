@@ -284,6 +284,91 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         try prepare(first)
     }
 
+    /// A refusal can be the vendor's passing trouble, so the same login is started again after a
+    /// while: five minutes, twice as long after each further refusal, never more than four hours.
+    func testARefusedLoginIsStartedAgainAfterAWhileThatGrowsWithEachRefusal() throws {
+        let (home, first, _) = try fixture()
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"spent"}}"#.utf8)
+        let failure = Date(timeIntervalSince1970: 1_800_000_000)
+        func at(_ minutes: Double) -> Date { failure.addingTimeInterval(minutes * 60) }
+        func refused(_ minutes: Double) -> Bool {
+            RestrictedHarnessStorage.refusedAgain(provider: .claudeCode, workspace: first, loginHome: home, now: at(minutes)) { _, _ in login }
+        }
+        func prepare(_ minutes: Double) throws {
+            try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: first, loginHome: home, now: at(minutes)) { _, _ in login }
+        }
+        try prepare(0)
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first, now: at(0))
+        XCTAssertEqual(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: first), at(5))
+        XCTAssertTrue(refused(4.9))
+        XCTAssertThrowsError(try prepare(4.9))
+        XCTAssertFalse(refused(5))
+        try prepare(5)
+        // Refused again on the same login: twice as long.
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first, now: at(5))
+        XCTAssertTrue(refused(14.9))
+        XCTAssertFalse(refused(15))
+        try prepare(15)
+        for _ in 0..<10 { try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first, now: at(15)) }
+        XCTAssertTrue(refused(15 + 4 * 60 - 0.1))
+        XCTAssertFalse(refused(15 + 4 * 60))
+        // Retry Now forgets the refusal at once.
+        RestrictedHarnessStorage.forgetRefusedLogin(provider: .claudeCode, workspace: first)
+        XCTAssertNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: first))
+        XCTAssertFalse(refused(16))
+        try prepare(16)
+        // And a refusal after that starts again from five minutes.
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first, now: at(16))
+        XCTAssertTrue(refused(20.9))
+        XCTAssertFalse(refused(21))
+    }
+
+    /// Claude Code refreshes a login whose access token expired, so that is a good time to try it again.
+    func testARefusedLoginIsStartedAgainOnceItsAccessTokenExpires() throws {
+        let (home, first, _) = try fixture()
+        let failure = Date(timeIntervalSince1970: 1_800_000_000)
+        let expiry = Int64(failure.addingTimeInterval(2 * 60).timeIntervalSince1970 * 1000)
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"spent","expiresAt":\#(expiry)}}"#.utf8)
+        func refused(_ minutes: Double) -> Bool {
+            RestrictedHarnessStorage.refusedAgain(provider: .claudeCode, workspace: first, loginHome: home,
+                                                  now: failure.addingTimeInterval(minutes * 60)) { _, _ in login }
+        }
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: first, loginHome: home, now: failure) { _, _ in login }
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first, now: failure)
+        XCTAssertTrue(refused(1.9))
+        XCTAssertFalse(refused(2))
+    }
+
+    /// The host checks a bot on a profile against the profile's own login item, never the person's.
+    func testABotOnAProfileIsRefusedUntilItsProfileSignsInAgain() throws {
+        let (home, first, _) = try fixture()
+        let profiles = HarnessProfileStore(root: home.deletingLastPathComponent().appendingPathComponent("Profiles"))
+        let profile = try profiles.create(provider: .claudeCode, named: "Work")
+        var person = Data(#"{"claudeAiOauth":{"accessToken":"person","refreshToken":"one"}}"#.utf8)
+        var work = Data(#"{"claudeAiOauth":{"accessToken":"work","refreshToken":"spent"}}"#.utf8)
+        var items: [String] = []
+        let secret = profiles.loginSecret(profile) { service, _ in
+            items.append(service)
+            return service == "Claude Code-credentials" ? person : work
+        }
+        let loginHome = profiles.loginHome(profile)
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: first, loginHome: loginHome, secret: secret)
+        XCTAssertTrue(items.allSatisfy { $0.hasPrefix("Claude Code-credentials-") }, "\(items)")
+        let copy = try WorkspaceMailbox(workspace: first, path: ".noodle/home/.claude").read(".credentials.json", limit: 4096)
+        XCTAssertTrue(String(decoding: copy, as: UTF8.self).contains("work"))
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: first)
+        func refused() -> Bool {
+            RestrictedHarnessStorage.refusedAgain(provider: .claudeCode, workspace: first, loginHome: loginHome, secret: secret)
+        }
+        XCTAssertTrue(refused())
+        person = Data(#"{"claudeAiOauth":{"accessToken":"person-again","refreshToken":"two"}}"#.utf8)
+        XCTAssertTrue(refused(), "The person's own sign-in is not the profile's")
+        work = Data(#"{"claudeAiOauth":{"accessToken":"work-again","refreshToken":"three"}}"#.utf8)
+        XCTAssertFalse(refused())
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: first, loginHome: loginHome, secret: secret)
+        XCTAssertNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: first))
+    }
+
     func testALoginRefreshedInTheKeychainReachesRunningBotsWithoutARestart() throws {
         let (home, first, second) = try fixture()
         var login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"one"}}"#.utf8)

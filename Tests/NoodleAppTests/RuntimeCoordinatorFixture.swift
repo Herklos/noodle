@@ -29,18 +29,26 @@ import XCTest
         snapshot = .init(agentID: launch.agent.id, phase: .offline, detail: "Fixture")
     }
     func transition(_ phase: AgentRuntimePhase, detail: String = "Fixture", failure: AgentRuntimeFailure? = nil,
-                    reconnectingSince: Date? = nil, usageResetsAt: Date? = nil) {
+                    reconnectingSince: Date? = nil, usageResetsAt: Date? = nil, signInRefusedUntil: Date? = nil) {
         snapshot.phase = phase
         snapshot.detail = detail
         snapshot.failure = failure
         snapshot.reconnectingSince = reconnectingSince
         snapshot.usageResetsAt = usageResetsAt
+        snapshot.signInRefusedUntil = signInRefusedUntil
         launch.onSnapshot(snapshot)
     }
-    /// A start the host refuses: the runtime fails this way before it is ever ready.
+    /// A start that fails before the runtime is ever ready, as a harness refusing its login while it starts does.
     var startFailure: AgentRuntimeFailure?
+    /// A start the host refuses, until then, because the harness already refused the login.
+    var startRefusedUntil: Date?
     func start() {
         starts += 1
+        if let startRefusedUntil {
+            transition(.starting)
+            transition(.failed, failure: .authenticationRequired, signInRefusedUntil: startRefusedUntil)
+            return
+        }
         guard let startFailure else { isAlive = true; transition(.ready); return }
         transition(.starting)
         transition(.failed, failure: startFailure)
@@ -79,9 +87,11 @@ import XCTest
 @MainActor final class RuntimeFactoryFixture {
     var processes: [RuntimeProcessFixture] = []
     var startFailure: AgentRuntimeFailure?
+    var startRefusedUntil: Date?
     func make(_ launch: AgentRuntimeLaunch) -> any AgentRuntimeProcess {
         let process = RuntimeProcessFixture(launch)
         process.startFailure = startFailure
+        process.startRefusedUntil = startRefusedUntil
         processes.append(process)
         return process
     }

@@ -20,6 +20,18 @@ public struct HarnessProfilesView: View {
     private var controller: HarnessProfilesController { store.harnessProfiles }
     private var profiles: [HarnessProfile] { controller.profiles(for: installation.provider) }
 
+    /// Profiles a bot on them waits to sign in to again. The sign-in check only reads the
+    /// saved login, so it still says signed in after the vendor refused that login. Only
+    /// bots waiting for sign-in have their profile read.
+    private var profilesWaitingForSignIn: Set<UUID> {
+        Set(store.agents.compactMap { agent in
+            guard agent.harnessIdentifier == installation.provider.rawValue,
+                  store.runtime.snapshot(for: agent.id).failure == .authenticationRequired,
+                  store.runtime.runningHarness(for: agent.id) == nil else { return nil }
+            return try? store.repository.loadAgentHarnessProfile(agent)
+        })
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 18) {
@@ -29,10 +41,11 @@ public struct HarnessProfilesView: View {
                     Text("No profiles").foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 60)
                 } else {
+                    let waiting = profilesWaitingForSignIn
                     VStack(spacing: 0) {
                         ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
                             if index > 0 { Divider() }
-                            row(profile)
+                            row(profile, waitingForSignIn: waiting.contains(profile.id))
                         }
                     }
                     .background(Color.secondary.opacity(0.075), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -82,23 +95,24 @@ public struct HarnessProfilesView: View {
         return "New Profile"
     }
 
-    private func row(_ profile: HarnessProfile) -> some View {
+    private func row(_ profile: HarnessProfile, waitingForSignIn: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "person.crop.circle")
                     .font(.title3).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.displayName).fontWeight(.medium).lineLimit(1)
-                    status(profile)
+                    status(profile, waitingForSignIn: waitingForSignIn)
                 }
                 Spacer(minLength: 8)
                 if controller.activity[profile.id] != nil {
                     Button("Cancel") { controller.cancel(profile) }
-                } else if controller.authentication[profile.id] != .authenticated, controller.authentication[profile.id] != .notRequired {
+                } else if waitingForSignIn
+                            || controller.authentication[profile.id] != .authenticated && controller.authentication[profile.id] != .notRequired {
                     Button("Sign In…") { controller.signIn(profile, installation: installation) }
                 }
                 Menu {
-                    if controller.activity[profile.id] == nil, controller.authentication[profile.id] == .authenticated {
+                    if controller.activity[profile.id] == nil, controller.authentication[profile.id] == .authenticated, !waitingForSignIn {
                         // A login can be revoked on the server while still reading as signed in here.
                         Button("Sign In Again…") { controller.signIn(profile, installation: installation) }
                     }
@@ -130,12 +144,14 @@ public struct HarnessProfilesView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
-    @ViewBuilder private func status(_ profile: HarnessProfile) -> some View {
+    @ViewBuilder private func status(_ profile: HarnessProfile, waitingForSignIn: Bool) -> some View {
         if let activity = controller.activity[profile.id] {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
                 Text(activity).font(.caption).foregroundStyle(.secondary)
             }
+        } else if waitingForSignIn {
+            SettingsStatusLabel(title: "Sign-in required", systemImage: "person.crop.circle.badge.questionmark", color: .secondary)
         } else {
             switch controller.authentication[profile.id] {
             case .authenticated:

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed", instead of showing as ready again after each automatic retry. It comes back by itself once the login works again.
+- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed", instead of showing as ready again after each automatic retry. It comes back by itself once the login works again, and tries the same login again after 5 minutes, then twice as long after each refusal, up to every 4 hours, so a login the service turned away only for a moment doesn't leave it waiting.
 
 ## [0.42.0] - 2026-10-24
 
