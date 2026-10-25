@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - The alert that asks you to sign in again when you Kick a paused bot no longer comes back after you choose Open Harness Settings in the main window. Every button of Kick's alerts now closes it for good.
+- Text selected in a table can be annotated with the Add Annotation shortcut, in a conversation and in the whole table opened from its rows, instead of beeping.
 
 ## [0.75.0] - 2026-10-24
 

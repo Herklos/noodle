@@ -237,6 +237,57 @@ private final class KeyedWindow: NSWindow {
                                                noodlet: true), in: panels, store: f.store)
     }
 
+    /// ⇧⌘A in a table beeped (#185): a mouse-down in a cell found no message, so nothing was quoted.
+    func testTableCellsCanBeAnnotatedInTheChatAndInTheWholeTable() async throws {
+        let f = try fixture()
+        NSApplication.shared.setActivationPolicy(.accessory)
+        let rows = (1...10).map { "| Town \($0) | \($0) |" }.joined(separator: "\n")
+        let message = ChatMessage(conversationID: f.directA.id, author: .agent(f.a.id),
+            body: "| City | Note |\n|---|---|\n| Paris | **capital** city |\n" + rows, delivery: .delivered)
+        let controller = ConversationAnnotationController()
+        let view = host(MessageBubble(message: message, hasConversationBackground: false,
+            selectedAttachmentID: .constant(nil), previewAttachment: { _, _ in }, showAgentProfile: nil)
+            .padding().environment(f.store).environment(\.conversationAnnotations, controller))
+        let window = try XCTUnwrap(view.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        controller.attach(to: window)
+
+        func pressMouse(on node: NSObject, in window: NSWindow, controller: ConversationAnnotationController) throws {
+            let frame = try XCTUnwrap((node.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue)
+            let point = window.convertPoint(fromScreen: NSPoint(x: frame.midX, y: frame.midY))
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            XCTAssertTrue(controller.handle(event) === event, "A mouse-down still selects text")
+        }
+        try pressMouse(on: try await control("capital city", in: view), in: window, controller: controller)
+        XCTAssertEqual(controller.selectedText?.message?.id, message.id, "A table cell's text must belong to its message")
+        // What a cell copies is accepted as a quote from its message.
+        XCTAssertTrue(String(MessageMarkdownCache.shared.render(message).characters).contains("capital city"))
+
+        // The whole table, opened from its folded rows, can be annotated too.
+        press(try await control("5 more rows", in: view))
+        var reader: NSView?
+        try await wait {
+            reader = NSApp.windows.filter { $0.isVisible && $0 !== window }
+                .compactMap(\.contentView).first { self.elements($0).contains { self.labels($0).contains("Town 10") } }
+            return reader != nil
+        }
+        let content = try XCTUnwrap(reader), readerWindow = try XCTUnwrap(content.window)
+        defer { readerWindow.close() }
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        var readerController: ConversationAnnotationController?
+        try await wait {
+            readerController = allViews(content).compactMap { ($0 as? ConversationAnnotationText.Marker)?.controller }
+                .first { $0.window === readerWindow }
+            return readerController != nil
+        }
+        let annotations = try XCTUnwrap(readerController)
+        try pressMouse(on: try await control("Town 10", in: content), in: readerWindow, controller: annotations)
+        XCTAssertEqual(annotations.selectedText?.message?.id, message.id)
+        XCTAssertEqual(annotations.conversationID, message.conversationID)
+    }
+
     private func assertAnnotatable(_ target: HubSurfaceTarget, in panels: HubSurfacePanels, store: NoodleStore) throws {
         func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
         panels.open(target, store: store)

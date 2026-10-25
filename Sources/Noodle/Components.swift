@@ -424,7 +424,7 @@ struct MessageBubble: View {
                     reactionContextMenu(attachment: nil)
                 }
         case .table(let table):
-            MessageTableView(table: table) { shown in reactionContextMenu(attachment: nil, table: shown) }
+            MessageTableView(message: message, table: table) { shown in reactionContextMenu(attachment: nil, table: shown) }
                 .foregroundStyle(isUser ? .white : .primary)
                 .background { messageBackground }
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

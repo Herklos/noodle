@@ -84,8 +84,6 @@ struct MessageText: View {
 }
 
 struct MessageTextReader: View {
-    @Environment(NoodleStore.self) private var store
-    @State private var annotations = ConversationAnnotationController()
     let message: ChatMessage
     let text: AttributedString
     let close: () -> Void
@@ -125,13 +123,25 @@ struct MessageTextReader: View {
         .foregroundStyle(Color.primary)
         .frame(width: min(600, (NSScreen.main?.visibleFrame.width ?? 800) - 80),
                height: min(540, (NSScreen.main?.visibleFrame.height ?? 700) - 100))
-        .environment(\.conversationAnnotations, annotations)
-        .background(ConversationAnnotationHost(controller: annotations,
-            conversationID: message.conversationID,
-            title: store.conversations.first { $0.id == message.conversationID }.map { store.title(for: $0) } ?? "Message",
-            save: { note, content, source, raw in
-                try store.saveConversationAnnotation(note, content: content, source: source, sourceData: raw)
-            }).frame(width: 0, height: 0))
-        .onDisappear { annotations.cancel() }
+        .modifier(MessageReaderAnnotations(message: message))
+    }
+}
+
+/// A reader opens in a popover, its own window, so it annotates into the message's conversation by itself.
+struct MessageReaderAnnotations: ViewModifier {
+    @Environment(NoodleStore.self) private var store
+    @State private var annotations = ConversationAnnotationController()
+    let message: ChatMessage
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.conversationAnnotations, annotations)
+            .background(ConversationAnnotationHost(controller: annotations,
+                conversationID: message.conversationID,
+                title: store.conversations.first { $0.id == message.conversationID }.map { store.title(for: $0) } ?? "Message",
+                save: { note, content, source, raw in
+                    try store.saveConversationAnnotation(note, content: content, source: source, sourceData: raw)
+                }).frame(width: 0, height: 0))
+            .onDisappear { annotations.cancel() }
     }
 }

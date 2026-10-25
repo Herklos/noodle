@@ -6,6 +6,7 @@ import HubLink
 /// A Markdown table drawn as its own bubble, sortable in place and folded when long.
 struct MessageTableView<Menu: View>: View {
     @Environment(NoodleStore.self) private var store
+    let message: ChatMessage
     let table: MessageTable
     /// The message's context menu, given the table as currently shown.
     let menu: (MessageTable) -> Menu
@@ -31,6 +32,8 @@ struct MessageTableView<Menu: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 MessageTableGrid(table: table, rowLimit: table.folds ? MessageTable.foldedRowCount : nil, sort: $sort)
+                    // Its cells' text is the message's, to annotate with the shortcut like the rest of it.
+                    .background(ConversationAnnotationText(message: message))
                     .onGeometryChange(for: CGFloat.self, of: \.size.width) { gridWidth = $0 }
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
@@ -46,7 +49,7 @@ struct MessageTableView<Menu: View>: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showingAll, arrowEdge: .bottom) {
-                    MessageTableReader(table: table, sort: $sort, close: { showingAll = false })
+                    MessageTableReader(message: message, table: table, sort: $sort, close: { showingAll = false })
                         .environment(store)
                 }
             }
@@ -163,6 +166,7 @@ struct MessageTableActions: View {
 }
 
 struct MessageTableReader: View {
+    let message: ChatMessage
     let table: MessageTable
     @Binding var sort: MessageTableSort?
     let close: () -> Void
@@ -183,11 +187,14 @@ struct MessageTableReader: View {
             .padding(16)
             Divider()
             ScrollView([.vertical, .horizontal]) {
-                MessageTableGrid(table: table, sort: $sort).padding(12)
+                MessageTableGrid(table: table, sort: $sort)
+                    .background(ConversationAnnotationText(message: message))
+                    .padding(12)
             }
         }
         .foregroundStyle(Color.primary)
         .frame(width: min(600, (NSScreen.main?.visibleFrame.width ?? 800) - 80),
                height: min(540, (NSScreen.main?.visibleFrame.height ?? 700) - 100))
+        .modifier(MessageReaderAnnotations(message: message))
     }
 }
