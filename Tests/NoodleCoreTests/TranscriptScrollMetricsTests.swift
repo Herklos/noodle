@@ -40,4 +40,18 @@ final class TranscriptScrollMetricsTests: XCTestCase {
         XCTAssertFalse(long.isAtBottom)
         XCTAssertEqual(short.offset, long.offset)
     }
+
+    func testDistanceFromTheEnd() {
+        // 2000 of content in an 800 viewport under a 52pt titlebar, 20 under the composer: the end is at 1220.
+        func metrics(_ offset: CGFloat, content: CGFloat = 2000) -> TranscriptScrollMetrics {
+            TranscriptScrollMetrics(contentOffset: offset, contentHeight: content, viewportHeight: 800, topInset: 52, bottomInset: 20)
+        }
+        XCTAssertEqual(metrics(1220).distanceFromEnd, 0)
+        XCTAssertEqual(metrics(1230).distanceFromEnd, 0, "Overscrolled past the end is at it")
+        XCTAssertEqual(metrics(1070).distanceFromEnd, 150)
+        XCTAssertFalse(metrics(1070).isFarFromEnd, "A few lines short of the end is not far from it")
+        XCTAssertTrue(metrics(820).isFarFromEnd)
+        XCTAssertEqual(metrics(-52).distanceFromEnd, 1272)
+        XCTAssertEqual(metrics(-52, content: 300).distanceFromEnd, 0, "A short conversation is at its end")
+    }
 }
