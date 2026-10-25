@@ -4,7 +4,7 @@ import XCTest
 import NoodleCore
 @testable import Noodle
 
-/// The transcript's opening position, hosted in windows that are never ordered onscreen.
+/// The transcript's reading position, hosted in windows that are never shown on screen.
 @MainActor final class TranscriptScrollTests: HiddenViewTests {
     /// A long history whose rows carry attachments opens on its last message at
     /// narrow, medium and wide windows, even when the messages arrive after the
@@ -124,7 +124,98 @@ import NoodleCore
         }
     }
 
+    /// Scrolled up and then back down to the end by hand, under the titlebar as
+    /// in the chat window, a transcript follows new messages again.
+    func testScrollingBackToTheEndByHandFollowsNewMessagesAgain() async throws {
+        let (model, root, scroll) = try await openUnderTitlebar()
+        var saved: TranscriptViewport?
+        model.persist = { saved = $0 }
+        XCTAssertGreaterThan(scroll.contentInsets.top, 2, "The transcript must run up behind the titlebar")
+        await scrollUp(scroll)
+        XCTAssertEqual(saved?.isAtBottom, false)
+        await scrollDownToTheEnd(scroll)
+        XCTAssertEqual(saved?.isAtBottom, true, "Scrolled to \(endOffset(scroll) - scroll.contentView.bounds.minY)pt "
+            + "from the end under a \(scroll.contentInsets.top)pt titlebar, it was not taken for the end")
+        model.ids.append(UUID())
+        _ = await eventually(seconds: 1) { false }
+        assertLastMessageShows(model, root, "After a new message")
+    }
+
+    /// Scroll to Latest shows only away from the end. It goes back there, and
+    /// new messages follow again.
+    func testScrollToLatestGoesBackToTheEndAndFollowsAgain() async throws {
+        let (model, root, scroll) = try await openUnderTitlebar()
+        XCTAssertFalse(hasControl("Scroll to Latest", in: root), "At the end there is no Scroll to Latest")
+        await scrollUp(scroll)
+        press(try await control("Scroll to Latest", in: root))
+        let hidden = await eventually { !self.hasControl("Scroll to Latest", in: root) }
+        XCTAssertTrue(hidden, "Scroll to Latest stayed after going back to the end")
+        _ = await eventually(seconds: 1) { false }
+        assertLastMessageShows(model, root, "After Scroll to Latest")
+        model.ids.append(UUID())
+        _ = await eventually(seconds: 1) { false }
+        assertLastMessageShows(model, root, "After a new message")
+        XCTAssertFalse(hasControl("Scroll to Latest", in: root), "Following new messages, there is no Scroll to Latest")
+    }
+
     // MARK: - Helpers
+
+    /// A long conversation opened on its end, running up behind the titlebar as the chat window's does.
+    private func openUnderTitlebar() async throws -> (StartupModel, NSView, NSScrollView) {
+        let model = StartupModel()
+        let root = mount(StartupFixture(model: model))
+        let window = try XCTUnwrap(root.window)
+        window.styleMask.insert(.fullSizeContentView)
+        // Native scroll phases need a rendered viewport; the window stays offscreen.
+        window.orderFront(nil)
+        model.ids = (0..<120).map { _ in UUID() }
+        model.overlay = 75
+        let last = try XCTUnwrap(model.ids.last)
+        let opened = await eventually { model.visible.contains(last) }
+        XCTAssertTrue(opened, "The last message was not rendered")
+        _ = await eventually(seconds: 1) { false }
+        return (model, root, try XCTUnwrap(scrollView(in: root)))
+    }
+
+    private func scrollView(in view: NSView) -> NSScrollView? {
+        view as? NSScrollView ?? view.subviews.lazy.compactMap { self.scrollView(in: $0) }.first
+    }
+
+    private func scrollUp(_ scroll: NSScrollView) async {
+        wheel(scroll, delta: 0, phase: 1)
+        for _ in 0..<6 {
+            wheel(scroll, delta: 300, phase: 2)
+            _ = await eventually(seconds: 0.03) { false }
+        }
+        wheel(scroll, delta: 0, phase: 4)
+        _ = await eventually(seconds: 1) { false }
+    }
+
+    /// Scrolls down to exactly the end, as a hand stops there, without overscrolling past it.
+    private func scrollDownToTheEnd(_ scroll: NSScrollView) async {
+        wheel(scroll, delta: 0, phase: 1)
+        for _ in 0..<40 {
+            let distance = endOffset(scroll) - scroll.contentView.bounds.minY
+            guard distance >= 0.5 else { break }
+            wheel(scroll, delta: -Int32(min(distance, 400).rounded()), phase: 2)
+            _ = await eventually(seconds: 0.03) { false }
+        }
+        wheel(scroll, delta: 0, phase: 4)
+        _ = await eventually(seconds: 1) { false }
+    }
+
+    /// The clip view's origin at the end of the transcript.
+    private func endOffset(_ scroll: NSScrollView) -> CGFloat {
+        (scroll.documentView?.frame.height ?? 0) + scroll.contentInsets.bottom - scroll.contentView.bounds.height
+    }
+
+    private func wheel(_ scroll: NSScrollView, delta: Int32, phase: Int64) {
+        guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                                  wheel1: delta, wheel2: 0, wheel3: 0) else { return XCTFail("No scroll event") }
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+        guard let native = NSEvent(cgEvent: event) else { return XCTFail("No scroll event") }
+        scroll.scrollWheel(with: native)
+    }
 
     /// Fails when rows leave a blank stretch in the part of the screen above the composer.
     private func assertFilled(_ model: StartupModel, _ root: NSView, _ context: String,
@@ -217,6 +308,8 @@ private struct StartupFixture: View {
                 .id(model.conversationID)
                 .transaction { $0.animation = nil }
         }
+        // As in the chat, the transcript runs up behind the titlebar of a full-size content window.
+        .ignoresSafeArea(edges: .top)
         .overlay(alignment: .bottom) { Text("Composer").frame(height: 60) }
     }
 

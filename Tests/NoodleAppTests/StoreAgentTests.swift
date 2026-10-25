@@ -363,4 +363,31 @@ import XCTest
         XCTAssertNotNil(f.store.errorMessage)
         XCTAssertEqual(try f.repository.loadAgents().first { $0.id == f.a.id }?.reasoningEffort, "low")
     }
+
+    /// A bot made by a version older than 0.13.0 waits alone and says how to upgrade it. The others
+    /// load, and storage is ready, which is what lets update checks start (issue #195).
+    func testAnOlderBotWaitsAloneWithTheStepsToUpgradeIt() throws {
+        let f = try fixture()
+        let layout = f.repository.storage(for: f.b.id)
+        try FileManager.default.removeItem(at: layout.package.appendingPathComponent(AgentStorageLayout.markerName))
+        let files = try FileManager.default.contentsOfDirectory(atPath: layout.package.path).sorted()
+        let configuration = try Data(contentsOf: layout.configuration)
+        f.store.reload()
+        XCTAssertTrue(f.store.storageReady)
+        XCTAssertEqual(f.store.agents.map(\.id), [f.a.id])
+        XCTAssertEqual(f.store.setAsideAgents.map(\.id), [f.b.id])
+        let steps = "This bot was made by a Noodle version older than 0.13.0. To upgrade it, back up your Noodle data, install Noodle 0.13.0 from https://github.com/pdparchitect/noodle/releases/tag/v0.13.0, open it, and accept each update it offers."
+        XCTAssertEqual(f.store.errorMessage, "Grace can't start. " + steps)
+        XCTAssertEqual(f.store.errorLink, .init(message: "Grace can't start. " + steps, title: "Upgrade Steps", url: AgentStorageError.upgradeStepsURL))
+        XCTAssertEqual(f.store.pauseSummary(for: f.directB), "Needs an upgrade")
+        XCTAssertEqual(f.store.pauseDetail(for: f.directB), steps)
+        XCTAssertNil(f.store.pauseSummary(for: f.directA))
+
+        // Once is enough: reloading does not show it again.
+        f.store.errorMessage = nil
+        f.store.reload()
+        XCTAssertNil(f.store.errorMessage)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: layout.package.path).sorted(), files)
+        XCTAssertEqual(try Data(contentsOf: layout.configuration), configuration)
+    }
 }

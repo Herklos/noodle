@@ -9,6 +9,7 @@ public enum RestrictedHarnessStorage {
     public static func home(workspace: URL) -> URL { workspace.appendingPathComponent(".noodle/home") }
 
     public static func prepare(provider: HarnessProvider, workspace: URL, loginHome: URL, settingsHome: URL? = nil,
+                               now: Date = Date(),
                                secret: (String, String) throws -> Data? = readSecret,
                                writeSecret: ((String, String, Data) throws -> Void)? = nil) throws {
         _ = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home", create: true)
@@ -106,11 +107,14 @@ public enum RestrictedHarnessStorage {
             }
         default: break
         }
-        for name in loginNames(provider) where runtime.contains(failedStamp(provider, name)) {
-            guard (try? runtime.read(failedStamp(provider, name), limit: 256)) != (try? runtime.read(SharedLogin.stamp(provider, name), limit: 256)) else {
-                throw refused(provider)
+        for name in loginNames(provider) {
+            guard let note = RefusedLogin(runtime, provider, name) else { continue }
+            // A note of the login the bot holds is kept once it lapses, so a further refusal waits longer.
+            guard note.login == (try? runtime.read(SharedLogin.stamp(provider, name), limit: 256)) else {
+                runtime.remove(failedStamp(provider, name))
+                continue
             }
-            runtime.remove(failedStamp(provider, name))
+            if now < note.until { throw refused(provider) }
         }
     }
 
@@ -175,24 +179,32 @@ public enum RestrictedHarnessStorage {
         try? FileManager.default.removeItem(at: folder)
     }
 
-    /// Notes that the login the bot holds was refused. Starting again on it cannot
-    /// work and would only show the bot as ready, so `prepare` refuses until a new
-    /// sign-in or another bot's refresh replaces it.
-    public static func loginFailed(provider: HarnessProvider, workspace: URL) throws {
+    /// Notes that the login the bot holds was refused. Starting again on it at once
+    /// would only show the bot as ready, so `prepare` refuses it for a while: five
+    /// minutes, twice as long after each further refusal of the same login, up to
+    /// four hours, and never past the moment its access token expires, when the
+    /// harness refreshes it. A new sign-in or another bot's refresh ends that at once.
+    public static func loginFailed(provider: HarnessProvider, workspace: URL, now: Date = Date()) throws {
         let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime")
+        let expiry = provider == .claudeCode ? claudeExpiry(workspace: workspace) : nil
         for name in loginNames(provider) where runtime.contains(SharedLogin.stamp(provider, name)) {
-            try runtime.writeData(runtime.read(SharedLogin.stamp(provider, name), limit: 256), named: failedStamp(provider, name))
+            let login = try runtime.read(SharedLogin.stamp(provider, name), limit: 256)
+            let previous = RefusedLogin(runtime, provider, name)
+            let refusals = previous?.login == login ? (previous?.refusals ?? 0) + 1 : 1
+            var until = now.addingTimeInterval(min(5 * 60 * pow(2, Double(min(refusals, 16) - 1)), 4 * 60 * 60))
+            if let expiry, expiry > now { until = min(until, expiry) }
+            try runtime.writeData(RefusedLogin(login: login, until: until, refusals: refusals).data, named: failedStamp(provider, name))
         }
     }
 
-    /// Whether the next start would hand the bot the login it was refused with, asked
-    /// before the start so the bot never shows as ready on it. Only Claude Code notes
-    /// refused logins.
-    public static func refusedAgain(provider: HarnessProvider, workspace: URL, loginHome: URL,
+    /// Whether the next start would hand the bot the login it was refused with, while
+    /// that refusal holds; asked before the start so the bot never shows as ready on it.
+    /// Only Claude Code notes refused logins.
+    public static func refusedAgain(provider: HarnessProvider, workspace: URL, loginHome: URL, now: Date = Date(),
                                     secret: (String, String) throws -> Data? = readSecret) -> Bool {
         guard provider == .claudeCode, let accountPath = accountPath(provider),
               let runtime = try? WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime"),
-              let refused = try? runtime.read(failedStamp(provider, ".credentials.json"), limit: 256),
+              let note = RefusedLogin(runtime, provider, ".credentials.json"), now < note.until,
               let shared = try? SharedLogin(provider: provider, workspace: workspace, loginHome: loginHome, accountPath: accountPath)
         else { return false }
         let source = try? WorkspaceMailbox(workspace: loginHome, path: accountPath)
@@ -201,16 +213,75 @@ public enum RestrictedHarnessStorage {
               let login = try? claudeLogin(data) else { return false }
         let destination = try? WorkspaceMailbox(workspace: workspace, path: ".noodle/home/" + accountPath)
         return shared.next(".credentials.json", from: .item(login), destination: destination, runtime: runtime)
-            .map(shared.tag) == refused
+            .map(shared.tag) == note.login
+    }
+
+    /// When a start on the login the harness refused is allowed again, past once that
+    /// refusal lapsed; nil when no refusal is noted. Reads no login.
+    public static func refusedUntil(provider: HarnessProvider, workspace: URL) -> Date? {
+        guard let runtime = try? WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime") else { return nil }
+        return loginNames(provider).compactMap { RefusedLogin(runtime, provider, $0)?.until }.max()
+    }
+
+    /// Lets the next start use the refused login: the person asked to retry, or the login worked after all.
+    public static func forgetRefusedLogin(provider: HarnessProvider, workspace: URL) {
+        guard let runtime = try? WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime") else { return }
+        for name in loginNames(provider) where runtime.contains(failedStamp(provider, name)) {
+            runtime.remove(failedStamp(provider, name))
+        }
     }
 
     /// Worded so the runtime recognises it as a sign-in failure.
     public static func refused(_ provider: HarnessProvider) -> HarnessSetupError {
-        HarnessSetupError("Not logged in: \(provider.displayName) refused this login and nobody has signed in since. Sign in to the harness, then retry.")
+        HarnessSetupError("Not logged in: \(provider.displayName) \(refusal)")
     }
+
+    /// Whether a start failed because `prepare` or the host refused the login, so it reached no harness.
+    public static func isRefusal(_ detail: String) -> Bool { detail.contains(refusal) }
+
+    private static let refusal = "refused this login and nobody has signed in since. Sign in to the harness, then retry."
 
     private static func failedStamp(_ provider: HarnessProvider, _ name: String) -> String {
         "auth-failed-\(provider.rawValue)-\(name).sha256"
+    }
+
+    /// The refused login, as the tag of its seed, until when a start on it is refused,
+    /// and how many times in a row it was refused, one per line.
+    private struct RefusedLogin {
+        let login: Data
+        let until: Date
+        let refusals: Int
+
+        init(login: Data, until: Date, refusals: Int) {
+            self.login = login
+            self.until = until
+            self.refusals = refusals
+        }
+
+        init?(_ runtime: WorkspaceMailbox, _ provider: HarnessProvider, _ name: String) {
+            guard runtime.contains(RestrictedHarnessStorage.failedStamp(provider, name)),
+                  let data = try? runtime.read(RestrictedHarnessStorage.failedStamp(provider, name), limit: 256) else { return nil }
+            let lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+            guard let login = lines.first, !login.isEmpty else { return nil }
+            self.login = Data(login.utf8)
+            // A note without a time lapsed long ago.
+            until = lines.dropFirst().first.flatMap { TimeInterval($0) }.map(Date.init(timeIntervalSince1970:)) ?? .distantPast
+            refusals = lines.dropFirst(2).first.flatMap { Int($0) } ?? 1
+        }
+
+        var data: Data {
+            Data("\(String(decoding: login, as: UTF8.self))\n\(until.timeIntervalSince1970)\n\(refusals)".utf8)
+        }
+    }
+
+    /// When the access token of the Claude Code login the bot holds expires.
+    private static func claudeExpiry(workspace: URL) -> Date? {
+        guard let home = try? WorkspaceMailbox(workspace: workspace, path: ".noodle/home/.claude"), home.contains(".credentials.json"),
+              let data = try? home.read(".credentials.json", limit: 1_048_576),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let milliseconds = ((payload["claudeAiOauth"] as? [String: Any])?["expiresAt"] as? NSNumber)?.doubleValue
+        else { return nil }
+        return Date(timeIntervalSince1970: milliseconds / 1000)
     }
 
     /// Replaces only the Claude.ai login in the item, and only while the item still

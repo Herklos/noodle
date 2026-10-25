@@ -342,7 +342,7 @@ import XCTest
         let f = try fixture(), agent = try f.agent(harness: .claudeCode)
         f.runtime.checkSignIn = { _ in true }
         try f.start(agent).transition(.failed, failure: .authenticationRequired)
-        f.factory.startFailure = .authenticationRequired
+        f.factory.startRefusedUntil = f.clock.date + 365 * 24 * 60 * 60
         for _ in 0..<8 {
             f.clock.date += 60 * 60
             let before = f.factory.processes.count
@@ -350,10 +350,90 @@ import XCTest
             try await f.clock.waitUntil { f.factory.processes.count == before + 1 }
             XCTAssertEqual(f.runtime.snapshot(for: agent.id).failure, .authenticationRequired)
         }
-        f.factory.startFailure = nil
+        f.factory.startRefusedUntil = nil
         f.clock.date += 60 * 60
         f.runtime.reconcile(agents: [agent], repository: f.repository)
         try await f.clock.waitUntil { f.factory.processes.count == 10 }
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
+    }
+
+    /// Steps the clock a minute at a time from now and returns the minutes at which the bot was started again.
+    private func restartMinutes(_ f: RuntimeCoordinatorFixture, _ agent: AgentRecord, through last: Int,
+                                each minute: (Int) -> Void = { _ in }) async -> [Int] {
+        let start = f.clock.date
+        var restarts: [Int] = []
+        for elapsed in 0...last {
+            f.clock.date = start + TimeInterval(elapsed * 60)
+            minute(elapsed)
+            let before = f.factory.processes.count
+            f.runtime.reconcile(agents: [agent], repository: f.repository)
+            for _ in 0..<20 { await Task.yield() }
+            if f.factory.processes.count > before { restarts.append(elapsed) }
+        }
+        return restarts
+    }
+
+    /// Grok Build and OpenCode refuse a login while they start. Those are real starts on the
+    /// login, so they keep the few spaced-out retries and then wait for a new sign-in.
+    func testAHarnessRefusingItsLoginWhileStartingIsRetriedOnlyAFewTimes() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .grokBuild)
+        f.runtime.checkSignIn = { _ in true }
+        try f.start(agent).transition(.failed, failure: .authenticationRequired)
+        f.factory.startFailure = .authenticationRequired
+        let restarts = await restartMinutes(f, agent, through: 3 * 60)
+        XCTAssertEqual(restarts, [0, 2, 6, 14], "Retries 2, 4 and 8 minutes apart, then none")
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).failure, .authenticationRequired)
+    }
+
+    /// A start the host refused reached no harness: it is asked again when the refusal lapses,
+    /// and every ten minutes until then, which notices a new sign-in, never every two.
+    func testRefusedStartsAreAskedAgainWhenTheRefusalLapsesAndOtherwiseOnlyEveryTenMinutes() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode)
+        f.runtime.checkSignIn = { _ in true }
+        try f.start(agent).transition(.failed, failure: .authenticationRequired)
+        let lapse = f.clock.date + 25 * 60
+        f.factory.startRefusedUntil = lapse
+        let restarts = await restartMinutes(f, agent, through: 40) { elapsed in
+            if elapsed == 25 { f.factory.startRefusedUntil = nil }
+        }
+        XCTAssertEqual(restarts, [0, 10, 20, 25])
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
+    }
+
+    /// Where the refusal of the login is noted, the host refuses the starts in between and so spaces
+    /// out the real tries; those go on past the few, so the bot does not wait for a person.
+    func testABotWhoseRefusedLoginIsNotedKeepsBeingRetried() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode)
+        let workspace = f.repository.directory(for: agent)
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime", create: true)
+        try runtime.writeData(Data("login-key:spent".utf8), named: "auth-seed-claude-code-.credentials.json.sha256")
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: workspace, now: f.clock.date)
+        f.runtime.checkSignIn = { _ in true }
+        try f.start(agent).transition(.failed, failure: .authenticationRequired)
+        f.factory.startFailure = .authenticationRequired
+        let restarts = await restartMinutes(f, agent, through: 3 * 60)
+        XCTAssertEqual(restarts, [0, 2, 6, 14] + Array(stride(from: 30, through: 3 * 60, by: 16)))
+    }
+
+    /// Opening the Kick alert can let a background check start the bot again before Retry Now
+    /// is chosen. The bot still waits for sign-in, so Retry Now retries, on the refused login too.
+    func testRetryNowForgetsTheRefusedLoginAndRetriesThoughTheBotWasStartedAgainMeanwhile() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
+        let workspace = f.repository.directory(for: agent)
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime", create: true)
+        try runtime.writeData(Data("login-key:spent".utf8), named: "auth-seed-claude-code-.credentials.json.sha256")
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: workspace, now: f.clock.date)
+        process.transition(.failed, failure: .authenticationRequired)
+        let request = try XCTUnwrap(f.runtime.kick(agent: agent, repository: f.repository))
+        f.factory.startRefusedUntil = f.clock.date + 5 * 60
+        f.runtime.restart(agent: agent, repository: f.repository)
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).failure, .authenticationRequired)
+        f.factory.startRefusedUntil = nil
+        let before = f.factory.processes.count
+        f.runtime.confirmKick(request, repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, before + 1, "Retry Now must retry")
+        XCTAssertNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: workspace),
+                     "The host must not refuse the retry the person asked for")
         XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
     }
 

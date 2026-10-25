@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- A conversation scrolled up to older messages shows a down arrow above the message field. Tap it to go back to the latest message, and new ones follow again. It hides once the latest message shows.
+
+### What to Test
+
+- In a long conversation, scroll up: check a down arrow shows at the bottom right, above the message field. Tap it: check the conversation goes to the latest message, the arrow hides, and a new reply follows. Open the keyboard while scrolled up: check the arrow sits above the message field, not under the keyboard. Scroll up while a reply arrives: check the conversation stays where you are reading.
+
 ## [0.45.0] - 2026-10-24
 
 ### Added

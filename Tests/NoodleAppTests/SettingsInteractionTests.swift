@@ -70,6 +70,27 @@ import NoodleCore
         withExtendedLifetime(presenter) {}
     }
 
+    /// An error that comes with a link, such as an older bot's upgrade steps, offers it beside OK (issue #195).
+    func testAnErrorWithALinkOpensItFromTheAlert() async throws {
+        let f = try fixture()
+        let window = try XCTUnwrap(host(Color.clear.frame(width: 300, height: 200)).window)
+        window.orderFront(nil)
+        final class Opened { var urls: [URL] = [] }
+        let opened = Opened(), url = AgentStorageError.upgradeStepsURL
+        let presenter = StoreErrorAlert(store: f.store, window: { window }, open: { opened.urls.append($0) })
+        f.store.errorLink = .init(message: "Grace can't start.", title: "Upgrade Steps", url: url)
+        f.store.errorMessage = "Grace can't start."
+        try await wait { window.attachedSheet != nil }
+        let alert = try XCTUnwrap(window.attachedSheet)
+        let buttons = views(in: alert.contentView).compactMap { $0 as? NSButton }
+        XCTAssertNotNil(buttons.first { $0.title == "OK" })
+        try XCTUnwrap(buttons.first { $0.title == "Upgrade Steps" }).performClick(nil)
+        try await wait { window.attachedSheet == nil && f.store.errorMessage == nil }
+        XCTAssertEqual(opened.urls, [url])
+        XCTAssertNil(f.store.errorLink)
+        withExtendedLifetime(presenter) {}
+    }
+
     private func views(in root: NSView?) -> [NSView] {
         guard let root else { return [] }
         return [root] + root.subviews.flatMap { views(in: $0) }

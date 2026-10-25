@@ -65,6 +65,29 @@ import Testing
         #expect(following.atBottom, "An automatic scroll is not a request to read older messages")
     }
 
+    @Test func scrollToLatestShowsOnlyWhileTheEndIsOutOfSight() {
+        var following = ConversationScroll.Following()
+        #expect(!following.awayFromEnd)
+        // A gap while lazy rows are measured is not the person leaving the end.
+        following.bottomChanged(false)
+        #expect(!following.awayFromEnd)
+        following.phaseChanged(.interacting)
+        #expect(following.awayFromEnd)
+        following.phaseChanged(.idle)
+        #expect(following.awayFromEnd, "It stays while the person reads older messages")
+        following.bottomChanged(true)
+        #expect(!following.awayFromEnd)
+        // A drag that starts at the end shows nothing until the end is out of sight.
+        following.phaseChanged(.interacting)
+        #expect(!following.awayFromEnd)
+        following.bottomChanged(false)
+        #expect(following.awayFromEnd)
+        following.phaseChanged(.idle)
+        // Tapping it follows the end again at once.
+        following.atBottom = true
+        #expect(!following.awayFromEnd)
+    }
+
     /// Opened, a conversation shows its end just above the composer, not past it, and does not sit
     /// shifted sideways until it is first scrolled.
     @MainActor @Test func aConversationOpensAtItsEnd() async throws {

@@ -61,7 +61,7 @@ struct AgentConfiguration: Codable {
 
     func requireBackstory() throws -> String {
         guard let backstory else {
-            throw AgentStorageError("This bot needs a backstory migration. Run Noodle 0.14.0 to move its backstory into agent.json before starting it.")
+            throw AgentStorageError.madeBefore("0.14.0")
         }
         return backstory
     }

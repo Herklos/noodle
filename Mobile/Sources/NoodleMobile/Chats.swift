@@ -2025,6 +2025,10 @@ enum ConversationScroll {
             self.bottom = bottom
             if scrolling || bottom { atBottom = bottom }
         }
+
+        /// Whether to offer the way back to the latest message: once the person has left the end and it
+        /// is out of sight. Not for a gap while lazy rows are measured, nor for a drag that starts at the end.
+        var awayFromEnd: Bool { !atBottom && !bottom }
     }
 
     /// Measured together so a correction never uses an offset from the previous layout pass.
@@ -2148,6 +2152,37 @@ struct ConversationScrolling: ViewModifier {
                     withAnimation { position.scrollTo(id: latest.id, anchor: anchor) }
                 }
             }
+            // Above the composer and the keyboard, whose room the conversation's safe area keeps.
+            .overlay(alignment: .bottomTrailing) {
+                ZStack {
+                    if following.awayFromEnd {
+                        Button(action: jumpToEnd) {
+                            Image(systemName: "chevron.down").font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 40, height: 40)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .accessibilityLabel("Scroll to Latest")
+                        .padding(.trailing, 12)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
+                }
+                // Only the button fades: animating the conversation with it would move its rows too.
+                .animation(.easeOut(duration: 0.2), value: following.awayFromEnd)
+            }
+    }
+
+    /// Back to the latest message, following new ones again.
+    private func jumpToEnd() {
+        following.atBottom = true
+        if #available(iOS 27, *), end != nil {
+            withAnimation { scrollToEnd() }
+        } else if let latest {
+            withAnimation { position.scrollTo(id: latest.id, anchor: .bottom) }
+        }
     }
 
     private func scrollToEnd() {

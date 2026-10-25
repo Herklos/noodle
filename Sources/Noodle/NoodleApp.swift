@@ -3,6 +3,7 @@ import Darwin
 import SwiftUI
 import NoodleCore
 import NoodleLaunchChecks
+import NoodleRuntime
 import NoodleRuntimeSettings
 import NoodleSettingsUI
 import UserNotifications
@@ -344,6 +345,8 @@ struct RootView: View {
     @State private var isFileDropTargeted = false
     @State private var composerFocusRequest = UUID()
     @State private var sidebarFocusRequest = UUID()
+    /// The Kick alert of the selected conversation's paused bot, asked for from the toolbar.
+    @State private var kickRequest: AgentKickRequest?
 
     var body: some View {
         Group {
@@ -497,7 +500,9 @@ struct RootView: View {
 
             ToolbarSpacer(.flexible)
             ToolbarItem {
-                if let conversation = store.selectedConversation { ConversationPauseControl(conversation: conversation) }
+                if let conversation = store.selectedConversation {
+                    ConversationPauseControl(conversation: conversation, kickRequest: $kickRequest)
+                }
             }
             ToolbarItem {
                 if let conversation = store.selectedConversation { VoiceCallToolbarControl(conversation: conversation) }
@@ -535,6 +540,8 @@ struct RootView: View {
                 .noodleSheetSizing()
         }
         .modifier(SpaceAlerts())
+        // Presented by the window, not by the toolbar item that asks for it.
+        .modifier(AgentKickConfirmation(store: store, request: $kickRequest))
         .sheet(isPresented: $store.editsSpaces) {
             SpaceEditorSheet()
                 .environment(store)

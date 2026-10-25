@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 import NoodleCore
+import NoodleRuntime
+import NoodleRuntimeSettings
 import NoodleWallpaper
 
 /// A window holds an ID, so edits and new messages always come from the shared store.
@@ -16,6 +18,8 @@ struct ConversationWindowView: View {
     @State private var backgroundBeingEdited: BotConversation?
     @State private var isFileDropTargeted = false
     @State private var composerFocusRequest: UUID?
+    /// The Kick alert of this conversation's paused bot, asked for from the toolbar.
+    @State private var kickRequest: AgentKickRequest?
 
     private func open(_ id: UUID) {
         guard store.conversations.contains(where: { $0.id == id }) else { return }
@@ -71,7 +75,7 @@ struct ConversationWindowView: View {
                 .sharedBackgroundVisibility(.hidden)
 
             ToolbarItem(placement: .primaryAction) {
-                if let conversation { ConversationPauseControl(conversation: conversation) }
+                if let conversation { ConversationPauseControl(conversation: conversation, kickRequest: $kickRequest) }
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -118,6 +122,8 @@ struct ConversationWindowView: View {
         .sheet(item: $backgroundBeingEdited) { conversation in
             ConversationBackgroundSheet(conversation: conversation).environment(store).noodleSheetSizing()
         }
+        // Presented by the window, not by the toolbar item that asks for it.
+        .modifier(AgentKickConfirmation(store: store, request: $kickRequest))
         // A window opened or brought back for a conversation starts in its input.
         .onAppear { composerFocusRequest = UUID() }
         .onReceive(NotificationCenter.default.publisher(for: .focusConversationComposer)) { notification in
@@ -152,6 +158,7 @@ struct ConversationWindowView: View {
 @MainActor final class StoreErrorAlert {
     private let store: NoodleStore
     private let window: () -> NSWindow?
+    private let open: (URL) -> Void
     private var alert: NSAlert?
     private var keyObserver: NSObjectProtocol?
 
@@ -160,9 +167,10 @@ struct ConversationWindowView: View {
     init(store: NoodleStore, window: @escaping () -> NSWindow? = {
         guard let app = NSApp else { return nil }
         return app.keyWindow ?? app.mainWindow ?? app.orderedWindows.first { $0.isVisible && $0.canBecomeMain }
-    }) {
+    }, open: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) }) {
         self.store = store
         self.window = window
+        self.open = open
         // An error that arrived with no window open is shown once one is.
         keyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.show(self?.store.errorMessage) }
@@ -189,10 +197,14 @@ struct ConversationWindowView: View {
         alert.messageText = "Noodle"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
+        let link = store.errorLink.flatMap { $0.message == message ? $0 : nil }
+        if let link { alert.addButton(withTitle: link.title) }
         self.alert = alert
-        alert.beginSheetModal(for: parent) { [weak self] _ in
+        alert.beginSheetModal(for: parent) { [weak self] response in
             guard let self else { return }
             self.alert = nil
+            if let link, response == .alertSecondButtonReturn { self.open(link.url) }
+            if store.errorLink?.message == alert.informativeText { store.errorLink = nil }
             if store.errorMessage == alert.informativeText { store.errorMessage = nil } else { show(store.errorMessage) }
         }
     }

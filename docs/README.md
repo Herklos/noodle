@@ -13,6 +13,7 @@
 - [Games](gaming.md)
 - [Security](security.md)
 - [Privacy](privacy.md)
+- [Upgrade a bot from an older version](releases.md#bots-from-older-versions)
 - [Noodle Computer](../Computer/README.md)
 - [Noodle Browser](../Browser/README.md)
 - [Noodle Hub](../Hub/README.md)

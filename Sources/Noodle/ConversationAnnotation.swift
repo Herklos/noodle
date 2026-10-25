@@ -107,7 +107,7 @@ struct ConversationAnnotationText: NSViewRepresentable {
     let editor = AttachmentPreviewController()
     let markers = NSHashTable<ConversationAnnotationText.Marker>.weakObjects()
     private(set) weak var window: NSWindow?
-    private weak var selectedText: ConversationAnnotationText.Marker?
+    private(set) weak var selectedText: ConversationAnnotationText.Marker?
     private(set) var conversationID: UUID?
     private var title = "Conversation"
     /// What a region capture is named after, before the title.

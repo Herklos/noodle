@@ -11,6 +11,17 @@ public struct CreatedAgentWorkspace: Sendable {
     public let conversation: BotConversation
 }
 
+/// A bot folder that cannot be loaded, such as one made by an older version: left as it is
+/// and out of the bots, so it never starts while the others do.
+public struct SetAsideAgent: Equatable, Sendable {
+    /// From the folder's name; nil when that is not a bot identifier.
+    public let id: UUID?
+    /// From its agent.json, when that can be read.
+    public let displayName: String?
+    public let message: String
+    public let helpURL: URL?
+}
+
 public enum WorkspaceError: LocalizedError, Equatable {
     case emptyName
     case missingAgent(UUID)
@@ -467,13 +478,21 @@ public struct WorkspaceRepository: Sendable {
         for (_, staged) in moved { try? FileManager.default.removeItem(at: staged) }
     }
 
+    /// The bots that load; see `loadAgentsSettingAside` for those that do not.
+    public func loadAgents() throws -> [AgentRecord] {
+        try loadAgentsSettingAside().agents
+    }
+
     /// Several loops ask every second, so a package is read in full only when one of its
     /// entries changed since; anything replaced or redirected is checked again.
-    public func loadAgents() throws -> [AgentRecord] {
+    /// A package that cannot be loaded, such as one made by an older version, is set aside
+    /// untouched with why, so one bot never keeps the others from loading.
+    public func loadAgentsSettingAside() throws -> (agents: [AgentRecord], setAside: [SetAsideAgent]) {
         try prepare()
         let packages = try FileManager.default.contentsOfDirectory(at: agentsURL, includingPropertiesForKeys: nil,
                                                                    options: [.skipsHiddenFiles])
         var agents: [AgentRecord] = []
+        var setAside: [SetAsideAgent] = []
         let root = rootURL.path, parent = agentsURL.path
         for url in packages {
             let package = url.path
@@ -487,18 +506,27 @@ public struct WorkspaceRepository: Sendable {
             }
             let layout = AgentStorageLayout(package: url)
             guard AgentStorageLayout.exists(layout.configuration) else { continue }
-            try AgentStorageLayout.requireDirectory(url)
-            try AgentStorageLayout.requireFile(layout.configuration)
-            agentRecords.read()
-            try layout.restoreMissingFolders()
-            try layout.validate()
-            let configuration = try AgentConfiguration.load(from: layout)
-            _ = try configuration.requireBackstory()
-            if let stamp { agentRecords.store(configuration.agent, at: package, stamp: stamp) }
-            agents.append(configuration.agent)
+            do {
+                try AgentStorageLayout.requireDirectory(url)
+                try AgentStorageLayout.requireFile(layout.configuration)
+                agentRecords.read()
+                try layout.restoreMissingFolders()
+                try layout.validate()
+                let configuration = try AgentConfiguration.load(from: layout)
+                _ = try configuration.requireBackstory()
+                if let stamp { agentRecords.store(configuration.agent, at: package, stamp: stamp) }
+                agents.append(configuration.agent)
+            } catch {
+                // Read, never written: its name, when its agent.json still reads as a bot's.
+                setAside.append(SetAsideAgent(id: UUID(uuidString: url.lastPathComponent),
+                                              displayName: (try? AgentConfiguration.load(from: layout))?.agent.displayName,
+                                              message: error.localizedDescription,
+                                              helpURL: (error as? AgentStorageError)?.helpURL))
+            }
         }
         agentRecords.keep(packages.map(\.path))
-        return agents.sorted { $0.createdAt < $1.createdAt }
+        return (agents.sorted { $0.createdAt < $1.createdAt },
+                setAside.sorted { ($0.displayName ?? "", $0.id?.uuidString ?? "") < ($1.displayName ?? "", $1.id?.uuidString ?? "") })
     }
 
     private func saveAgentRecord(_ agent: AgentRecord) throws {

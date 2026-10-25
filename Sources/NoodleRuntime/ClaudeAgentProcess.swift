@@ -50,6 +50,8 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
     private var usageResetsAt: Date?
     /// Held for Kick after a safety stop; new messages wait instead of starting Claude again.
     private var paused = false
+    /// A turn finished on the login since this runtime started, so no refusal of it is noted.
+    private var loginWorked = false
     private lazy var trace = RuntimeTrace(agentID: configuration.id, provider: .claudeCode, workspace: workspaceURL)
 
 
@@ -144,7 +146,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
                     guard let self, self.connectionID == connectionID, !self.intentionallyStopped, !self.terminationReported else { return }
                     if let error {
                         // The host refuses a start on a login Claude Code already refused.
-                        if ClaudeProtocol.isAuthenticationFailure(error) { self.pauseForSignIn() } else { self.reportUnexpectedTermination(error) }
+                        if ClaudeProtocol.isAuthenticationFailure(error) {
+                            self.pauseForSignIn(refused: RestrictedHarnessStorage.isRefusal(error))
+                        } else {
+                            self.reportUnexpectedTermination(error)
+                        }
                         return
                     }
                     self.startupTimeout?.cancel()
@@ -400,6 +406,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             pauseForSignIn()
             return
         }
+        // Claude Code answered on the login, so a refusal noted earlier no longer holds.
+        if !failed, !extendedAccess, !loginWorked {
+            loginWorked = true
+            RestrictedHarnessStorage.forgetRefusedLogin(provider: .claudeCode, workspace: workspaceURL)
+        }
         if failed, usageRejected || detail.map(ClaudeProtocol.isUsageLimit) == true {
             // Restarting cannot restore usage. The unfinished turn stays recorded, so Kick or another harness picks it up.
             pauseForUsageLimit(resetsAt: detail.flatMap(ClaudeProtocol.usageLimitReset) ?? usageResetsAt)
@@ -443,18 +454,29 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
     }
 
     private func didTerminate(status: Int32) {
-        if let lastErrorText, ClaudeProtocol.isAuthenticationFailure(lastErrorText) { pauseForSignIn(); return }
+        if let lastErrorText, ClaudeProtocol.isAuthenticationFailure(lastErrorText) {
+            pauseForSignIn(refused: RestrictedHarnessStorage.isRefusal(lastErrorText))
+            return
+        }
         reportUnexpectedTermination(lastErrorText ?? "Claude Code exited with status \(status)")
     }
 
-    /// Restarting cannot sign the user in. Stay paused for an explicit retry.
-    private func pauseForSignIn() {
+    /// Restarting at once cannot sign the user in. Stay paused; the runtime retries later, or on Kick.
+    /// A start `refused` on the login Claude Code already refused reached no one, so it is not noted
+    /// again, and the runtime learns when that refusal lapses.
+    private func pauseForSignIn(refused: Bool = false) {
         guard !intentionallyStopped, !terminationReported else { return }
-        if !extendedAccess { try? RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: workspaceURL) }
+        loginWorked = false
+        var refusedUntil: Date?
+        if refused {
+            refusedUntil = RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: workspaceURL) ?? Date()
+        } else if !extendedAccess {
+            try? RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: workspaceURL)
+        }
         trace.finish(.turnFailed)
         disconnect()
         update(.failed, "Claude Code needs you to sign in. Open Harness settings and sign in, then retry.",
-               failure: .authenticationRequired)
+               failure: .authenticationRequired, signInRefusedUntil: refusedUntil)
     }
 
     private func pauseForUsageLimit(resetsAt: Date?) {
@@ -498,14 +520,16 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         connection = nil
     }
 
-    private func update(_ phase: AgentRuntimePhase, _ detail: String, failure: AgentRuntimeFailure? = nil, usageResetsAt: Date? = nil) {
+    private func update(_ phase: AgentRuntimePhase, _ detail: String, failure: AgentRuntimeFailure? = nil, usageResetsAt: Date? = nil,
+                        signInRefusedUntil: Date? = nil) {
         snapshot = AgentRuntimeSnapshot(
             agentID: configuration.id,
             phase: phase,
             detail: detail,
             processIdentifier: processIdentifier,
             failure: failure,
-            usageResetsAt: usageResetsAt
+            usageResetsAt: usageResetsAt,
+            signInRefusedUntil: signInRefusedUntil
         )
         onSnapshot(snapshot)
     }

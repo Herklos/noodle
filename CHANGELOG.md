@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Added
+
+- A conversation scrolled up to older messages shows a down arrow above the message field. Click it to go back to the latest message, and new ones follow again. It hides once the latest message shows.
+
 ### Changed
 
 - Noodle keeps its own sign-in for every harness, separate from the one the harness uses in Terminal and from a Noodle Hub on the same Mac, so they no longer use up each other's sign-ins and sign each other out. After updating, sign in once in Settings › Harness. Bots with unrestricted access no longer use your own harness settings and conversations in your home folder. In a bot's settings, the sign-in it uses without a profile is called Default. The copies of the Terminal sign-ins Noodle kept for its bots are deleted, and deleting a profile now also deletes the copy of it its bots shared.
@@ -13,7 +17,12 @@ All notable changes to Noodle are documented here, following
 
 ### Fixed
 
-- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed" on the Mac and on your iPhone, instead of showing as ready again after each automatic retry. Settings › Harnesses says sign-in is required and offers Sign In, though the saved login still looks valid. The bot comes back by itself after you sign in again or another bot's refresh gets the login working.
+- A conversation scrolled back down to its latest message by hand follows new messages again. Before, Noodle left out the part of the conversation under the titlebar, so it thought you hadn't reached the end yet. Thanks to Emircan Sahin for finding this.
+- The alert that asks you to sign in again when you Kick a paused bot no longer comes back after you choose Open Harness Settings in the main window. Every button of Kick's alerts now closes it for good.
+- Text selected in a table can be annotated with the Add Annotation shortcut, in a conversation and in the whole table opened from its rows, instead of beeping.
+- A bot made by a Noodle version older than 0.13.0 or 0.14.0 no longer keeps every other bot from starting, or Noodle from checking for updates. Only that bot waits, marked Needs an upgrade, and its message says how to upgrade it: back up your Noodle data, install the version it names from its release page, open it and accept each update. Upgrade Steps in the message opens the [full steps](docs/releases.md#bots-from-older-versions).
+- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed" on the Mac and on your iPhone, instead of showing as ready again after each automatic retry. Settings › Harnesses says sign-in is required and offers Sign In, though the saved login still looks valid; for a bot on a profile, so does that profile in Profiles. The bot comes back by itself within about ten minutes after you sign in again or another bot's refresh gets the login working. It also tries the same login again after 5 minutes, then twice as long after each refusal, up to every 4 hours, so a login the service turned away only for a moment doesn't leave the bot waiting for you.
+- Retry Now, in the alert of a bot waiting for sign-in, now always retries. Before, it often did nothing, when Noodle had tried the bot again in the background while the alert was open.
 
 ## [0.75.0] - 2026-10-24
 
