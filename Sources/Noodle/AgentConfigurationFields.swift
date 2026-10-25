@@ -113,7 +113,7 @@ struct AgentConfigurationFields: View {
                     Button { choosingProfile = true } label: {
                         RuntimeSelectionRow(
                             title: "Profile",
-                            value: store.harnessProfiles.profile(selectedProfileID)?.displayName ?? "System",
+                            value: store.harnessProfiles.profile(selectedProfileID)?.displayName ?? "Default",
                             icon: AnyView(Image(systemName: "person.crop.circle"))
                         )
                     }
@@ -362,7 +362,7 @@ struct HarnessProfileChooser: View {
             Divider()
 
             List {
-                profileButton(id: nil, name: "System")
+                profileButton(id: nil, name: "Default")
                 ForEach(profiles) { profileButton(id: $0.id, name: $0.displayName) }
             }
             .listStyle(.inset)

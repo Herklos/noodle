@@ -234,6 +234,8 @@ public final class AgentRuntimeCoordinator {
     /// Whether a bot's harness login works now, asked without starting the bot or a turn;
     /// nil when it could not be told.
     @ObservationIgnored public var checkSignIn: (@MainActor (AgentRecord) async -> Bool?)?
+    /// The app's harness logins; the model lists come from the default ones, which bots without a profile use.
+    @ObservationIgnored public var harnessProfiles: HarnessProfileStore?
     @ObservationIgnored private var signInChecks: Set<UUID> = []
     @ObservationIgnored private var nextSignInCheck: [UUID: Date] = [:]
     /// Restarts since the bot was last seen signed out or finished a turn.
@@ -817,7 +819,8 @@ public final class AgentRuntimeCoordinator {
             }
             return
         }
-        let probe = CodexCapabilityProbe(executableURL: URL(fileURLWithPath: executablePath))
+        let probe = CodexCapabilityProbe(executableURL: URL(fileURLWithPath: executablePath),
+            codexHome: harnessProfiles.flatMap { store in (try? store.defaultProfile(.codex)).map(store.accountHome) })
         capabilityProbe = probe
         probe.loadModels { [weak self, weak probe] result in
             guard let self, self.capabilityProbe === probe else { return }

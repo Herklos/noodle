@@ -21,7 +21,7 @@ struct AgentConfiguration: Codable {
     /// What the bot's active groups share, copied from them on every workspace
     /// synchronization so Agent Host reads this file alone.
     var groupFolders: [AgentFolder] = []
-    /// Nil selects the system profile: the harness's login in the user's home.
+    /// Nil selects the harness's default profile, Noodle's own login for it.
     var harnessProfile: UUID?
     /// Only on Noodle Hub; its bots cannot change it, since only their workspace is theirs.
     var owner: AgentOwner?

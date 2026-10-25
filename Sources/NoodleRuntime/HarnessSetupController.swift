@@ -25,7 +25,7 @@ public final class HarnessSetupController {
     public private(set) var checking: Set<HarnessProvider> = []
     public private(set) var snapshots: [HarnessProvider: HarnessPresentationSnapshot]
     private let providers: [HarnessProvider: any HarnessSetupProviding]
-    /// Where the system login's plan limits go when a sign-in check reads them.
+    /// Where the default login's plan limits go when a sign-in check reads them.
     @ObservationIgnored public var subscriptionUsage: SubscriptionUsageStore? {
         didSet {
             (providers[.codex] as? CodexAccountProvider)?.onUsage = { [weak usage = self.subscriptionUsage] in
@@ -49,23 +49,16 @@ public final class HarnessSetupController {
     @ObservationIgnored private var statusChecks: [HarnessProvider: (id: UUID, installation: HarnessInstallation)] = [:]
 
     public init(providers: [HarnessProvider: any HarnessSetupProviding]? = nil, defaults: UserDefaults = .standard,
-         versionChecker: (any HarnessVersionChecking)? = nil, installer: (any HarnessInstalling)? = nil) {
+         versionChecker: (any HarnessVersionChecking)? = nil, installer: (any HarnessInstalling)? = nil,
+         profiles: HarnessProfileStore? = nil) {
         self.defaults = defaults
         self.versionChecker = versionChecker
         self.installer = installer
         let cached = HarnessPresentationCache.load(from: defaults)
         snapshots = cached
         authentication = cached.compactMapValues(\.authentication)
-        self.providers = providers ?? [
-            .apple: AppleSetupProvider(),
-            .codex: CodexAccountProvider(codexHome: HarnessStorage.codexHome),
-            .claudeCode: ClaudeCodeSetupProvider(),
-            .fx: FxSetupProvider(),
-            .grokBuild: GrokSetupProvider(),
-            .muse: MuseSetupProvider(),
-            .openCode: OpenCodeSetupProvider(),
-            .antigravity: AntigravitySetupProvider()
-        ]
+        // Bots without a profile use the app's own login, so that is the one a harness's row checks and signs in.
+        self.providers = providers ?? profiles.map(HarnessProfileAccounts.defaultLogins) ?? [:]
     }
 
     public var displayedInstallations: [HarnessInstallation] {

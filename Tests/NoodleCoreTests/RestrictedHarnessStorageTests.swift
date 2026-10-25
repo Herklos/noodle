@@ -65,6 +65,22 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertFalse(destination.contains(".credentials.json"))
     }
 
+    /// A bot that was never signed in pauses for sign-in and comes back by itself once it is,
+    /// instead of restarting over and over.
+    func testAMissingLoginReadsAsASignInFailure() throws {
+        for provider in [HarnessProvider.claudeCode, .antigravity] {
+            let (home, workspace, _) = try fixture()
+            // As a default profile's folders are laid out, before anyone signs in.
+            try FileManager.default.createDirectory(at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+            XCTAssertThrowsError(try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: home,
+                secret: { _, _ in nil })) {
+                let text = $0.localizedDescription
+                XCTAssertTrue(provider == .claudeCode ? ClaudeProtocol.isAuthenticationFailure(text)
+                              : AntigravityProtocol.isAuthenticationFailure(text), text)
+            }
+        }
+    }
+
     func testClaudeLoginIsReadThroughTheSecurityToolThatOwnsTheItem() throws {
         // Claude Code writes the item with /usr/bin/security, so only that tool
         // stays trusted across token refreshes. A direct read prompts every time.
@@ -148,6 +164,21 @@ final class RestrictedHarnessStorageTests: XCTestCase {
 
     /// Custom models route through the provider the person chose, so a restricted
     /// bot gets that choice and its catalogue, but no commands, servers or hooks.
+    /// A bot on the app's default Codex login keeps the person's model routing, which is not a login.
+    func testCodexRoutingCanComeFromAnotherHomeThanTheLogin() throws {
+        let (root, workspace, _) = try fixture()
+        let login = root.appendingPathComponent("default"), settings = root.appendingPathComponent("person")
+        for home in [login, settings] { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true) }
+        try WorkspaceMailbox(workspace: login, path: ".codex", create: true).writeData(Data("app-login".utf8), named: "auth.json")
+        let person = try WorkspaceMailbox(workspace: settings, path: ".codex", create: true)
+        try person.writeData(Data("person-login".utf8), named: "auth.json")
+        try person.writeData(Data("model_provider = \"opencodex\"\n".utf8), named: "config.toml")
+        try RestrictedHarnessStorage.prepare(provider: .codex, workspace: workspace, loginHome: login, settingsHome: settings)
+        let copy = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/.codex")
+        XCTAssertEqual(try copy.read("auth.json", limit: 100), Data("app-login".utf8))
+        XCTAssertTrue(String(decoding: try copy.read("config.toml", limit: 4096), as: UTF8.self).contains("model_provider = \"opencodex\""))
+    }
+
     func testCodexCarriesOnlyModelRoutingIntoTheBotsConfig() throws {
         let (home, workspace, _) = try fixture()
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -282,6 +313,86 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertFalse(refused())
         try prepare(first)
         try prepare(first)
+    }
+
+    /// A bot keeps no copy of a login it no longer uses, such as the one the harness's CLI keeps,
+    /// even when there is no new login yet to replace it.
+    func testACopyOfAnotherLoginIsDroppedEvenWithNoLoginToReplaceIt() throws {
+        let (root, workspace, _) = try fixture()
+        let cli = root.appendingPathComponent("cli"), own = root.appendingPathComponent("own")
+        try WorkspaceMailbox(workspace: try made(cli), path: ".codex", create: true).writeData(Data("cli-login".utf8), named: "auth.json")
+        _ = try WorkspaceMailbox(workspace: try made(own), path: ".codex", create: true)
+        try RestrictedHarnessStorage.prepare(provider: .codex, workspace: workspace, loginHome: cli)
+        let copy = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/.codex")
+        XCTAssertTrue(copy.contains("auth.json"))
+        XCTAssertThrowsError(try RestrictedHarnessStorage.prepare(provider: .codex, workspace: workspace, loginHome: own))
+        XCTAssertFalse(copy.contains("auth.json"))
+    }
+
+    // TODO(0.77.0): remove with RestrictedHarnessStorage.removeSharedLogins, its call in NoodleStore.reload
+    // and in Hub.init (TODO(Hub 0.44.0)). Milestones: 0.76.0, Hub 0.43.0.
+    func testSharedCopiesOfTheCLIsOwnLoginsAreRemoved() throws {
+        let (root, first, _) = try fixture()
+        let cli = root.appendingPathComponent("cli"), own = root.appendingPathComponent("own")
+        for home in [cli, own] {
+            try WorkspaceMailbox(workspace: try made(home), path: ".claude", create: true)
+                .writeData(Data(#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r"}}"#.utf8), named: ".credentials.json")
+        }
+        let storage = first.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let logins = storage.appendingPathComponent("HarnessLogins")
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: first, loginHome: cli) { _, _ in nil }
+        let cliCopies = try FileManager.default.contentsOfDirectory(atPath: logins.path)
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: first, loginHome: own) { _, _ in nil }
+        RestrictedHarnessStorage.removeSharedLogins(root: storage, loginHome: cli)
+        let left = try FileManager.default.contentsOfDirectory(atPath: logins.path)
+        XCTAssertEqual(left.count, 1)
+        XCTAssertFalse(cliCopies.contains(left[0]), "Only the CLI's copy goes")
+    }
+
+    private func made(_ url: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func testAClaudeLoginIsDueHalfAnHourBeforeItExpires() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func login(expiresIn seconds: TimeInterval) -> Data {
+            Data(#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":\#(Int((now.timeIntervalSince1970 + seconds) * 1000))}}"#.utf8)
+        }
+        XCTAssertTrue(ClaudeLoginRefresh.isDue(login(expiresIn: 29 * 60), now: now))
+        XCTAssertFalse(ClaudeLoginRefresh.isDue(login(expiresIn: 31 * 60), now: now))
+        XCTAssertFalse(ClaudeLoginRefresh.isDue(Data(#"{"claudeAiOauth":{"accessToken":"a"}}"#.utf8), now: now), "Nothing to renew with")
+    }
+
+    /// Every bot would otherwise refresh in the same minute before the login expires, and only one can win.
+    func testTheHostRenewsAClaudeLoginOnceAndEveryBotGetsIt() throws {
+        let (home, first, second) = try fixture()
+        let soon = Int((Date().timeIntervalSince1970 + 20 * 60) * 1000)
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"one","refreshToken":"r1","expiresAt":\#(soon)}}"#.utf8)
+        let secret: (String, String) throws -> Data? = { _, _ in login }
+        for workspace in [first, second] {
+            try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        // Stands in for Claude Code, which renews a login it finds about to expire when it starts.
+        let claude = home.deletingLastPathComponent().appendingPathComponent("claude")
+        try Data(#"""
+            #!/bin/sh
+            f="$CLAUDE_CONFIG_DIR/.credentials.json"
+            [ "$CLAUDE_CONFIG_DIR" = "$HOME/.claude" ] || exit 1
+            /usr/bin/grep -q '"refreshToken":"r1"' "$f" && printf '%s' '{"claudeAiOauth":{"accessToken":"two","refreshToken":"r2","expiresAt":1}}' > "$f"
+            exec /bin/sleep 30
+            """#.utf8).write(to: claude)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claude.path)
+        XCTAssertTrue(try RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: first) {
+            ClaudeLoginRefresh.isDue($0) ? try ClaudeLoginRefresh.refresh($0, executable: claude, timeout: 10) : nil
+        })
+        for workspace in [first, second] {
+            try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        let b = try WorkspaceMailbox(workspace: second, path: ".noodle/home/.claude")
+        XCTAssertTrue(String(decoding: try b.read(".credentials.json", limit: 4096), as: UTF8.self).contains("r2"))
+        // A renewal that changes nothing is not passed on.
+        XCTAssertFalse(try RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: second) { _ in nil })
     }
 
     func testALoginRefreshedInTheKeychainReachesRunningBotsWithoutARestart() throws {

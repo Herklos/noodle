@@ -100,11 +100,10 @@ public enum OpenCodeStorage {
         return result
     }
 
-    /// A restricted bot's login comes from the profile it selected, or from
-    /// `system`, the user's home, when it uses the system profile.
-    public static func seed(workspace: URL, harnessProfile: HarnessProfile?, profiles: HarnessProfileStore, system: URL,
+    /// A restricted bot's login comes from the profile it selected, or its default profile.
+    public static func seed(workspace: URL, harnessProfile: HarnessProfile, profiles: HarnessProfileStore,
                             executable: URL, environment: [String: String], profile: String) throws -> Bool {
-        try seed(workspace: workspace, loginHome: harnessProfile.map(profiles.loginHome) ?? system,
+        try seed(workspace: workspace, loginHome: profiles.loginHome(harnessProfile),
                  executable: executable, environment: environment, profile: profile)
     }
 

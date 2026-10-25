@@ -113,28 +113,6 @@ public final class ExtendedAgentConnection: NSObject, AgentHostClient {
     func checkCompatibility(reply: @escaping (Bool, String) -> Void) {
         proxy(failure: { reply(false, $0) })?.checkCompatibility(withReply: reply)
     }
-    func checkAuthentication(
-        provider: HarnessProvider,
-        executablePath: String,
-        reply: @escaping (Bool, String?) -> Void
-    ) {
-        proxy(failure: { reply(false, $0) })?.checkAuthentication(
-            harnessIdentifier: provider.rawValue,
-            executablePath: executablePath,
-            withReply: reply
-        )
-    }
-    func signIn(
-        provider: HarnessProvider,
-        executablePath: String,
-        reply: @escaping (Bool, String?) -> Void
-    ) {
-        proxy(failure: { reply(false, $0) })?.signIn(
-            harnessIdentifier: provider.rawValue,
-            executablePath: executablePath,
-            withReply: reply
-        )
-    }
     func checkProfileAuthentication(profile: UUID, executablePath: String, reply: @escaping (Bool, String?) -> Void) {
         proxy(failure: { reply(false, $0) })?.checkProfileAuthentication(
             profileID: profile.uuidString, executablePath: executablePath, withReply: reply)

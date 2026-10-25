@@ -15,21 +15,24 @@ private enum HostPaths {
     /// Where harnesses are installed and keep their logins, as the app's own storage decides.
     static let home: URL = HarnessStorage.accountHome(applicationSupport: applicationSupport)
 
-    /// The Keychain a bot's login comes from. The user's items belong to the system
-    /// profile and must never stand in for a profile's login, and the login Keychain
-    /// belongs to the person's own home, not to one the app's storage gives harnesses.
+    /// The Keychain a bot's login comes from: its profile's own item, never one of the
+    /// person's, which belong to their own harness.
     static func loginSecret(_ profile: HarnessProfile?) -> (String, String) throws -> Data? {
-        if let profile { return profiles.loginSecret(profile) }
-        return home == HarnessStorage.systemHome ? RestrictedHarnessStorage.readSecret : { _, _ in nil }
+        profile.map { profiles.loginSecret($0) } ?? { _, _ in nil }
     }
 
-    /// Where a bot's refresh of that login goes back to, so the person's own harness
-    /// is not left holding the token the bot spent. A Hub runs bots for other people,
-    /// who must not be able to change the login of the Mac's owner.
+    /// Where a bot's refresh of that login goes back to, so a bot with extended access,
+    /// which reads the item itself, is not left holding the token the refresh spent.
+    /// A Hub runs bots for other people, who must not change a login in its Keychain.
     static func loginWriter(_ profile: HarnessProfile?) -> ((String, String, Data) throws -> Void)? {
         guard Bundle.main.object(forInfoDictionaryKey: "NoodleHostServesOtherPeople") as? Bool != true else { return nil }
-        if let profile { return profiles.loginWriter(profile) }
-        return home == HarnessStorage.systemHome ? RestrictedHarnessStorage.writeSecret : nil
+        return profile.flatMap { profiles.loginWriter($0) }
+    }
+
+    /// The account environment pointed at a harness's default profile, for the checks
+    /// that read the login of a bot without a profile.
+    static func defaultEnvironment(_ provider: HarnessProvider) throws -> [String: String] {
+        profiles.environment(try profiles.defaultProfile(provider), over: accountEnvironment)
     }
 
     static func executable(_ path: String, provider: HarnessProvider) throws -> URL {
@@ -203,7 +206,10 @@ if CommandLine.arguments.count == 11, CommandLine.arguments[1] == "--harness-chi
         if restricted {
             let layout = AgentStorageLayout(workspace: workspace)
             let repository = layout.package.deletingLastPathComponent().deletingLastPathComponent()
+            // A bot on the default login keeps the person's own Codex model routing.
+            let settingsHome = harnessProfile?.id == HarnessProfileStore.defaultID(provider) ? HostPaths.home : nil
             try RestrictedHarnessStorage.prepare(provider: provider, workspace: workspace, loginHome: loginHome,
+                                                 settingsHome: settingsHome,
                                                  secret: HostPaths.loginSecret(harnessProfile),
                                                  writeSecret: HostPaths.loginWriter(harnessProfile))
             let privateHome = RestrictedHarnessStorage.home(workspace: workspace)
@@ -243,8 +249,9 @@ if CommandLine.arguments.count == 11, CommandLine.arguments[1] == "--harness-chi
                 }
             } else { setenv("HOME", privateHome.path, 1) }
             if provider == .openCode {
+                guard let harnessProfile else { throw HostError("OpenCode has no login for this bot.") }
                 _ = try OpenCodeStorage.seed(workspace: workspace, harnessProfile: harnessProfile, profiles: profiles,
-                    system: HostPaths.home, executable: executable, environment: ProcessInfo.processInfo.environment, profile: profile)
+                    executable: executable, environment: ProcessInfo.processInfo.environment, profile: profile)
                 // ACP v2 keeps the first catalogue it sees for its process lifetime.
                 // Refresh this bot's private cache before it opens a session.
                 try OpenCodeInspection.prepareCatalogue(executable: executable, workspace: workspace,
@@ -524,7 +531,7 @@ private final class HostSession: NSObject, AgentHostService {
     func inspectGrok(withReply reply: @escaping (Data?, String?) -> Void) {
         queue.async {
             do {
-                let result = try GrokInspection.inspect(home: HostPaths.home, environment: self.accountEnvironment,
+                let result = try GrokInspection.inspect(home: HostPaths.home, environment: HostPaths.defaultEnvironment(.grokBuild),
                                                         managed: HostPaths.managedExecutable(.grokBuild))
                 reply(try JSONEncoder().encode(result), nil)
             } catch { reply(nil, error.localizedDescription) }
@@ -534,7 +541,9 @@ private final class HostSession: NSObject, AgentHostService {
     func inspectOpenCode(withReply reply: @escaping (Data?, String?) -> Void) {
         queue.async {
             do {
-                let result = try OpenCodeInspection.inspect(home: HostPaths.home, application: HostPaths.application,
+                let result = try OpenCodeInspection.inspect(home: HostPaths.home,
+                                                            loginHome: HostPaths.profiles.loginHome(HostPaths.profiles.defaultProfile(.openCode)),
+                                                            application: HostPaths.application,
                                                             managed: HostPaths.managedExecutable(.openCode))
                 reply(try JSONEncoder().encode(result), nil)
             } catch { reply(nil, error.localizedDescription) }
@@ -544,7 +553,7 @@ private final class HostSession: NSObject, AgentHostService {
     func inspectMuse(withReply reply: @escaping (Data?, String?) -> Void) {
         queue.async {
             do {
-                let result = try MuseInspection.inspect(home: HostPaths.home, environment: self.accountEnvironment,
+                let result = try MuseInspection.inspect(home: HostPaths.home, environment: HostPaths.defaultEnvironment(.muse),
                                                         managed: HostPaths.managedExecutable(.muse))
                 reply(try JSONEncoder().encode(result), nil)
             } catch { reply(nil, error.localizedDescription) }
@@ -554,70 +563,10 @@ private final class HostSession: NSObject, AgentHostService {
     func inspectAntigravity(withReply reply: @escaping (Data?, String?) -> Void) {
         queue.async {
             do {
-                let result = try AntigravityInspection.inspect(home: HostPaths.home, environment: self.accountEnvironment,
+                let result = try AntigravityInspection.inspect(home: HostPaths.home, environment: HostPaths.defaultEnvironment(.antigravity),
                                                                managed: HostPaths.managedExecutable(.antigravity))
                 reply(try JSONEncoder().encode(result), nil)
             } catch { reply(nil, error.localizedDescription) }
-        }
-    }
-
-    func checkAuthentication(
-        harnessIdentifier: String,
-        executablePath: String,
-        withReply reply: @escaping (Bool, String?) -> Void
-    ) {
-        queue.async {
-            do {
-                if harnessIdentifier == HarnessProvider.codex.rawValue {
-                    let executable = try HostPaths.executable(executablePath, provider: .codex)
-                    return self.runCodexAccount(executable, home: HostPaths.home.appendingPathComponent(".codex"), signIn: false, reply: reply)
-                }
-                guard let provider = HarnessProvider(rawValue: harnessIdentifier), provider == .claudeCode || provider == .fx else {
-                    throw HostError("This harness does not use the Claude Code account check.")
-                }
-                let executable = try HostPaths.executable(executablePath, provider: provider)
-                reply(try provider == .fx ? FxInspection.status(executable: executable, environment: self.accountEnvironment).authenticated : self.claudeAuthenticationStatus(executable), nil)
-            } catch { reply(false, error.localizedDescription) }
-        }
-    }
-
-    func signIn(
-        harnessIdentifier: String,
-        executablePath: String,
-        withReply reply: @escaping (Bool, String?) -> Void
-    ) {
-        queue.async { [self] in
-            do {
-                if harnessIdentifier == HarnessProvider.codex.rawValue {
-                    let executable = try HostPaths.executable(executablePath, provider: .codex)
-                    return self.runCodexAccount(executable, home: HostPaths.home.appendingPathComponent(".codex"), signIn: true, reply: reply)
-                }
-                guard let provider = HarnessProvider(rawValue: harnessIdentifier) else { throw HostError("Unsupported harness.") }
-                if let arguments = HarnessProfileLogin.arguments(provider) {
-                    // Grok Build and Muse Code: the same device-code login a profile uses, into the system account.
-                    let executable = try HostPaths.executable(executablePath, provider: provider)
-                    let environment = self.accountEnvironment
-                    return self.runLogin(executable: executable, arguments: arguments, environment: environment, name: provider.displayName,
-                                         challenge: { HarnessProfileLogin.challenge(provider: provider, text: $0) },
-                                         status: {
-                                             provider == .grokBuild
-                                                 ? try GrokInspection.inspect(home: HostPaths.home, environment: environment,
-                                                                              managed: HostPaths.managedExecutable(.grokBuild)).authenticated
-                                                 : MuseAuthentication.inspect(home: HostPaths.home, environment: environment) != .unauthenticated
-                                         }, reply: reply)
-                }
-                guard provider == .claudeCode || provider == .fx else {
-                    throw HostError("This harness does not support this sign-in flow.")
-                }
-                let executable = try HostPaths.executable(executablePath, provider: provider)
-                let environment = self.accountEnvironment
-                self.runLogin(executable: executable, arguments: provider == .fx ? ["login"] : ["auth", "login", "--claudeai"],
-                              environment: environment, name: provider.displayName,
-                              challenge: provider == .fx ? FxProtocol.loginChallenge : nil,
-                              status: { try provider == .fx ? FxInspection.status(executable: executable, environment: environment).authenticated
-                                  : self.claudeAuthenticationStatus(executable) },
-                              reply: reply)
-            } catch { reply(false, error.localizedDescription) }
         }
     }
 
@@ -643,13 +592,13 @@ private final class HostSession: NSObject, AgentHostService {
                 }
                 let account = try self.profileAccount(profileID, executablePath: executablePath)
                 if account.provider == .claudeCode {
-                    // Claude Code signs in through the browser, as the system profile does.
+                    // Claude Code signs in through the browser.
                     return self.runLogin(executable: account.executable, arguments: ["auth", "login", "--claudeai"],
                                          environment: account.environment, name: account.provider.displayName,
                                          challenge: nil, status: account.status, reply: reply)
                 }
                 if account.provider == .fx {
-                    // FX signs in with Vercel, as the system profile does.
+                    // FX signs in with Vercel.
                     return self.runLogin(executable: account.executable, arguments: ["login"], environment: account.environment,
                                          name: account.provider.displayName, challenge: FxProtocol.loginChallenge,
                                          status: account.status, reply: reply)
@@ -802,7 +751,7 @@ private final class HostSession: NSObject, AgentHostService {
         queue.async {
             do {
                 let executable = try HostPaths.executable(executablePath, provider: .fx)
-                reply(try JSONEncoder().encode(FxInspection.models(executable: executable, environment: self.accountEnvironment)), nil)
+                reply(try JSONEncoder().encode(FxInspection.models(executable: executable, environment: HostPaths.defaultEnvironment(.fx))), nil)
             } catch { reply(nil, error.localizedDescription) }
         }
     }
@@ -811,8 +760,7 @@ private final class HostSession: NSObject, AgentHostService {
         queue.async {
             do {
                 let executable = try HostPaths.executable(executablePath, provider: .codex)
-                var environment = self.accountEnvironment
-                environment["CODEX_HOME"] = HostPaths.home.appendingPathComponent(".codex").path
+                let environment = try HostPaths.defaultEnvironment(.codex)
                 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
                 reply(try JSONEncoder().encode(CodexInspection.models(executable: executable, environment: environment,
                                                                       clientVersion: version)), nil)
@@ -892,6 +840,10 @@ private final class SharedLogins: @unchecked Sendable {
         for bot in running where bot.provider == .codex && refreshed.insert(bot.loginHome).inserted {
             refreshCodexIfDue(loginHome: bot.loginHome, executable: bot.executable)
         }
+        var renewed = Set<URL>()
+        for bot in running where bot.provider == .claudeCode && bot.restricted && renewed.insert(bot.loginHome).inserted {
+            refreshClaudeIfDue(workspace: bot.workspace, loginHome: bot.loginHome, executable: bot.executable)
+        }
         // Each Keychain item is read once per round, however many bots share it.
         var items: [String: Data?] = [:]
         // The first pass collects a refresh; the second passes it to the bots before it.
@@ -912,6 +864,22 @@ private final class SharedLogins: @unchecked Sendable {
                         }
                     })
             }
+        }
+    }
+
+    /// Renews a Claude login in one bot's copy before Claude Code would; the exchange
+    /// that follows hands the renewal to every other bot on the login.
+    func refreshClaudeIfDue(workspace: URL, loginHome: URL, executable: URL) {
+        refreshQueue.sync {
+            let key = loginHome.appendingPathComponent(".claude", isDirectory: true)
+            guard failedRefreshes[key].map({ Date().timeIntervalSince($0) > 300 }) ?? true else { return }
+            var attempted = false
+            let renewed = try? RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: workspace) { login in
+                guard ClaudeLoginRefresh.isDue(login) else { return nil }
+                attempted = true
+                return try ClaudeLoginRefresh.refresh(login, executable: executable)
+            }
+            if attempted { failedRefreshes[key] = renewed == true ? nil : Date() }
         }
     }
 

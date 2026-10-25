@@ -43,7 +43,7 @@ final class HarnessProfileTests: XCTestCase {
     func testBotSelectionIsPrivateAndSurvivesRecordUpdates() throws {
         var agent = try repository.createAgent(named: "Profile Bot", harnessIdentifier: "codex").agent
         let workspace = repository.storage(for: agent.id).workspace
-        XCTAssertNil(try store.selected(workspace: workspace, provider: .codex))
+        XCTAssertEqual(try store.selected(workspace: workspace, provider: .codex), try store.defaultProfile(.codex))
         XCTAssertFalse(try String(contentsOf: repository.storage(for: agent.id).configuration, encoding: .utf8).contains("harnessProfile"))
 
         let profile = try store.create(provider: .codex, named: "Work")
@@ -54,7 +54,49 @@ final class HarnessProfileTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(String(data: JSONEncoder().encode(agent), encoding: .utf8)).contains(profile.id.uuidString))
 
         try repository.updateAgentHarnessProfile(agent, profile: nil)
-        XCTAssertNil(try store.selected(workspace: workspace, provider: .codex))
+        XCTAssertEqual(try store.selected(workspace: workspace, provider: .codex), try store.defaultProfile(.codex))
+    }
+
+    /// A bot without a profile uses the app's own login for its harness, never the one the
+    /// person's CLI keeps in their home, so neither can spend the other's refresh tokens.
+    func testABotWithoutAProfileUsesTheAppsOwnDefaultLogin() throws {
+        let agent = try repository.createAgent(named: "Default Bot", harnessIdentifier: "claude-code").agent
+        let workspace = repository.storage(for: agent.id).workspace
+        let claude = try XCTUnwrap(try store.selected(workspace: workspace, provider: .claudeCode))
+        XCTAssertEqual(claude.provider, .claudeCode)
+        XCTAssertEqual(claude.id, HarnessProfileStore.defaultID(.claudeCode))
+        XCTAssertTrue(store.loginHome(claude).path.hasPrefix(root.path + "/"), "The login lives in the app's own storage")
+        XCTAssertEqual(store.environment(claude)["CLAUDE_CONFIG_DIR"], store.accountHome(claude).path)
+        XCTAssertEqual(try store.selected(workspace: workspace, provider: .claudeCode), claude, "The same login every time")
+        XCTAssertEqual(try store.load(), [], "It is the harness's own row in Settings, not a profile")
+        // Every harness has its own; a profile of another harness does not stand in.
+        let codex = try XCTUnwrap(try store.selected(workspace: workspace, provider: .codex))
+        XCTAssertNotEqual(codex.id, claude.id)
+        try repository.updateAgentHarnessProfile(agent, profile: try store.create(provider: .codex, named: "Work").id)
+        XCTAssertEqual(try store.selected(workspace: workspace, provider: .claudeCode), claude)
+        XCTAssertNil(try store.selected(workspace: workspace, provider: .apple), "Apple Intelligence has no login")
+        // The Agent Host only gets the identifier, and finds the folder from it, made or not.
+        try FileManager.default.removeItem(at: store.loginHome(claude).deletingLastPathComponent())
+        XCTAssertEqual(try store.validated(claude.id).id, claude.id)
+        XCTAssertEqual(try store.defaultProfile(.claudeCode), claude)
+    }
+
+    /// Bots on a profile share one copy of its login; deleting the profile deletes that copy too.
+    func testDeletingAProfileDeletesTheCopyItsBotsShared() throws {
+        let agent = try repository.createAgent(named: "Profile Bot", harnessIdentifier: "codex").agent
+        let workspace = repository.storage(for: agent.id).workspace
+        let profile = try store.create(provider: .codex, named: "Work")
+        try WorkspaceMailbox(workspace: store.loginHome(profile), path: ".codex").writeData(Data("work-login".utf8), named: "auth.json")
+        try RestrictedHarnessStorage.prepare(provider: .codex, workspace: workspace, loginHome: store.loginHome(profile))
+        // Codex keeps a file login in place, so give the copy a Keychain origin as Claude Code's has.
+        try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: workspace,
+            loginHome: store.loginHome(try store.create(provider: .claudeCode, named: "Claude"))) { _, _ in
+            Data(#"{"claudeAiOauth":{"accessToken":"a"}}"#.utf8)
+        }
+        let logins = root.appendingPathComponent("HarnessLogins")
+        let before = try FileManager.default.contentsOfDirectory(atPath: logins.path).count
+        try store.delete(try XCTUnwrap(try store.load().first { $0.provider == .claudeCode }))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: logins.path).count, before - 1)
     }
 
     func testUnavailableProfileFailsClosed() throws {
@@ -64,8 +106,8 @@ final class HarnessProfileTests: XCTestCase {
         try repository.updateAgentHarnessProfile(agent, profile: profile.id)
 
         // A profile belongs to its own harness. On another one, as a fallback when its own
-        // runs out of usage, the bot uses that harness's own login.
-        XCTAssertNil(try store.selected(workspace: workspace, provider: .claudeCode))
+        // runs out of usage, the bot uses that harness's default login.
+        XCTAssertEqual(try store.selected(workspace: workspace, provider: .claudeCode), try store.defaultProfile(.claudeCode))
 
         // A redirected login home must not stand in for the profile.
         let home = store.loginHome(profile), moved = home.deletingLastPathComponent().appendingPathComponent("moved")
@@ -140,15 +182,15 @@ final class HarnessProfileTests: XCTestCase {
             exec /usr/bin/sqlite3 "$XDG_DATA_HOME/opencode/opencode.db" "CREATE TABLE IF NOT EXISTS credential (id TEXT, integration_id TEXT, label TEXT, value TEXT, active INT, time_created INT, time_updated INT);"
             """#.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
-        func seed(_ harnessProfile: HarnessProfile?) throws -> String {
-            _ = try OpenCodeStorage.seed(workspace: workspace, harnessProfile: harnessProfile, profiles: store, system: system,
+        func seed(_ harnessProfile: HarnessProfile) throws -> String {
+            _ = try OpenCodeStorage.seed(workspace: workspace, harnessProfile: harnessProfile, profiles: store,
                 executable: executable, environment: OpenCodeStorage.environment(workspace: workspace),
                 profile: "(version 1)(allow default)")
             return String(describing: try OpenCodeStorage.credentials(home: RestrictedHarnessStorage.home(workspace: workspace)))
         }
         XCTAssertTrue(try seed(profile).contains("work-key"))
         XCTAssertFalse(try seed(profile).contains("system-key"))
-        XCTAssertTrue(try seed(nil).contains("system-key"))
+        XCTAssertFalse(try seed(store.defaultProfile(.openCode)).contains("system-key"), "The default login is Noodle's own")
     }
 
     private func openCodeLogin(_ home: URL, key: String) throws {

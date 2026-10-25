@@ -6,6 +6,11 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Noodle keeps its own sign-in for every harness, separate from the one the harness uses in Terminal and from a Noodle Hub on the same Mac, so they no longer use up each other's sign-ins and sign each other out. After updating, sign in once in Settings › Harness. Bots with unrestricted access no longer use your own harness settings and conversations in your home folder. In a bot's settings, the sign-in it uses without a profile is called Default. The copies of the Terminal sign-ins Noodle kept for its bots are deleted, and deleting a profile now also deletes the copy of it its bots shared.
+- Noodle renews a Claude Code sign-in itself half an hour before it expires and hands the renewal to its bots, so they no longer all renew at the same moment, which could leave every bot signed out.
+
 ### Fixed
 
 - A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed" on the Mac and on your iPhone, instead of showing as ready again after each automatic retry. Settings › Harnesses says sign-in is required and offers Sign In, though the saved login still looks valid. The bot comes back by itself after you sign in again or another bot's refresh gets the login working.

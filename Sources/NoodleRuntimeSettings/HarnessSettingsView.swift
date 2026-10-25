@@ -376,6 +376,8 @@ public struct HarnessInstallationRow: View {
               installation.isAvailable || setup.snapshots[id] == nil else { return false }
         return setup.authentication[id] == .unauthenticated || setup.authentication[id] == .managedExternally
             || installation.isAvailable && hasAgentsWaitingForSignIn
+            // OpenCode runs its free models signed out; signing in adds your own providers.
+            || id == .openCode && setup.authentication[id] == .notRequired
     }
 
     /// Every button of the row shares one line.
