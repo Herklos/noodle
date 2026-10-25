@@ -126,6 +126,15 @@ public struct HarnessInstallationRow: View {
         affectedAgents.contains { store.runtime.snapshot(for: $0.id).phase == .failed }
     }
 
+    /// The account check only reads the saved login, so a login the vendor refused still
+    /// checks as signed in. Bots on a profile sign in there instead.
+    private var hasAgentsWaitingForSignIn: Bool {
+        affectedAgents.contains {
+            store.runtime.snapshot(for: $0.id).failure == .authenticationRequired
+                && (try? store.repository.loadAgentHarnessProfile($0)) == nil
+        }
+    }
+
     private var hasReconnectingAgents: Bool {
         affectedAgents.contains { store.runtime.snapshot(for: $0.id).reconnectingSince != nil }
     }
@@ -366,6 +375,7 @@ public struct HarnessInstallationRow: View {
         guard setup.challenges[id] == nil, setup.activity[id] == nil,
               installation.isAvailable || setup.snapshots[id] == nil else { return false }
         return setup.authentication[id] == .unauthenticated || setup.authentication[id] == .managedExternally
+            || installation.isAvailable && hasAgentsWaitingForSignIn
     }
 
     /// Every button of the row shares one line.
@@ -456,6 +466,7 @@ public struct HarnessInstallationRow: View {
 
     private var statusText: String {
         if setup.activity[id] != nil { return "Setting up" }
+        if setup.errors[id] == nil, hasAgentsWaitingForSignIn { return "Sign-in required" }
         if setup.errors[id] != nil || hasFailedAgents { return "Needs attention" }
         if hasReconnectingAgents { return "Reconnecting" }
         if setup.snapshots[id] == nil { return "Checking…" }

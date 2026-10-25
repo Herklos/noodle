@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed" on the Mac and on your iPhone, instead of showing as ready again after each automatic retry. Settings › Harnesses says sign-in is required and offers Sign In, though the saved login still looks valid. The bot comes back by itself after you sign in again or another bot's refresh gets the login working.
+
 ## [0.75.0] - 2026-10-24
 
 ### Added

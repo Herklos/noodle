@@ -259,7 +259,9 @@ import XCTest
     }
 
     func testExpiredSignInPausesForSignInAndKeepsTheTurn() async throws {
-        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire)
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire, extended: false)
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: f.workspace).package, path: "runtime", create: true)
+        try runtime.writeData(Data("login-key:spent".utf8), named: "auth-seed-claude-code-.credentials.json.sha256")
         try await ready(f, wire, p); try confirm(wire)
         p.notify(); try await f.wait { wire.count("user") == 1 }
         wire.emit(["type": "result", "subtype": "error_during_execution", "is_error": true,
@@ -269,6 +271,19 @@ import XCTest
         XCTAssertEqual(p.snapshot.failure, .authenticationRequired)
         XCTAssertTrue(p.hasInterruptedWork)
         XCTAssertFalse(p.isAlive)
+        XCTAssertTrue(f.failures.isEmpty, "Restarting cannot sign the user in")
+        XCTAssertEqual(try runtime.read("auth-failed-claude-code-.credentials.json.sha256", limit: 256), Data("login-key:spent".utf8),
+                       "The next start must know which login was refused")
+    }
+
+    /// The host refuses to start a bot again on the login Claude Code refused, so the bot keeps waiting for sign-in.
+    func testStartRefusedOnTheFailedLoginWaitsForSignIn() async throws {
+        let f = try fixture(), wire = HarnessWire(), p = f.claude(wire, extended: false)
+        wire.automaticStart = false
+        p.start()
+        wire.startReply?(0, "Not logged in: Claude Code refused this login and nobody has signed in since. Sign in to the harness, then retry.")
+        try await f.wait { p.snapshot.phase == .failed }
+        XCTAssertEqual(p.snapshot.failure, .authenticationRequired)
         XCTAssertTrue(f.failures.isEmpty, "Restarting cannot sign the user in")
     }
 

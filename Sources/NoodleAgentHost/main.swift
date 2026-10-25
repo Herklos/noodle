@@ -372,6 +372,11 @@ private final class HostSession: NSObject, AgentHostService {
                 let profile = try HostPaths.profiles.selected(workspace: workspace, provider: provider)
                 let loginHome = profile.map(HostPaths.profiles.loginHome) ?? HostPaths.home
                 if provider == .codex { SharedLogins.shared.refreshCodexIfDue(loginHome: loginHome, executable: executable) }
+                // Refused before the child starts, so the bot never shows as ready on a login that cannot work.
+                if restricted, RestrictedHarnessStorage.refusedAgain(provider: provider, workspace: workspace, loginHome: loginHome,
+                                                                     secret: HostPaths.loginSecret(profile)) {
+                    throw RestrictedHarnessStorage.refused(provider)
+                }
                 let child = Process()
                 child.executableURL = Bundle.main.executableURL
                 // Preserve the approved installation path for the child's independent

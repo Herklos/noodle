@@ -97,6 +97,12 @@ public enum RestrictedHarnessStorage {
             }
         default: break
         }
+        for name in loginNames(provider) where runtime.contains(failedStamp(provider, name)) {
+            guard (try? runtime.read(failedStamp(provider, name), limit: 256)) != (try? runtime.read(SharedLogin.stamp(provider, name), limit: 256)) else {
+                throw refused(provider)
+            }
+            runtime.remove(failedStamp(provider, name))
+        }
     }
 
     /// Hands a login a running bot refreshed to the login it shares, and the
@@ -125,6 +131,44 @@ public enum RestrictedHarnessStorage {
                                         writeBack: writeBack)
             }
         }
+    }
+
+    /// Notes that the login the bot holds was refused. Starting again on it cannot
+    /// work and would only show the bot as ready, so `prepare` refuses until a new
+    /// sign-in or another bot's refresh replaces it.
+    public static func loginFailed(provider: HarnessProvider, workspace: URL) throws {
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime")
+        for name in loginNames(provider) where runtime.contains(SharedLogin.stamp(provider, name)) {
+            try runtime.writeData(runtime.read(SharedLogin.stamp(provider, name), limit: 256), named: failedStamp(provider, name))
+        }
+    }
+
+    /// Whether the next start would hand the bot the login it was refused with, asked
+    /// before the start so the bot never shows as ready on it. Only Claude Code notes
+    /// refused logins.
+    public static func refusedAgain(provider: HarnessProvider, workspace: URL, loginHome: URL,
+                                    secret: (String, String) throws -> Data? = readSecret) -> Bool {
+        guard provider == .claudeCode, let accountPath = accountPath(provider),
+              let runtime = try? WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime"),
+              let refused = try? runtime.read(failedStamp(provider, ".credentials.json"), limit: 256),
+              let shared = try? SharedLogin(provider: provider, workspace: workspace, loginHome: loginHome, accountPath: accountPath)
+        else { return false }
+        let source = try? WorkspaceMailbox(workspace: loginHome, path: accountPath)
+        let file = source.flatMap { $0.contains(".credentials.json") ? try? $0.read(".credentials.json", limit: 1_048_576) : nil }
+        guard let data = (try? secret("Claude Code-credentials", NSUserName())) ?? file,
+              let login = try? claudeLogin(data) else { return false }
+        let destination = try? WorkspaceMailbox(workspace: workspace, path: ".noodle/home/" + accountPath)
+        return shared.next(".credentials.json", from: .item(login), destination: destination, runtime: runtime)
+            .map(shared.tag) == refused
+    }
+
+    /// Worded so the runtime recognises it as a sign-in failure.
+    public static func refused(_ provider: HarnessProvider) -> HarnessSetupError {
+        HarnessSetupError("Not logged in: \(provider.displayName) refused this login and nobody has signed in since. Sign in to the harness, then retry.")
+    }
+
+    private static func failedStamp(_ provider: HarnessProvider, _ name: String) -> String {
+        "auth-failed-\(provider.rawValue)-\(name).sha256"
     }
 
     /// Replaces only the Claude.ai login in the item, and only while the item still
@@ -363,11 +407,30 @@ public enum RestrictedHarnessStorage {
             return result
         }
 
-        private func tag(_ data: Data) -> Data {
+        /// The login `exchange` would leave the bot holding, without exchanging anything.
+        func next(_ name: String, from origin: Origin, destination: WorkspaceMailbox?, runtime: WorkspaceMailbox) -> Data? {
+            let store: WorkspaceMailbox?
+            switch origin {
+            case .file: store = source
+            case .unknown: store = copies.contains(name) ? copies : source
+            case .item(let login):
+                if (try? copies.read(name + ".origin", limit: 256)) != tag(login) { return login }
+                store = copies
+            }
+            let shared = store.flatMap { $0.contains(name) ? try? $0.read(name, limit: 1_048_576) : nil }
+            let agreed = try? runtime.read(stamp(name), limit: 256)
+            let copy = destination.flatMap { $0.contains(name) ? try? $0.read(name, limit: 1_048_576) : nil }
+            if let shared, let copy, agreed != tag(copy), agreed == tag(shared) { return copy }
+            return shared
+        }
+
+        func tag(_ data: Data) -> Data {
             Data((key + ":" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()).utf8)
         }
 
-        private func stamp(_ name: String) -> String { "auth-seed-\(provider.rawValue)-\(name).sha256" }
+        private func stamp(_ name: String) -> String { Self.stamp(provider, name) }
+
+        static func stamp(_ provider: HarnessProvider, _ name: String) -> String { "auth-seed-\(provider.rawValue)-\(name).sha256" }
     }
 
     private static func missing(_ provider: HarnessProvider) -> HarnessSetupError {

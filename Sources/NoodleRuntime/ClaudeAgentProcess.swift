@@ -142,7 +142,11 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             ) { [weak self] pid, error in
                 Task { @MainActor in
                     guard let self, self.connectionID == connectionID, !self.intentionallyStopped, !self.terminationReported else { return }
-                    if let error { self.reportUnexpectedTermination(error); return }
+                    if let error {
+                        // The host refuses a start on a login Claude Code already refused.
+                        if ClaudeProtocol.isAuthenticationFailure(error) { self.pauseForSignIn() } else { self.reportUnexpectedTermination(error) }
+                        return
+                    }
                     self.startupTimeout?.cancel()
                     self.processIdentifier = pid
                     self.update(.ready, "Claude Code ready")
@@ -446,6 +450,7 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
     /// Restarting cannot sign the user in. Stay paused for an explicit retry.
     private func pauseForSignIn() {
         guard !intentionallyStopped, !terminationReported else { return }
+        if !extendedAccess { try? RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: workspaceURL) }
         trace.finish(.turnFailed)
         disconnect()
         update(.failed, "Claude Code needs you to sign in. Open Harness settings and sign in, then retry.",

@@ -336,6 +336,27 @@ import XCTest
         try await f.clock.waitUntil { f.factory.processes.count == 6 }
     }
 
+    /// The host refuses a start on the login that already failed, before any turn, so refusals
+    /// are not tries: the bot keeps waiting as "sign-in needed" and still comes back after a sign-in.
+    func testStartsRefusedOnTheFailedLoginKeepWaitingAndDoNotUseUpRetries() async throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode)
+        f.runtime.checkSignIn = { _ in true }
+        try f.start(agent).transition(.failed, failure: .authenticationRequired)
+        f.factory.startFailure = .authenticationRequired
+        for _ in 0..<8 {
+            f.clock.date += 60 * 60
+            let before = f.factory.processes.count
+            f.runtime.reconcile(agents: [agent], repository: f.repository)
+            try await f.clock.waitUntil { f.factory.processes.count == before + 1 }
+            XCTAssertEqual(f.runtime.snapshot(for: agent.id).failure, .authenticationRequired)
+        }
+        f.factory.startFailure = nil
+        f.clock.date += 60 * 60
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        try await f.clock.waitUntil { f.factory.processes.count == 10 }
+        XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
+    }
+
     func testMessageToABotWaitingForSignInReachesItsHarness() throws {
         let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
         process.transition(.failed, failure: .authenticationRequired)
