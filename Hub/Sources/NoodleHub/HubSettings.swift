@@ -32,7 +32,8 @@ struct HubSettingsProblem: Equatable {
         self.hub = hub
         mcp = MCPController(repository: hub.repository)
         setup = HarnessSetupController(versionChecker: HarnessVersionChecker(),
-                                       installer: ManagedHarnessInstaller(store: hub.repository.managedHarnesses))
+                                       installer: ManagedHarnessInstaller(store: hub.repository.managedHarnesses),
+                                       profiles: hub.repository.harnessProfiles)
         setup.subscriptionUsage = hub.runtime.subscriptionUsage
     }
 

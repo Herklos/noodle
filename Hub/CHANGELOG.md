@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Hub keeps its own sign-in for every harness, separate from Noodle and from the harness in Terminal on the same Mac, so they no longer use up each other's sign-ins. After updating, sign in once in Settings › Harness. Plans without a profile lend this Default sign-in. The copies of the Terminal sign-ins the Hub kept for its bots are deleted, and deleting a profile now also deletes the copy of it its bots shared.
+- The Hub renews a Claude Code sign-in itself half an hour before it expires and hands the renewal to its bots, so they no longer all renew at the same moment.
+
 ### Fixed
 
 - A Claude Code bot whose sign-in has stopped working now stays paused as "sign-in needed", instead of showing as ready again after each automatic retry. It comes back by itself once the login works again, and tries the same login again after 5 minutes, then twice as long after each refusal, up to every 4 hours, so a login the service turned away only for a moment doesn't leave it waiting.

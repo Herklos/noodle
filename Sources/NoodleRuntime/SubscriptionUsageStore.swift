@@ -18,7 +18,7 @@ public final class SubscriptionUsageStore {
             .flatMap { try? JSONDecoder().decode([String: SubscriptionUsage].self, from: $0) } ?? [:]
     }
 
-    /// A harness's system login, or one of its profiles.
+    /// A harness's default login, or one of its profiles.
     public static func key(_ provider: HarnessProvider, profile: UUID?) -> String {
         profile.map { "\(provider.rawValue)/\($0.uuidString)" } ?? provider.rawValue
     }

@@ -8,7 +8,8 @@ import Security
 public enum RestrictedHarnessStorage {
     public static func home(workspace: URL) -> URL { workspace.appendingPathComponent(".noodle/home") }
 
-    public static func prepare(provider: HarnessProvider, workspace: URL, loginHome: URL, now: Date = Date(),
+    public static func prepare(provider: HarnessProvider, workspace: URL, loginHome: URL, settingsHome: URL? = nil,
+                               now: Date = Date(),
                                secret: (String, String) throws -> Data? = readSecret,
                                writeSecret: ((String, String, Data) throws -> Void)? = nil) throws {
         _ = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home", create: true)
@@ -19,6 +20,12 @@ public enum RestrictedHarnessStorage {
         let destination = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/" + accountPath, create: true)
         let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime")
         let shared = try SharedLogin(provider: provider, workspace: workspace, loginHome: loginHome, accountPath: accountPath)
+        // A copy of a login the bot no longer uses goes, even when no login replaces it.
+        for name in loginNames(provider) where runtime.contains(SharedLogin.stamp(provider, name)) && !shared.holds(name, runtime: runtime) {
+            destination.remove(name)
+            runtime.remove(SharedLogin.stamp(provider, name))
+            runtime.remove(failedStamp(provider, name))
+        }
         func seed(_ data: Data, name: String) throws {
             let stamp = "auth-seed-\(provider.rawValue)-\(name).sha256"
             let fingerprint = Data(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined().utf8)
@@ -30,8 +37,8 @@ public enum RestrictedHarnessStorage {
             guard try shared.exchange(name, from: origin, destination: destination, runtime: runtime, writeBack: writeBack)
             else { throw missing(provider) }
         }
-        func sourceData(_ name: String) throws -> Data? {
-            let source = try WorkspaceMailbox(workspace: loginHome, path: accountPath)
+        func sourceData(_ name: String, in home: URL? = nil) throws -> Data? {
+            let source = try WorkspaceMailbox(workspace: home ?? loginHome, path: accountPath)
             return source.contains(name) ? try source.read(name, limit: 1_048_576) : nil
         }
         switch provider {
@@ -47,7 +54,10 @@ public enum RestrictedHarnessStorage {
         case .codex, .grokBuild:
             try share("auth.json")
             if provider == .codex {
-                let routing = try CodexModelRouting(config: sourceData("config.toml"), codexHome: loginHome.appendingPathComponent(accountPath))
+                // Model routing is not a login, so it can come from the person's own settings.
+                let routingHome = settingsHome ?? loginHome
+                let routing = try CodexModelRouting(config: sourceData("config.toml", in: routingHome),
+                                                    codexHome: routingHome.appendingPathComponent(accountPath))
                 if let catalogue = routing.catalogue { try seed(catalogue, name: CodexModelRouting.catalogueName) }
                 try seed(Data(("cli_auth_credentials_store = \"file\"\n"
                     + routing.config(catalogue: destination.url.appendingPathComponent(CodexModelRouting.catalogueName))).utf8),
@@ -134,6 +144,39 @@ public enum RestrictedHarnessStorage {
                                         writeBack: writeBack)
             }
         }
+    }
+
+    /// Replaces a running bot's login with `refresh`'s renewal of it, unless the bot
+    /// changed it meanwhile. The next exchange hands it on like the bot's own refresh.
+    public static func refreshLogin(provider: HarnessProvider, workspace: URL, refresh: (Data) throws -> Data?) throws -> Bool {
+        guard let accountPath = accountPath(provider), let name = loginNames(provider).first else { return false }
+        let copy = try WorkspaceMailbox(workspace: workspace, path: ".noodle/home/" + accountPath)
+        guard copy.contains(name) else { return false }
+        let login = try copy.read(name, limit: 1_048_576)
+        guard let renewed = try refresh(login), renewed != login else { return false }
+        var replaced = false
+        try copy.withLock(".refresh.lock", wait: true) {
+            guard try copy.read(name, limit: 1_048_576) == login else { return }
+            try copy.writeData(renewed, named: name)
+            replaced = true
+        }
+        return replaced
+    }
+
+    /// Deletes the copy bots shared of the login in `loginHome`, for every harness: bots
+    /// used to share the logins of the harnesses' CLIs, which they no longer use.
+    // TODO(0.77.0): remove with its calls in NoodleStore.reload and Hub.init (TODO(Hub 0.44.0)) and
+    // RestrictedHarnessStorageTests.testSharedCopiesOfTheCLIsOwnLoginsAreRemoved. Milestones: 0.76.0, Hub 0.43.0.
+    public static func removeSharedLogins(root: URL, loginHome: URL) {
+        for provider in HarnessProvider.allCases { removeSharedLogin(provider: provider, root: root, loginHome: loginHome) }
+    }
+
+    /// Deletes the copy bots shared of one harness's login in `loginHome`. `root` is Noodle's storage.
+    public static func removeSharedLogin(provider: HarnessProvider, root: URL, loginHome: URL) {
+        guard let accountPath = accountPath(provider) else { return }
+        let folder = AgentStorageLayout.canonicalURL(root).appendingPathComponent("HarnessLogins", isDirectory: true)
+            .appendingPathComponent(SharedLogin.key(provider: provider, loginHome: loginHome, accountPath: accountPath), isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
     }
 
     /// Notes that the login the bot holds was refused. Starting again on it at once
@@ -426,11 +469,15 @@ public enum RestrictedHarnessStorage {
 
         init(provider: HarnessProvider, workspace: URL, loginHome: URL, accountPath: String) throws {
             self.provider = provider
-            let identity = provider.rawValue + "\n" + loginHome.standardizedFileURL.path + "\n" + accountPath
-            key = SHA256.hash(data: Data(identity.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+            key = Self.key(provider: provider, loginHome: loginHome, accountPath: accountPath)
             source = try? WorkspaceMailbox(workspace: loginHome, path: accountPath)
             let root = AgentStorageLayout(workspace: workspace).package.deletingLastPathComponent().deletingLastPathComponent()
             copies = try WorkspaceMailbox(workspace: root, path: "HarnessLogins/" + key, create: true)
+        }
+
+        static func key(provider: HarnessProvider, loginHome: URL, accountPath: String) -> String {
+            let identity = provider.rawValue + "\n" + loginHome.standardizedFileURL.path + "\n" + accountPath
+            return SHA256.hash(data: Data(identity.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         }
 
         func holds(_ name: String, runtime: WorkspaceMailbox) -> Bool {
@@ -503,8 +550,9 @@ public enum RestrictedHarnessStorage {
         static func stamp(_ provider: HarnessProvider, _ name: String) -> String { "auth-seed-\(provider.rawValue)-\(name).sha256" }
     }
 
+    /// Worded so the runtime recognises it as a sign-in failure and waits for one.
     private static func missing(_ provider: HarnessProvider) -> HarnessSetupError {
-        HarnessSetupError("The \(provider.displayName) login is unavailable for this bot's private storage. Sign in to the harness, then retry startup.")
+        HarnessSetupError("Not logged in: Noodle has no \(provider.displayName) login for this bot. Please sign in to the harness in Settings, then retry startup.")
     }
 
     public static func readSecret(service: String, account: String) throws -> Data? {
@@ -592,5 +640,66 @@ public enum RestrictedHarnessStorage {
             throw HarnessSetupError("macOS did not allow Noodle Agent Host to read the harness login (\(status)). Grant that helper access to the provider's login item in Keychain Access, then retry startup.")
         }
         return data
+    }
+}
+
+/// Claude Code renews its login only in the last minutes before it expires, and
+/// every bot on the login does so then, though only the first renewal works. The
+/// Agent Host renews it once, earlier, and the bots take the renewal.
+public enum ClaudeLoginRefresh {
+    public static let margin: TimeInterval = 30 * 60
+
+    /// Reads only the expiry, never a token.
+    public static func isDue(_ login: Data, now: Date = Date()) -> Bool {
+        guard let oauth = (try? JSONSerialization.jsonObject(with: login) as? [String: Any])?["claudeAiOauth"] as? [String: Any],
+              let token = oauth["refreshToken"] as? String, !token.isEmpty,
+              let expires = (oauth["expiresAt"] as? NSNumber)?.doubleValue else { return false }
+        return Date(timeIntervalSince1970: expires / 1000).timeIntervalSince(now) < margin
+    }
+
+    /// Has Claude Code renew `login` itself. It renews a login about to expire when it
+    /// starts, so a private copy marked as expiring within the minute is started and left
+    /// idle until it is renewed. A private home keeps the login in its file, out of the
+    /// Keychain. Nil when Claude Code did not renew it in time.
+    public static func refresh(_ login: Data, executable: URL, timeout: TimeInterval = 30) throws -> Data? {
+        guard var payload = try JSONSerialization.jsonObject(with: login) as? [String: Any],
+              var oauth = payload["claudeAiOauth"] as? [String: Any],
+              let token = oauth["refreshToken"] as? String else { return nil }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-claude-refresh-\(UUID())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let account = home.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: account, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        oauth["expiresAt"] = Int((Date().timeIntervalSince1970 + 60) * 1000)
+        payload["claudeAiOauth"] = oauth
+        let file = account.appendingPathComponent(".credentials.json")
+        try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+
+        let process = Process(), input = Pipe()
+        process.executableURL = executable
+        process.arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+        process.currentDirectoryURL = home
+        process.environment = ["HOME": home.path, "CLAUDE_CONFIG_DIR": account.path, "USER": NSUserName(), "LOGNAME": NSUserName(),
+                               "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "TMPDIR": home.path, "DISABLE_AUTOUPDATER": "1"]
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer {
+            if process.isRunning { process.terminate() }
+            process.waitUntilExit()
+            try? input.fileHandleForWriting.close()
+        }
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            if let data = try? Data(contentsOf: file),
+               let renewed = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["claudeAiOauth"] as? [String: Any],
+               let next = renewed["refreshToken"] as? String, !next.isEmpty, next != token {
+                return data
+            }
+            guard process.isRunning else { return nil }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return nil
     }
 }

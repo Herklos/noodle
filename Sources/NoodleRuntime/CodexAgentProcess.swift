@@ -867,8 +867,11 @@ public final class CodexCapabilityProbe {
     private var completion: ((Result<[HarnessModel], Error>) -> Void)?
     private var timeoutTask: Task<Void, Never>?
 
-    init(executableURL: URL) {
+    private let codexHome: URL
+
+    init(executableURL: URL, codexHome: URL? = nil) {
         self.executableURL = executableURL
+        self.codexHome = codexHome ?? HarnessStorage.codexHome
     }
 
     func loadModels(completion: @escaping (Result<[HarnessModel], Error>) -> Void) {
@@ -884,7 +887,7 @@ public final class CodexCapabilityProbe {
             child.standardOutput = outputPipe
             child.standardError = errorPipe
             var environment = ProcessInfo.processInfo.environment
-            environment["CODEX_HOME"] = HarnessStorage.codexHome.path
+            environment["CODEX_HOME"] = codexHome.path
             child.environment = environment
 
             let reader = outputReader

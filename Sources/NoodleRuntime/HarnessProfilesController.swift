@@ -3,7 +3,7 @@ import Observation
 import NoodleCore
 
 /// Noodle-owned harness logins. Each profile signs in through the same
-/// account-only session as the system profile, pointed at its own home.
+/// account-only session as its harness's default login, pointed at its own home.
 @MainActor @Observable
 public final class HarnessProfilesController {
     public private(set) var profiles: [HarnessProfile] = []
@@ -128,25 +128,89 @@ public final class HarnessProfilesController {
     }
 
     private func setupProvider(for profile: HarnessProfile) -> (any HarnessProfileAccount)? {
+        let provider = HarnessProfileAccounts.provider(for: profile, store: store)
+        (provider as? CodexAccountProvider)?.onUsage = { [weak usage = self.subscriptionUsage] in
+            usage?.record($0, provider: .codex, profile: profile.id)
+        }
+        return provider
+    }
+
+    private func terminalSignIn(for profile: HarnessProfile, installation: HarnessInstallation) -> String? {
+        HarnessProfileAccounts.terminalSignIn(for: profile, installation: installation, store: store)
+    }
+}
+
+/// How a profile's login is checked and signed in, for named profiles and default logins alike.
+@MainActor enum HarnessProfileAccounts {
+    fileprivate static func provider(for profile: HarnessProfile, store: HarnessProfileStore) -> (any HarnessProfileAccount)? {
         switch profile.provider {
-        case .codex:
-            let provider = CodexAccountProvider(codexHome: store.accountHome(profile), profile: profile.id)
-            provider.onUsage = { [weak usage = self.subscriptionUsage] in usage?.record($0, provider: .codex, profile: profile.id) }
-            return provider
-        case .grokBuild, .muse, .claudeCode, .fx, .antigravity, .openCode: return HostProfileSetupProvider(profile: profile)
-        default: return nil
+        case .codex: CodexAccountProvider(codexHome: store.accountHome(profile), profile: profile.id)
+        case .grokBuild, .muse, .claudeCode, .fx, .antigravity, .openCode: HostProfileSetupProvider(profile: profile)
+        default: nil
         }
     }
 
     /// Antigravity and OpenCode have no login the host can run; the person signs
     /// in from Terminal, pointed at the profile's folders.
-    private func terminalSignIn(for profile: HarnessProfile, installation: HarnessInstallation) -> String? {
+    static func terminalSignIn(for profile: HarnessProfile, installation: HarnessInstallation,
+                               store: HarnessProfileStore) -> String? {
         switch profile.provider {
         case .antigravity: AntigravitySetupProvider.command(for: installation, home: store.loginHome(profile))
         // A private server, so no background service is left running for the profile.
         case .openCode: OpenCodeSetupProvider.command(for: installation, environment: store.environment(profile)) + " auth login --standalone"
         default: nil
         }
+    }
+
+    /// Each harness's setup, signing in and checking its default login. Each folder is
+    /// made when a check or sign-in first needs it.
+    static func defaultLogins(_ store: HarnessProfileStore) -> [HarnessProvider: any HarnessSetupProviding] {
+        let guides: [HarnessProvider: HarnessInstallationGuide] = [
+            .claudeCode: ClaudeCodeSetupProvider.installationGuide, .fx: FxSetupProvider.installationGuide,
+            .grokBuild: GrokSetupProvider.installationGuide, .muse: MuseSetupProvider.installationGuide,
+            .openCode: OpenCodeSetupProvider.installationGuide, .antigravity: AntigravitySetupProvider.installationGuide
+        ]
+        var providers: [HarnessProvider: any HarnessSetupProviding] = [.apple: AppleSetupProvider()]
+        for provider in HarnessProvider.allCases where provider.supportsProfiles {
+            let profile = HarnessProfileStore.defaultRecord(provider)
+            let prepare = { _ = try store.defaultProfile(provider) }
+            if provider == .codex {
+                providers[provider] = CodexAccountProvider(codexHome: store.accountHome(profile), profile: profile.id, prepare: prepare)
+            } else if let guide = guides[provider], let account = Self.provider(for: profile, store: store) {
+                providers[provider] = DefaultLoginSetupProvider(guide: guide, account: account, profile: profile, store: store, prepare: prepare)
+            }
+        }
+        return providers
+    }
+}
+
+/// A harness's installation guide, with sign-in and its check on the default login.
+@MainActor private final class DefaultLoginSetupProvider: HarnessSetupProviding {
+    let installationGuide: HarnessInstallationGuide
+    let account: any HarnessProfileAccount
+    let profile: HarnessProfile
+    let store: HarnessProfileStore
+    let prepare: () throws -> Void
+
+    init(guide: HarnessInstallationGuide, account: any HarnessProfileAccount, profile: HarnessProfile,
+         store: HarnessProfileStore, prepare: @escaping () throws -> Void) {
+        installationGuide = guide; self.account = account; self.profile = profile; self.store = store; self.prepare = prepare
+    }
+
+    func terminalSignIn(for installation: HarnessInstallation) -> String? {
+        try? prepare()
+        return HarnessProfileAccounts.terminalSignIn(for: profile, installation: installation, store: store)
+    }
+    func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
+        try prepare()
+        let status = try await account.status(for: installation)
+        // OpenCode's free models need no account.
+        return profile.provider == .openCode && status == .unauthenticated ? .notRequired : status
+    }
+    func signIn(for installation: HarnessInstallation,
+                onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus {
+        try prepare()
+        return try await account.signIn(for: installation, onChallenge: onChallenge)
     }
 }
 

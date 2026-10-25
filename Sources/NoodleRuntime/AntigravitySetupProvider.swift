@@ -1,21 +1,10 @@
 import Foundation
 import NoodleCore
 
-@MainActor
-public final class AntigravitySetupProvider: HarnessSetupProviding {
-    public init() {}
-    public var installationGuide: HarnessInstallationGuide {
-        .init(command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-              instructions: "Run Google’s official Antigravity installer in Terminal, then run agy and sign in. Noodle uses your existing Antigravity sign-in; return here and choose Check Again.",
-              documentationURL: URL(string: "https://antigravity.google/docs/cli/install")!)
-    }
-    public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
-        try await AntigravityHostProbe.load().authenticated ? .authenticated : .unauthenticated
-    }
-    public func signIn(for installation: HarnessInstallation, onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus {
-        throw HarnessSetupError("Run \(Self.command(for: installation)) in Terminal, complete sign-in, then choose Check Again here.")
-    }
-    public func terminalSignIn(for installation: HarnessInstallation) -> String? { Self.command(for: installation) }
+public enum AntigravitySetupProvider {
+    public static let installationGuide = HarnessInstallationGuide(command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        instructions: "Run Google’s official Antigravity installer in Terminal, then return here, choose Check Again and sign in. Noodle keeps its own sign-in, separate from the one agy uses in Terminal.",
+        documentationURL: URL(string: "https://antigravity.google/docs/cli/install")!)
 
     /// Antigravity signs in from its interactive prompt. A copy Noodle installed is
     /// not on the shell's PATH, so name it in full. A profile is a separate home.

@@ -1,8 +1,9 @@
 import CryptoKit
 import Foundation
 
-/// A separate harness login owned by Noodle. A bot without a profile uses the
-/// system profile: the harness's own configuration in the user's home.
+/// A separate harness login owned by Noodle. A bot without a profile uses its
+/// harness's default profile: Noodle's own login too, never the one the person's
+/// CLI keeps in their home, so neither spends the refresh tokens the other holds.
 public struct HarnessProfile: Identifiable, Codable, Hashable, Sendable {
     public let id: UUID
     public let provider: HarnessProvider
@@ -34,6 +35,7 @@ public struct HarnessProfileStore: Sendable {
         try AgentStorageLayout.requireDirectory(directory)
         return try FileManager.default.contentsOfDirectory(atPath: directory.path)
             .compactMap(UUID.init(uuidString:))
+            .filter { id in !HarnessProvider.allCases.contains { Self.defaultID($0) == id } }
             .compactMap { try? profile($0) }
             .sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) }
     }
@@ -58,21 +60,58 @@ public struct HarnessProfileStore: Sendable {
         try AgentStorageLayout.requireDirectory(directory)
         let folder = folder(profile.id)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
-        do {
-            let account = accountHome(profile)
-            try FileManager.default.createDirectory(at: account, withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            if provider == .codex {
-                // Keep the login inside this folder, never in a shared Keychain item.
-                try AtomicFile.write(Data("cli_auth_credentials_store = \"file\"\n".utf8),
-                                     to: account.appendingPathComponent("config.toml"))
-            }
-            try save(profile)
-        } catch {
+        do { try populate(folder, with: profile) } catch {
             try? FileManager.default.removeItem(at: folder)
             throw error
         }
         return profile
+    }
+
+    /// The same for every copy of Noodle, so the app and the Agent Host find the one folder.
+    public static func defaultID(_ provider: HarnessProvider) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("noodle.default-profile.\(provider.rawValue)".utf8)).prefix(16))
+        bytes[6] = bytes[6] & 0x0f | 0x50
+        bytes[8] = bytes[8] & 0x3f | 0x80
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
+    /// The record of a harness's default profile, whether or not its folder is made yet.
+    public static func defaultRecord(_ provider: HarnessProvider) -> HarnessProfile {
+        HarnessProfile(id: defaultID(provider), provider: provider, displayName: "Default", createdAt: Date(timeIntervalSince1970: 0))
+    }
+
+    /// The login of a bot that chose no profile, made the first time it is needed.
+    public func defaultProfile(_ provider: HarnessProvider) throws -> HarnessProfile {
+        guard provider.supportsProfiles else {
+            throw HarnessSetupError("\(provider.displayName) does not support separate profiles.")
+        }
+        let id = Self.defaultID(provider)
+        if AgentStorageLayout.exists(folder(id)) { return try validated(id) }
+        let profile = Self.defaultRecord(provider)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try AgentStorageLayout.requireDirectory(directory)
+        // Made aside and moved in whole, so the app and the Agent Host can both make it at once.
+        let staging = directory.appendingPathComponent(".\(id.uuidString.lowercased())-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try populate(staging, with: profile)
+        do { try FileManager.default.moveItem(at: staging, to: folder(id)) }
+        catch { guard AgentStorageLayout.exists(folder(id)) else { throw error } }
+        return try validated(id)
+    }
+
+    private func populate(_ folder: URL, with profile: HarnessProfile) throws {
+        let account = folder.appendingPathComponent("home", isDirectory: true)
+            .appendingPathComponent(Self.accountPath(profile.provider), isDirectory: true)
+        try FileManager.default.createDirectory(at: account, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        if profile.provider == .codex {
+            // Keep the login inside this folder, never in a shared Keychain item.
+            try AtomicFile.write(Data("cli_auth_credentials_store = \"file\"\n".utf8),
+                                 to: account.appendingPathComponent("config.toml"))
+        }
+        try save(profile, in: folder)
     }
 
     public func rename(_ profile: HarnessProfile, to rawName: String) throws -> HarnessProfile {
@@ -82,8 +121,11 @@ public struct HarnessProfileStore: Sendable {
         return renamed
     }
 
+    /// Deletes the profile with the copy of its login its bots shared.
     public func delete(_ profile: HarnessProfile) throws {
         try FileManager.default.removeItem(at: try requireFolder(profile.id))
+        RestrictedHarnessStorage.removeSharedLogin(provider: profile.provider, root: directory.deletingLastPathComponent(),
+                                                   loginHome: loginHome(profile))
     }
 
     /// The stand-in for the user's home when reading this profile's login.
@@ -152,21 +194,27 @@ public struct HarnessProfileStore: Sendable {
         return "Claude Code-credentials-" + digest.prefix(8)
     }
 
-    /// Resolves the profile a bot selected in its agent.json. Nil means the
-    /// system profile. A missing or redirected profile is an error: a bot must
-    /// never start under a different account of its harness by accident. A
-    /// profile belongs to its own harness; on another one, where a bot continues
-    /// when its own runs out of usage, the bot uses that harness's system login.
+    /// Resolves the profile a bot selected in its agent.json, or its harness's
+    /// default profile when it chose none. Nil only for a harness without a
+    /// login. A missing or redirected profile is an error: a bot must never start
+    /// under a different account of its harness by accident. A profile belongs to
+    /// its own harness; on another one, where a bot continues when its own runs
+    /// out of usage, the bot uses that harness's default profile.
     public func selected(workspace: URL, provider: HarnessProvider) throws -> HarnessProfile? {
-        guard let id = try AgentConfiguration.load(from: AgentStorageLayout(workspace: workspace)).harnessProfile else { return nil }
+        guard provider.supportsProfiles else { return nil }
+        guard let id = try AgentConfiguration.load(from: AgentStorageLayout(workspace: workspace)).harnessProfile else {
+            return try defaultProfile(provider)
+        }
         guard let profile = try? validated(id) else {
             throw HarnessSetupError("This bot's \(provider.displayName) profile is unavailable. Choose another profile in the bot's settings, then retry startup.")
         }
-        return profile.provider == provider ? profile : nil
+        return profile.provider == provider ? profile : try defaultProfile(provider)
     }
 
     /// A profile whose folders are in place and not redirected elsewhere.
     public func validated(_ id: UUID) throws -> HarnessProfile {
+        if let provider = HarnessProvider.allCases.first(where: { Self.defaultID($0) == id }),
+           !AgentStorageLayout.exists(folder(id)) { return try defaultProfile(provider) }
         let profile = try profile(id)
         guard profile.provider.supportsProfiles else {
             throw HarnessSetupError("\(profile.provider.displayName) does not support separate profiles.")
@@ -218,10 +266,10 @@ public struct HarnessProfileStore: Sendable {
         return folder
     }
 
-    private func save(_ profile: HarnessProfile) throws {
+    private func save(_ profile: HarnessProfile, in folder: URL? = nil) throws {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try AtomicFile.write(encoder.encode(profile), to: folder(profile.id).appendingPathComponent("profile.json"))
+        try AtomicFile.write(encoder.encode(profile), to: (folder ?? self.folder(profile.id)).appendingPathComponent("profile.json"))
     }
 }
 

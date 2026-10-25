@@ -241,13 +241,15 @@ final class NoodleStore {
             self.runtime = AgentRuntimeCoordinator(discovery: discovery, harnesses: HarnessSelection(defaults: .standard))
         }
         self.runtime.remoteModels = RemoteModelAccountStore(repository: self.repository.rootURL)
+        self.runtime.harnessProfiles = self.repository.harnessProfiles
         usage = UsageHistory(url: self.repository.rootURL.appendingPathComponent("usage.sqlite"))
         self.runtime.onUsage = { [usage] in usage.record($0) }
         self.runtime.recordedUsage = { [usage] in usage.recorded(session: $0) }
         hubs = HubMemberships(directory: self.repository.rootURL.appendingPathComponent("Hubs", isDirectory: true),
                               deviceName: Host.current().localizedName ?? "Mac")
         harnessSetup = HarnessSetupController(versionChecker: HarnessVersionChecker(),
-            installer: repository == nil ? ManagedHarnessInstaller(store: self.repository.managedHarnesses) : nil)
+            installer: repository == nil ? ManagedHarnessInstaller(store: self.repository.managedHarnesses) : nil,
+            profiles: self.repository.harnessProfiles)
         harnessSetup.subscriptionUsage = self.runtime.subscriptionUsage
 
         transcriptPositions = TranscriptPositionStore(fileURL: self.repository.rootURL.appendingPathComponent("scroll-positions.json"))
@@ -785,6 +787,9 @@ final class NoodleStore {
         storageReady = false
         do {
             try repository.prepare()
+            // TODO(0.77.0): remove with RestrictedHarnessStorage.removeSharedLogins and
+            // RestrictedHarnessStorageTests.testSharedCopiesOfTheCLIsOwnLoginsAreRemoved. Milestone: 0.76.0.
+            RestrictedHarnessStorage.removeSharedLogins(root: repository.rootURL, loginHome: HarnessStorage.userHome)
             (agents, setAsideAgents) = try repository.loadAgentsSettingAside()
             // TODO(0.62.0): remove with AppleLocalModelStore.keepSystemModelForExistingBots. Milestone: 0.61.0.
             try AppleLocalModelStore(repository: repository.rootURL).keepSystemModelForExistingBots(agents)
@@ -1455,7 +1460,7 @@ final class NoodleStore {
         return profile.id
     }
 
-    /// Bots on a deleted profile return to the system profile, never to another account.
+    /// Bots on a deleted profile return to the default profile, never to another account.
     func deleteHarnessProfile(_ profile: HarnessProfile) {
         do {
             let affected = agents.filter { (try? repository.loadAgentHarnessProfile($0)) == profile.id }

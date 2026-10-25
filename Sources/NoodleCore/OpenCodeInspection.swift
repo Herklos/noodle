@@ -2,18 +2,20 @@ import Foundation
 
 public enum OpenCodeInspection {
     /// `managed` is the copy Noodle installed, already verified by the caller,
-    /// and is used only when the user has no installation of their own.
-    public static func inspect(home: URL, application: URL, managed: URL? = nil) throws -> OpenCodeInspectionResult {
+    /// and is used only when the user has no installation of their own. `loginHome`
+    /// holds the login, laid out like `home`, which holds the installation.
+    public static func inspect(home: URL, loginHome: URL? = nil, application: URL, managed: URL? = nil) throws -> OpenCodeInspectionResult {
         let path = home.appendingPathComponent(".opencode/bin/opencode").path
         guard FileManager.default.isExecutableFile(atPath: path) else {
             guard let managed else { return .init(executablePath: nil, authenticated: false, models: []) }
-            return try inspect(executable: managed, installationPath: managed.path, home: home, application: application)
+            return try inspect(executable: managed, installationPath: managed.path, home: home, loginHome: loginHome, application: application)
         }
         let executable = try OpenCodeExecutableTrust.executable(at: path, home: home)
-        return try inspect(executable: executable, installationPath: path, home: home, application: application)
+        return try inspect(executable: executable, installationPath: path, home: home, loginHome: loginHome, application: application)
     }
 
-    static func inspect(executable: URL, installationPath: String, home: URL, application: URL) throws -> OpenCodeInspectionResult {
+    static func inspect(executable: URL, installationPath: String, home: URL, loginHome: URL? = nil,
+                        application: URL) throws -> OpenCodeInspectionResult {
         let package = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-opencode-probe-\(UUID())").resolvingSymlinksInPath()
         let layout = AgentStorageLayout(package: package)
         try layout.create()
@@ -29,7 +31,7 @@ public enum OpenCodeInspection {
               OpenCodeProtocol.supportsVersion(parsed.text) else {
             throw HarnessSetupError("Noodle requires OpenCode v2. Run the v2 installer in Terminal, then check again.")
         }
-        let authenticated = try OpenCodeStorage.seed(workspace: layout.workspace, loginHome: home,
+        let authenticated = try OpenCodeStorage.seed(workspace: layout.workspace, loginHome: loginHome ?? home,
             executable: executable, environment: environment, profile: profile)
         return .init(executablePath: installationPath, authenticated: authenticated,
             models: try prepareCatalogue(executable: executable, workspace: layout.workspace,

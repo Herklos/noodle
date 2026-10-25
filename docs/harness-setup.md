@@ -2,8 +2,13 @@
 
 A harness is the agent program behind each bot. Noodle supports Codex, Claude
 Code, Vercel FX, Grok Build, Muse Code, OpenCode v2, and Google Antigravity,
-using your existing account, plus the experimental Apple Intelligence harness,
+using your own account, plus the experimental Apple Intelligence harness,
 which comes with Noodle and runs on your Mac.
+
+Noodle keeps its own sign-in for each harness, separate from the one the
+harness uses in Terminal and from a Noodle Hub on the same Mac, so signing in or
+out in one never signs the other out. Sign in once in Noodle, even if the
+harness is already signed in on this Mac.
 
 The first time you open Noodle with no bots, the welcome offers Codex by
 OpenAI, Claude by Anthropic, Muse by Meta and Grok by xAI; the other harnesses
@@ -44,19 +49,14 @@ To install a harness yourself:
 
 | Harness | Sign in |
 | --- | --- |
-| Codex | **Sign In** in Noodle, or `codex login` in Terminal |
-| Claude Code | **Sign In** in Noodle, or `claude auth login` in Terminal |
-| FX | **Sign In** in Noodle, or `fx login` in Terminal |
-| Grok Build | **Sign In** in Noodle, or `grok login` in Terminal |
-| Muse Code | **Sign In** in Noodle, or `muse login` in Terminal |
-| OpenCode v2 | Works without an account on OpenCode's free models. For your own providers run `opencode auth login` in Terminal; for a copy Noodle installed, **Sign In** shows the full command to paste. |
-| Antigravity | Run `agy` in Terminal and follow its Google sign-in. For a copy Noodle installed, **Sign In** shows the full command to paste. |
+| Codex, Claude Code, FX, Grok Build, Muse Code | **Sign In** in Noodle |
+| OpenCode v2 | Works without an account on OpenCode's free models. For your own providers, **Sign In** shows a command to paste into Terminal. |
+| Antigravity | **Sign In** shows a command to paste into Terminal; follow its Google sign-in there. |
 | Apple Intelligence | Turn on Apple Intelligence in System Settings on a supported Mac running macOS 26 or later. No separate install or sign-in. |
 
 Once a harness is found, create a bot and choose its model and, where available,
 reasoning effort. Every bot starts with restricted access; you can give a bot
-[unrestricted access](security.md) in **Settings → Bots**. A restricted Claude
-bot uses the Claude.ai sign-in from Claude Code's standard installation.
+[unrestricted access](security.md) in **Settings → Bots**.
 
 Apps connected to ChatGPT or Claude.ai are off by default for Noodle bots. Turn
 on **Apps** beside a bot in **Settings → Bots** to allow them. This setting is
@@ -65,28 +65,29 @@ explains what it covers.
 
 ## Profiles
 
-Claude Code, Codex, Grok Build, Muse Code, and Antigravity can each be signed
-in to several accounts at once. Under the harness in **Settings → Harness**,
+Claude Code, Codex, FX, Grok Build, Muse Code, OpenCode, and Antigravity can
+each be signed in to several accounts at once. Under the harness in **Settings → Harness**,
 choose **Profiles**, then **Add Profile…**, name it, and choose **Sign In…**
 beside it. Noodle shows a sign-in code and a button for the sign-in page. Claude
 Code instead opens its sign-in page in your browser. For Antigravity, Noodle
 shows a command to paste into Terminal; run it, then choose **Check Again**.
 
 Choose the profile for a bot in **Edit Bot → Harness → Profile**; the row appears
-once that harness has a profile. **System** is the default: the harness sign-in
-already on this Mac, shared with Terminal and other apps.
+once that harness has a profile. **Default** is the sign-in in the harness's own
+row in **Settings → Harness**.
 
 - Grok Build sign-ins expire after seven days; sign the profile in again from
   **Profiles**.
-- An unrestricted bot on a profile does not use your usual settings for that
-  harness (in `~/.claude`, `~/.codex`, `~/.grok`, `~/.config/muse` or `~/.gemini`).
-  An unrestricted Antigravity bot on a profile also does not see files in your
-  home folder by their usual `~` paths, such as `~/.gitconfig` or `~/.ssh`.
+- An unrestricted bot does not use your usual settings for its harness (in
+  `~/.claude`, `~/.codex`, `~/.grok`, `~/.config/muse` or `~/.gemini`), and
+  does not continue conversations started there. An unrestricted Antigravity
+  bot also does not see files in your home folder by their usual `~` paths,
+  such as `~/.gitconfig` or `~/.ssh`.
 - A Codex or Claude Code conversation starts again when you change the bot's
   profile.
-- The model list in the bot editor comes from the System sign-in.
-- Deleting a profile signs it out of Noodle and moves its bots back to System.
-- FX, OpenCode, and Apple Intelligence use the System sign-in only.
+- The model list in the bot editor comes from the Default sign-in.
+- Deleting a profile signs it out of Noodle and moves its bots back to Default.
+- Apple Intelligence has no sign-in.
 
 ## OpenCode v2
 
@@ -94,14 +95,13 @@ Install OpenCode with [OpenCode's v2 installer](https://opencode.ai/v2/docs):
 
 ```sh
 curl -fsSL https://opencode.ai/v2/install | bash
-opencode auth login
 ```
 
-Choose **Check Again** after installing or signing in. Version 1 and copies
+Choose **Check Again** after installing, then **Sign In** for your own providers. Version 1 and copies
 installed through package managers are not supported. Choose a model as
 `provider/model`.
 
-A restricted OpenCode bot uses the API keys and accounts you signed in with, but
+A restricted OpenCode bot uses the API keys and accounts you signed in with in Noodle, but
 not your global OpenCode settings, plugins, MCP servers or conversations. Put
 custom provider settings in `opencode.json` in the bot's workspace; their models
 appear in **Edit Bot → Harness → Model**. Keys set only in your shell environment
@@ -114,7 +114,6 @@ Install Antigravity with [Google's installer](https://antigravity.google/docs/cl
 
 ```sh
 curl -fsSL https://antigravity.google/cli/install.sh | bash
-agy
 ```
 
 Reasoning effort is part of each Antigravity model's name, so there is no
@@ -129,8 +128,8 @@ its copy out of your home folder and Terminal.
 
 - **Your own installation always wins.** If you later install the harness
   yourself, Noodle uses yours and deletes its copy the next time it starts.
-- **Your sign-in is shared.** Switching between Noodle's copy and yours does not
-  sign you out.
+- **Your sign-in stays.** Switching between Noodle's copy and yours does not
+  sign Noodle out.
 - **Updates.** Noodle checks every six hours and installs newer releases itself.
   Turn off **Update harnesses installed by Noodle automatically** in
   **Settings → Harness** to update by hand with **Update**. Noodle never updates
@@ -146,10 +145,8 @@ its copy out of your home folder and Terminal.
 
 - **Not installed:** use the installer shown in Noodle. Other ways of installing
   may not be detected.
-- **Codex browser sign-in fails:** run `codex login` in Terminal if your account
-  does not allow sign-in with a code.
-- **Sign-in status unknown:** check the harness in Terminal, then choose
-  **Check Again**. Unknown does not mean signed out.
+- **Sign-in status unknown:** choose **Check Again**. Unknown does not mean
+  signed out.
 - **Update required:** for a harness installed by Noodle, choose **Update**.
   Otherwise follow the update instructions in Settings and check again.
 - **Install failed:** the row shows the reason. Choose **Install** to retry, or

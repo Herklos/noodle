@@ -224,9 +224,24 @@ import XCTest
     func testShippedTerminalSignInsNameTheExecutable() {
         let agy = HarnessInstallation(provider: .antigravity, executablePath: "/fixtures/agy")
         let openCode = HarnessInstallation(provider: .openCode, executablePath: "/fixtures/opencode")
-        XCTAssertEqual(AntigravitySetupProvider().terminalSignIn(for: agy), "'/fixtures/agy'")
-        XCTAssertEqual(OpenCodeSetupProvider().terminalSignIn(for: openCode), "'/fixtures/opencode' auth login")
-        XCTAssertNil(ClaudeCodeSetupProvider().terminalSignIn(for: HarnessInstallation(provider: .claudeCode, executablePath: "/fixtures/claude")))
+        XCTAssertEqual(AntigravitySetupProvider.command(for: agy), "'/fixtures/agy'")
+        XCTAssertEqual(OpenCodeSetupProvider.command(for: openCode), "'/fixtures/opencode'")
+    }
+
+    /// A harness's own Sign In is for the app's default login, the one bots without a profile
+    /// use, never the login the person's CLI keeps in their home.
+    func testShippedSignInsGoToTheAppsDefaultLoginNotTheCLIs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("noodle-default-login-\(UUID())").resolvingSymlinksInPath()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let store = HarnessProfileStore(root: root)
+        let defaults = UserDefaults(suiteName: "Noodle.DefaultLoginTests.\(UUID())")!
+        let c = HarnessSetupController(defaults: defaults, profiles: store)
+        c.signIn(HarnessInstallation(provider: .antigravity, executablePath: "/fixtures/agy"))
+        c.signIn(HarnessInstallation(provider: .openCode, executablePath: "/fixtures/opencode"))
+        let antigravity = try store.defaultProfile(.antigravity), openCode = try store.defaultProfile(.openCode)
+        XCTAssertEqual(c.terminalSignIns[.antigravity], "HOME='\(store.loginHome(antigravity).path)' '/fixtures/agy'")
+        XCTAssertTrue(try XCTUnwrap(c.terminalSignIns[.openCode]).contains(store.loginHome(openCode).path))
+        XCTAssertNotNil(c.installationGuide(for: .antigravity), "Installing still follows the vendor's guide")
     }
 
     func testVersionResultCannotAttachToReplacementInstallation() async {

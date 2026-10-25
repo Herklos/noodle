@@ -86,7 +86,7 @@ public struct HarnessProfilesView: View {
             Button("Delete", role: .destructive) { store.deleteHarnessProfile(profile) }
             Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
         } message: { profile in
-            Text("“\(profile.displayName)” is signed out of Noodle. Bots using it return to the system profile and restart.")
+            Text("“\(profile.displayName)” is signed out of Noodle. Bots using it return to the Default sign-in and restart.")
         }
     }
 

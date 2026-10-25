@@ -1,23 +1,10 @@
 import Foundation
 import NoodleCore
 
-@MainActor
-public final class OpenCodeSetupProvider: HarnessSetupProviding {
-    public init() {}
-    public var installationGuide: HarnessInstallationGuide {
-        .init(command: "curl -fsSL https://opencode.ai/v2/install | bash",
-              instructions: "Run OpenCode’s official v2 installer in Terminal, then run opencode auth login. Noodle uses your existing OpenCode sign-in; return here and choose Check Again.",
-              documentationURL: URL(string: "https://opencode.ai/v2/docs")!)
-    }
-    public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
-        let result = try await OpenCodeHostProbe.load()
-        return result.authenticated ? .authenticated : (result.models.isEmpty ? .unauthenticated : .notRequired)
-    }
-    public func signIn(for installation: HarnessInstallation, onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus {
-        // OpenCode's login is an interactive prompt.
-        throw HarnessSetupError("Run \(Self.command(for: installation)) auth login in Terminal, complete sign-in, then choose Check Again here.")
-    }
-    public func terminalSignIn(for installation: HarnessInstallation) -> String? { Self.command(for: installation) + " auth login" }
+public enum OpenCodeSetupProvider {
+    public static let installationGuide = HarnessInstallationGuide(command: "curl -fsSL https://opencode.ai/v2/install | bash",
+        instructions: "Run OpenCode’s official v2 installer in Terminal, then return here, choose Check Again and sign in. Noodle keeps its own sign-in, separate from the one opencode uses in Terminal.",
+        documentationURL: URL(string: "https://opencode.ai/v2/docs")!)
 
     /// A copy Noodle installed is not on the shell's PATH, so name it in full;
     /// Terminal can run it from there. `environment` points it at a profile.

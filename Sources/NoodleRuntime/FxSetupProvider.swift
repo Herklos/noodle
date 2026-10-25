@@ -1,22 +1,10 @@
 import Foundation
 import NoodleCore
 
-@MainActor
-public final class FxSetupProvider: HarnessSetupProviding {
-    public init() {}
-    public var installationGuide: HarnessInstallationGuide {
-        .init(command: "curl -fsSL https://fx.sh/setup.sh | bash",
-              instructions: "Run Vercel’s official FX installer in Terminal, then check the installation here. Sign in here with Vercel, or use fx login codex / fx login grok in Terminal for a subscription account.",
-              documentationURL: URL(string: "https://fx.sh/docs")!)
-    }
-    public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
-        guard let path = installation.executablePath else { throw HarnessSetupError("Install FX first.") }
-        return try await HarnessAccountOperation().run(executablePath: path, signIn: false, provider: .fx)
-    }
-    public func signIn(for installation: HarnessInstallation, onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus {
-        guard let path = installation.executablePath else { throw HarnessSetupError("Install FX first.") }
-        return try await HarnessAccountOperation().run(executablePath: path, signIn: true, provider: .fx, onChallenge: onChallenge)
-    }
+public enum FxSetupProvider {
+    public static let installationGuide = HarnessInstallationGuide(command: "curl -fsSL https://fx.sh/setup.sh | bash",
+        instructions: "Run Vercel’s official FX installer in Terminal, then check the installation here and sign in with Vercel. Noodle keeps its own sign-in, separate from the one fx uses in Terminal.",
+        documentationURL: URL(string: "https://fx.sh/docs")!)
 }
 
 @MainActor

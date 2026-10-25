@@ -10,6 +10,11 @@ All notable changes to Noodle are documented here, following
 
 - A conversation scrolled up to older messages shows a down arrow above the message field. Click it to go back to the latest message, and new ones follow again. It hides once the latest message shows.
 
+### Changed
+
+- Noodle keeps its own sign-in for every harness, separate from the one the harness uses in Terminal and from a Noodle Hub on the same Mac, so they no longer use up each other's sign-ins and sign each other out. After updating, sign in once in Settings › Harness. Bots with unrestricted access no longer use your own harness settings and conversations in your home folder. In a bot's settings, the sign-in it uses without a profile is called Default. The copies of the Terminal sign-ins Noodle kept for its bots are deleted, and deleting a profile now also deletes the copy of it its bots shared.
+- Noodle renews a Claude Code sign-in itself half an hour before it expires and hands the renewal to its bots, so they no longer all renew at the same moment, which could leave every bot signed out.
+
 ### Fixed
 
 - A conversation scrolled back down to its latest message by hand follows new messages again. Before, Noodle left out the part of the conversation under the titlebar, so it thought you hadn't reached the end yet. Thanks to Emircan Sahin for finding this.

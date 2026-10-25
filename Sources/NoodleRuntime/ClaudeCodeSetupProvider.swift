@@ -1,40 +1,12 @@
 import Foundation
 import NoodleCore
 
-/// Claude account setup is checked by the isolated Agent Host so Noodle itself
-/// never receives access to Claude's private configuration or credentials.
-@MainActor
-public final class ClaudeCodeSetupProvider: HarnessSetupProviding {
-    public init() {}
-    public var installationGuide: HarnessInstallationGuide {
-        HarnessInstallationGuide(
-            command: "curl -fsSL https://claude.ai/install.sh | bash",
-            instructions: "Run Anthropic’s official installer in Terminal, then return here and check the installation. Claude Code opens your browser when you sign in.",
-            documentationURL: URL(string: "https://code.claude.com/docs/en/quickstart")!
-        )
-    }
-
-    public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
-        try await request(installation, signIn: false)
-    }
-
-    public func signIn(
-        for installation: HarnessInstallation,
-        onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void
-    ) async throws -> HarnessAuthenticationStatus {
-        try await request(installation, signIn: true)
-    }
-
-    private func request(
-        _ installation: HarnessInstallation,
-        signIn: Bool
-    ) async throws -> HarnessAuthenticationStatus {
-        guard installation.provider == .claudeCode, let executablePath = installation.executablePath else {
-            throw HarnessSetupError("Install the harness first.")
-        }
-        let operation = try HarnessAccountOperation()
-        return try await operation.run(executablePath: executablePath, signIn: signIn)
-    }
+public enum ClaudeCodeSetupProvider {
+    public static let installationGuide = HarnessInstallationGuide(
+        command: "curl -fsSL https://claude.ai/install.sh | bash",
+        instructions: "Run Anthropic’s official installer in Terminal, then return here and check the installation. Claude Code opens your browser when you sign in.",
+        documentationURL: URL(string: "https://code.claude.com/docs/en/quickstart")!
+    )
 }
 
 @MainActor
@@ -46,7 +18,9 @@ public final class HarnessAccountOperation {
 
     public init() throws { connection = try ExtendedAgentConnection() }
 
-    public func run(executablePath: String, signIn: Bool, provider: HarnessProvider = .claudeCode, profile: UUID? = nil,
+    /// Account checks and sign-ins run in the isolated Agent Host, so Noodle itself never
+    /// reads a harness's private configuration or credentials.
+    public func run(executablePath: String, signIn: Bool, provider: HarnessProvider, profile: UUID,
              onChallenge: (@MainActor (HarnessSignInChallenge) -> Void)? = nil,
              onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
         try await withTaskCancellationHandler {
@@ -86,14 +60,8 @@ public final class HarnessAccountOperation {
                         else { self.finish(.success(authenticated ? .authenticated : .unauthenticated)) }
                     }
                 }
-                if let profile {
-                    if signIn { connection.signInProfile(profile: profile, executablePath: executablePath, reply: reply) }
-                    else { connection.checkProfileAuthentication(profile: profile, executablePath: executablePath, reply: reply) }
-                } else if signIn {
-                    connection.signIn(provider: provider, executablePath: executablePath, reply: reply)
-                } else {
-                    connection.checkAuthentication(provider: provider, executablePath: executablePath, reply: reply)
-                }
+                if signIn { connection.signInProfile(profile: profile, executablePath: executablePath, reply: reply) }
+                else { connection.checkProfileAuthentication(profile: profile, executablePath: executablePath, reply: reply) }
             }
         } onCancel: {
             Task { @MainActor in self.finish(.failure(CancellationError())) }

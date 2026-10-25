@@ -233,7 +233,7 @@ struct HubPlanEditor: View {
     static func harnesses(_ host: HubSettingsHost) -> [Entry] {
         host.runtime.availableInstallations.flatMap { installation in
             let provider = installation.provider
-            return [Entry(harness: HubHarness(provider: provider, profile: nil), title: provider.displayName, login: "System")]
+            return [Entry(harness: HubHarness(provider: provider, profile: nil), title: provider.displayName, login: "Default")]
                 + host.harnessProfiles.profiles(for: provider).map {
                     Entry(harness: HubHarness(provider: provider, profile: $0.id),
                           title: "\(provider.displayName) (\($0.displayName))", login: $0.displayName)

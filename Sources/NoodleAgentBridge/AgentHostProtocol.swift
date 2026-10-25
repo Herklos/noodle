@@ -60,16 +60,6 @@ public enum AgentHostIdentity {
     func write(_ data: Data)
     func stop(withReply reply: @escaping (Bool) -> Void)
     func checkCompatibility(withReply reply: @escaping (Bool, String) -> Void)
-    func checkAuthentication(
-        harnessIdentifier: String,
-        executablePath: String,
-        withReply reply: @escaping (Bool, String?) -> Void
-    )
-    func signIn(
-        harnessIdentifier: String,
-        executablePath: String,
-        withReply reply: @escaping (Bool, String?) -> Void
-    )
     /// The profile is named by identifier only; the host resolves its folder
     /// in Noodle's storage and derives the harness and environment from it.
     func checkProfileAuthentication(profileID: String, executablePath: String,
