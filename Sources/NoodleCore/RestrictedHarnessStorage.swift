@@ -693,8 +693,10 @@ public enum ClaudeLoginRefresh {
 
     /// Has Claude Code renew `login` itself. It renews a login about to expire when it
     /// starts, so a private copy marked as expiring within the minute is started and left
-    /// idle until it is renewed. A private home keeps the login in its file, out of the
-    /// Keychain. Nil when Claude Code did not renew it in time.
+    /// idle until it is renewed. Claude Code tries the Keychain first through `security`,
+    /// found on the path; there is no keychain in the private home, so macOS would ask the
+    /// person to reset theirs. Leaving `/usr/bin` off the path keeps the login in its file,
+    /// as the bots' sandbox does. Nil when Claude Code did not renew it in time.
     public static func refresh(_ login: Data, executable: URL, timeout: TimeInterval = 30) throws -> Data? {
         guard var payload = try JSONSerialization.jsonObject(with: login) as? [String: Any],
               var oauth = payload["claudeAiOauth"] as? [String: Any],
@@ -714,7 +716,7 @@ public enum ClaudeLoginRefresh {
         process.arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
         process.currentDirectoryURL = home
         process.environment = ["HOME": home.path, "CLAUDE_CONFIG_DIR": account.path, "USER": NSUserName(), "LOGNAME": NSUserName(),
-                               "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "TMPDIR": home.path, "DISABLE_AUTOUPDATER": "1"]
+                               "PATH": "/bin:/usr/sbin:/sbin", "TMPDIR": home.path, "DISABLE_AUTOUPDATER": "1"]
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

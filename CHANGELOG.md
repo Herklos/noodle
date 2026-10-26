@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Renewing a Claude Code sign-in no longer shows "A keychain cannot be found to store …" over and over in the half hour before it expires. Choosing Reset To Defaults there could reset your login keychain.
+
 ## [0.77.0] - 2026-10-26
 
 ### Added

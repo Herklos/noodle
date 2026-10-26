@@ -480,6 +480,24 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertFalse(try RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: second) { _ in nil })
     }
 
+    /// Claude Code saves a renewal to the Keychain first, through `security`. With the
+    /// private home there is no keychain, so macOS asks the person to reset theirs, and the
+    /// renewal may never reach the file. Bots cannot run `security` either.
+    func testARenewalCannotReachTheKeychain() throws {
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"one","refreshToken":"r1","expiresAt":1}}"#.utf8)
+        let claude = FileManager.default.temporaryDirectory.appendingPathComponent("claude-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: claude) }
+        try Data(#"""
+            #!/bin/sh
+            command -v security >/dev/null && exit 1
+            printf '%s' '{"claudeAiOauth":{"accessToken":"two","refreshToken":"r2","expiresAt":1}}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
+            exec /bin/sleep 30
+            """#.utf8).write(to: claude)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claude.path)
+        let renewed = try ClaudeLoginRefresh.refresh(login, executable: claude, timeout: 10)
+        XCTAssertTrue(String(decoding: try XCTUnwrap(renewed), as: UTF8.self).contains("r2"))
+    }
+
     /// Claude Code clears its login when a refresh is refused, as it is when another copy
     /// spent the token. That copy must never replace a working login, least of all the renewal
     /// that spent the token, which an exchange of the clearing bot would otherwise get to first.
