@@ -263,6 +263,16 @@ enum HubThread: HubConversation {
         try? JSONEncoder().encode(drafts).write(to: draftsURL, options: .atomic)
     }
 
+    /// Files waiting above the message field, by conversation, while the app runs: a conversation shown again,
+    /// as when an iPad window is resized between one column and two, still has them.
+    @ObservationIgnored private var pendingFiles: [UUID: [OutgoingFile]] = [:]
+
+    func pendingFiles(for conversation: some HubConversation) -> [OutgoingFile] { pendingFiles[conversation.conversationID] ?? [] }
+
+    func setPendingFiles(_ files: [OutgoingFile], for conversation: some HubConversation) {
+        pendingFiles[conversation.conversationID] = files.isEmpty ? nil : files
+    }
+
     /// The bot's phase as its dot shows it: offline while its Hub does not answer.
     func phase(of agent: LinkBot) -> LinkBotPhase? { HubConnection(pairing).phase(of: agent.phase) }
 
@@ -1468,7 +1478,7 @@ struct AgentsView: View {
 
     var body: some View {
         let rows = rows
-        Group {
+        presentations(Group {
             if layout == .split {
                 split(rows)
             } else {
@@ -1477,7 +1487,7 @@ struct AgentsView: View {
                         .navigationDestination(for: ChatLink.self) { conversation($0) }
                 }
             }
-        }
+        })
         // The room the screen has, whatever the keyboard covers, so typing never changes the layout.
         .background {
             Color.clear
@@ -1732,35 +1742,42 @@ struct AgentsView: View {
                 try? await hub.reload()
             }
         }
-        .sheet(isPresented: $showingMore, onDismiss: openChosen) {
-            MoreSheet { choice in
-                chosen = choice
-                showingMore = false
+    }
+
+    /// The sheets and covers the list opens. They are on the screen as a whole, not on the list, which is built
+    /// again when an iPad window is resized between one column and two, so one that is open stays open, with
+    /// what was typed in it.
+    private func presentations(_ content: some View) -> some View {
+        content
+            .sheet(isPresented: $showingMore, onDismiss: openChosen) {
+                MoreSheet { choice in
+                    chosen = choice
+                    showingMore = false
+                }
             }
-        }
-        .sheet(isPresented: $showingProfile) { HubsView(chats: chats).formSheetSizing() }
-        .sheet(isPresented: $showingSettings) { SettingsView(chats: chats).formSheetSizing() }
-        .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
-        // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
-        .sheet(isPresented: $creating) {
-            if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
-        }
-        .sheet(isPresented: $creatingGroup) {
-            if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
-        }
-        .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
-            TextField("Name", text: $spaceName)
-            Button("Cancel", role: .cancel) {}
-            Button("Create") { saveSpace() }
-                .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }
-        .sheet(isPresented: $editingSpaces) {
-            SpaceEditor(list: spaceList,
-                        hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
-                        moveHubs: moveHubs, change: { changeSpaces($0) })
-                .formSheetSizing()
-        }
-        .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread).formSheetSizing() }
+            .sheet(isPresented: $showingProfile) { HubsView(chats: chats).formSheetSizing() }
+            .sheet(isPresented: $showingSettings) { SettingsView(chats: chats).formSheetSizing() }
+            .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
+            // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
+            .sheet(isPresented: $creating) {
+                if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
+            }
+            .sheet(isPresented: $creatingGroup) {
+                if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
+            }
+            .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
+                TextField("Name", text: $spaceName)
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { saveSpace() }
+                    .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .sheet(isPresented: $editingSpaces) {
+                SpaceEditor(list: spaceList,
+                            hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
+                            moveHubs: moveHubs, change: { changeSpaces($0) })
+                    .formSheetSizing()
+            }
+            .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread).formSheetSizing() }
     }
 
     /// All, a space for each joined Hub with its bots and groups alone and the pins it keeps, then the spaces the person made.
@@ -2681,8 +2698,10 @@ struct ChatView: View {
         .onAppear {
             chats.markRead(thread)
             draft = chats.draft(for: thread)
+            files = chats.pendingFiles(for: thread)
         }
         .onChange(of: draft) { chats.setDraft(draft, for: thread) }
+        .onChange(of: files) { chats.setPendingFiles(files, for: thread) }
         .onChange(of: messages.last?.id) { chats.markRead(thread) }
         // Behind the attach panel, as in Messages: the conversation blurs, and tapping it closes the panel.
         .overlay {
