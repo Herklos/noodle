@@ -70,22 +70,111 @@ import Testing
         #expect(!following.awayFromEnd)
         // A gap while lazy rows are measured is not the person leaving the end.
         following.bottomChanged(false)
+        following.farFromEnd = true
         #expect(!following.awayFromEnd)
         following.phaseChanged(.interacting)
         #expect(following.awayFromEnd)
         following.phaseChanged(.idle)
         #expect(following.awayFromEnd, "It stays while the person reads older messages")
         following.bottomChanged(true)
+        following.farFromEnd = false
         #expect(!following.awayFromEnd)
         // A drag that starts at the end shows nothing until the end is out of sight.
         following.phaseChanged(.interacting)
         #expect(!following.awayFromEnd)
         following.bottomChanged(false)
+        following.farFromEnd = true
         #expect(following.awayFromEnd)
         following.phaseChanged(.idle)
         // Tapping it follows the end again at once.
         following.atBottom = true
         #expect(!following.awayFromEnd)
+    }
+
+    /// An iPhone conversation's geometry as SwiftUI reports it: a 852-point screen with 116 points of bars above
+    /// and 90 of composer and home bar below, which `containerSize` leaves out.
+    private func geometry(_ offset: CGFloat, content: CGFloat = 3000) -> ScrollGeometry {
+        ScrollGeometry(contentOffset: CGPoint(x: 0, y: offset), contentSize: CGSize(width: 393, height: content),
+                       contentInsets: EdgeInsets(top: 116, leading: 0, bottom: 90, trailing: 0),
+                       containerSize: CGSize(width: 393, height: 852 - 116 - 90))
+    }
+
+    /// Where the end of `geometry`'s 3000 points of conversation is.
+    private let end: CGFloat = 3000 + 90 - 852
+
+    /// Measured against `containerSize`, a conversation resting at its end seemed short of it by the bars' and
+    /// the composer's height, so after any drag Scroll to Latest stayed over the latest message.
+    @Test func atItsEndAConversationIsAtTheBottomUnderTheBarsAndAboveTheComposer() {
+        #expect(ConversationScroll.isAtBottom(geometry(end)))
+        #expect(ConversationScroll.distanceFromEnd(geometry(end)) == 0)
+        #expect(!ConversationScroll.isFarFromEnd(geometry(end)))
+        #expect(!ConversationScroll.isPastEnd(geometry(end)))
+        // Going to the end aims past it by the insets, and the scroll view stops at the end, even when
+        // SwiftUI's sizes are behind the scroll view's.
+        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end + 116 + 90)
+        // On the iPhone simulator SwiftUI's sizes put the end 6 points below where the scroll view stops.
+        #expect(ConversationScroll.isAtBottom(geometry(end - 6)))
+        #expect(!ConversationScroll.isAtBottom(geometry(end - 150)))
+        #expect(ConversationScroll.distanceFromEnd(geometry(end - 150)) == 150)
+        // A conversation shorter than the screen is at its end from the start, below the bars.
+        #expect(ConversationScroll.isAtBottom(geometry(-116, content: 300)))
+        #expect(ConversationScroll.distanceFromEnd(geometry(-116, content: 300)) == 0)
+    }
+
+    /// The same on a real scroll view, under a navigation bar and above the composer's room.
+    @MainActor @Test func aConversationRestingAtItsEndIsAtTheBottom() async throws {
+        let recorded = ScrollTestGeometry()
+        let conversation = NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(0..<60, id: \.self) { Text("Message \($0)").padding(8).frame(maxWidth: .infinity, alignment: .leading) }
+                }
+                .padding(.vertical, 8)
+            }
+            .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in recorded.geometry = geometry }
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 56) }
+            .navigationTitle("Conversation")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .frame(width: 390, height: 700)
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: conversation)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        await Self.layout(window)
+        let scroll = try #require(Self.scrollView(in: window))
+        #expect(scroll.adjustedContentInset.top > 2 && scroll.adjustedContentInset.bottom > 2)
+        let end = scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height
+        for above: CGFloat in [0, 150, 450] {
+            scroll.contentOffset.y = end - above
+            await Self.layout(window)
+            let geometry = try #require(recorded.geometry)
+            let seen = "\(above) points above the end; \(Self.describe(scroll)); SwiftUI: \(geometry)"
+            #expect(abs(ConversationScroll.distanceFromEnd(geometry) - above) <= ConversationScroll.bottomSlack, "\(seen)")
+            #expect(ConversationScroll.isAtBottom(geometry) == (above == 0), "\(seen)")
+            #expect(ConversationScroll.isFarFromEnd(geometry) == (above > ConversationScroll.scrollToLatestDistance), "\(seen)")
+        }
+    }
+
+    /// Petko on 0.46.0: a few lines short of the end is not reading older messages.
+    @Test func scrollToLatestWaitsUntilWellAboveTheEnd() {
+        let near = end - ConversationScroll.scrollToLatestDistance + 100
+        let far = end - ConversationScroll.scrollToLatestDistance - 100
+        #expect(!ConversationScroll.isFarFromEnd(geometry(near)))
+        #expect(ConversationScroll.isFarFromEnd(geometry(far)))
+
+        var following = ConversationScroll.Following()
+        following.phaseChanged(.interacting)
+        following.bottomChanged(ConversationScroll.isAtBottom(geometry(near)))
+        following.farFromEnd = ConversationScroll.isFarFromEnd(geometry(near))
+        following.phaseChanged(.idle)
+        #expect(!following.atBottom)
+        #expect(!following.awayFromEnd, "Just above the end, there is no Scroll to Latest")
+        following.farFromEnd = ConversationScroll.isFarFromEnd(geometry(far))
+        #expect(following.awayFromEnd, "Well above the end, Scroll to Latest shows")
+        following.farFromEnd = ConversationScroll.isFarFromEnd(geometry(near))
+        #expect(!following.awayFromEnd, "Back near the end, it hides again")
     }
 
     /// Opened, a conversation shows its end just above the composer, not past it, and does not sit
@@ -95,6 +184,7 @@ import Testing
             LinkMessage(id: UUID(), conversationID: UUID(), author: index.isMultiple(of: 2) ? .you : .bot(UUID()),
                         body: String(repeating: "Line of a message. ", count: 1 + index % 5), createdAt: Date(), delivered: true)
         }
+        let recorded = ScrollTestGeometry()
         let conversation = NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 6) {
@@ -107,6 +197,7 @@ import Testing
                 .padding(.vertical, 8)
             }
             .modifier(ConversationScrolling(latest: messages.last))
+            .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in recorded.geometry = geometry }
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 56) }
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -119,13 +210,20 @@ import Testing
 
         let scrollView = try #require(Self.scrollView(in: window))
         let end = scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height
-        #expect(scrollView.contentOffset.x == -scrollView.adjustedContentInset.left)
-        #expect(abs(scrollView.contentOffset.y - end) <= 1)
+        let seen = "\(Self.describe(scrollView)); SwiftUI: \(recorded.geometry.map(String.init(describing:)) ?? "none")"
+        #expect(scrollView.contentOffset.x == -scrollView.adjustedContentInset.left, "\(seen)")
+        #expect(abs(scrollView.contentOffset.y - end) <= 1, "\(seen)")
     }
 
     private static func scrollView(in view: UIView) -> UIScrollView? {
         if let scrollView = view as? UIScrollView { return scrollView }
         return view.subviews.lazy.compactMap(scrollView(in:)).first
+    }
+
+    /// What the scroll view itself has, to set beside SwiftUI's geometry when a test fails.
+    @MainActor private static func describe(_ scroll: UIScrollView) -> String {
+        "UIScrollView: contentOffset \(scroll.contentOffset), contentSize \(scroll.contentSize), "
+            + "adjustedContentInset \(scroll.adjustedContentInset), bounds \(scroll.bounds)"
     }
 
     @MainActor private static func layout(_ window: UIWindow) async {
@@ -159,7 +257,7 @@ import Testing
         model.messages.append(message(from: .you))
         await Self.layout(window)
         let sentEnd = scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height
-        #expect(abs(scroll.contentOffset.y - sentEnd) <= 1, "Your own message should show at the end")
+        #expect(abs(scroll.contentOffset.y - sentEnd) <= 1, "Your own message should show at the end; \(Self.describe(scroll))")
         #expect(abs(scroll.contentOffset.x + scroll.adjustedContentInset.left) < 1)
     }
 
@@ -237,6 +335,10 @@ import Testing
         // A long strip stays big enough to tap.
         #expect(AttachmentView.pictureFrame(for: LinkPixelSize(width: 20_000, height: 10)) == CGSize(width: 240, height: 44))
     }
+}
+
+@MainActor private final class ScrollTestGeometry {
+    var geometry: ScrollGeometry?
 }
 
 @MainActor @Observable private final class ScrollTestMessages {

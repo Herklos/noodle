@@ -223,6 +223,38 @@ final class HarnessProfileTests: XCTestCase {
         XCTAssertNil(HarnessProfileLogin.challenge(provider: .grokBuild, url: "https://accounts.x.ai/oauth2/device", code: "7ABC DEFG; rm"))
     }
 
+    /// Grok Build and Muse Code open the browser themselves. Noodle shows their
+    /// page and code instead, so the person decides when to open it.
+    func testDeviceCodeSignInsCannotOpenTheBrowserThemselves() throws {
+        let executable = URL(fileURLWithPath: "/Applications/Harness/bin/harness")
+        for provider in [HarnessProvider.grokBuild, .muse] {
+            let launch = HarnessProfileLogin.launch(provider, executable: executable, arguments: ["login"])
+            XCTAssertEqual(launch.executable.path, "/usr/bin/sandbox-exec", provider.rawValue)
+            XCTAssertEqual(launch.arguments, ["-p", "(version 1)(allow default)(deny lsopen)", executable.path, "login"],
+                           provider.rawValue)
+        }
+        // Claude Code has no code to show, so its sign-in still opens the browser.
+        for provider in [HarnessProvider.claudeCode, .codex, .fx, .antigravity, .openCode] {
+            let launch = HarnessProfileLogin.launch(provider, executable: executable, arguments: ["login"])
+            XCTAssertEqual(launch.executable, executable, provider.rawValue)
+            XCTAssertEqual(launch.arguments, ["login"], provider.rawValue)
+        }
+
+        // Grok Build then says it could not open the browser; the link and code still come through.
+        let grok = "  https://accounts.x.ai/oauth2/device?user_code=8WJ9-APKN\n\n"
+            + "  (Could not open browser automatically — open the URL above manually.)\n\nConfirm this code in your browser:\n\n  8WJ9-APKN\n"
+        XCTAssertEqual(HarnessProfileLogin.challenge(provider: .grokBuild, text: grok)?.code, "8WJ9-APKN")
+
+        // The profile itself is accepted by this Mac's sandbox-exec.
+        let check = Process()
+        let launch = HarnessProfileLogin.launch(.grokBuild, executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
+        check.executableURL = launch.executable
+        check.arguments = launch.arguments
+        try check.run()
+        check.waitUntilExit()
+        XCTAssertEqual(check.terminationStatus, 0)
+    }
+
     func testMuseProfileNeverFallsBackToTheSharedKeychainLogin() throws {
         let agent = try repository.createAgent(named: "Muse Bot", harnessIdentifier: "muse").agent
         let workspace = repository.storage(for: agent.id).workspace

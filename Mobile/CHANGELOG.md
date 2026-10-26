@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The down arrow in a conversation no longer stays over the latest message after you scroll back down to it, and it waits until you are well above the latest message, not a few lines short of it. Scrolled back down to the latest message by hand, a conversation follows new replies again. Before, it left out the room under the bar and the message field, so it thought you hadn't reached the end yet.
+
+### What to Test
+
+- In a long conversation, scroll up a little, less than half the screen: check no down arrow shows. Scroll up further: check it shows. Scroll back down to the latest message by hand: check the arrow hides, and a new reply scrolls into view. Do the same with the keyboard open.
+
 ## [0.46.0] - 2026-10-25
 
 ### Added

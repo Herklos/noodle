@@ -16,6 +16,7 @@ private struct TranscriptGeometry: Equatable {
     let viewport: TranscriptViewport
     let contentHeight: CGFloat
     let containerHeight: CGFloat
+    let farFromEnd: Bool
 }
 
 /// Records geometry without publishing a SwiftUI update for every scrolled pixel.
@@ -50,8 +51,9 @@ struct TranscriptScrollView<Content: View>: View {
     @State private var userIsScrolling = false
     @State private var userHasScrolled = false
     @State private var didRestoreInitialViewport = false
-    /// Changes only when the end comes into or out of sight, not for every scrolled pixel.
-    @State private var endIsInSight: Bool
+    /// Whether the reader is more than `TranscriptScrollMetrics.scrollToLatestDistance` above the end.
+    /// Changes only when that distance is crossed, not for every scrolled pixel.
+    @State private var farFromEnd: Bool
 
     init(initialViewport: TranscriptViewport, lastMessageID: UUID?, lastMessageIsFromUser: Bool,
          bottomOverlayHeight: CGFloat, saveViewport: @escaping (TranscriptViewport) -> Void,
@@ -71,7 +73,7 @@ struct TranscriptScrollView<Content: View>: View {
         _position = State(initialValue: initialPosition)
         _viewportRecorder = State(initialValue: TranscriptViewportRecorder(initialViewport))
         _followsLatest = State(initialValue: initialViewport.isAtBottom)
-        _endIsInSight = State(initialValue: initialViewport.isAtBottom)
+        _farFromEnd = State(initialValue: !initialViewport.isAtBottom)
     }
 
     var body: some View {
@@ -126,11 +128,12 @@ struct TranscriptScrollView<Content: View>: View {
                 // ScrollPosition(y:) uses the inset-adjusted top, not raw offset.
                 viewport: TranscriptViewport(offset: metrics.offset, isAtBottom: metrics.isAtBottom),
                 contentHeight: geometry.contentSize.height,
-                containerHeight: geometry.containerSize.height
+                containerHeight: geometry.containerSize.height,
+                farFromEnd: metrics.isFarFromEnd
             )
         } action: { _, updated in
             viewportRecorder.viewport = updated.viewport
-            if endIsInSight != updated.viewport.isAtBottom { endIsInSight = updated.viewport.isAtBottom }
+            if farFromEnd != updated.farFromEnd { farFromEnd = updated.farFromEnd }
             // A later layout change must not be mistaken for a user scroll.
             if userIsScrolling, followsLatest != updated.viewport.isAtBottom {
                 followsLatest = updated.viewport.isAtBottom
@@ -158,8 +161,8 @@ struct TranscriptScrollView<Content: View>: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            // Once the person has left the end and it is out of sight, as on iPhone.
-            let showsScrollToLatest = !followsLatest && !endIsInSight
+            // Once the person has left the end and is well above it, as on iPhone.
+            let showsScrollToLatest = !followsLatest && farFromEnd
             ZStack {
                 if showsScrollToLatest { scrollToLatestButton.transition(.opacity.combined(with: .scale(scale: 0.8))) }
             }

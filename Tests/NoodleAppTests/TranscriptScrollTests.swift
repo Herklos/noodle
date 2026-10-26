@@ -158,6 +158,20 @@ import NoodleCore
         XCTAssertFalse(hasControl("Scroll to Latest", in: root), "Following new messages, there is no Scroll to Latest")
     }
 
+    /// A little above the end is not reading older messages: Scroll to Latest waits until the end is
+    /// more than `TranscriptScrollMetrics.scrollToLatestDistance` below, as on iPhone.
+    func testScrollToLatestWaitsUntilWellAboveTheEnd() async throws {
+        let (_, root, scroll) = try await openUnderTitlebar()
+        await scrollUp(scroll, by: 200, step: 50)
+        let near = endOffset(scroll) - scroll.contentView.bounds.minY
+        XCTAssertGreaterThan(near, 50, "The scroll did not leave the end")
+        XCTAssertLessThan(near, TranscriptScrollMetrics.scrollToLatestDistance, "The scroll went too far")
+        XCTAssertFalse(hasControl("Scroll to Latest", in: root), "\(near)pt above the end, Scroll to Latest showed")
+        await scrollUp(scroll, by: 900)
+        let shown = await eventually(seconds: 2) { self.hasControl("Scroll to Latest", in: root) }
+        XCTAssertTrue(shown, "\(endOffset(scroll) - scroll.contentView.bounds.minY)pt above the end, there was no Scroll to Latest")
+    }
+
     // MARK: - Helpers
 
     /// A long conversation opened on its end, running up behind the titlebar as the chat window's does.
@@ -181,10 +195,10 @@ import NoodleCore
         view as? NSScrollView ?? view.subviews.lazy.compactMap { self.scrollView(in: $0) }.first
     }
 
-    private func scrollUp(_ scroll: NSScrollView) async {
+    private func scrollUp(_ scroll: NSScrollView, by distance: Int32 = 1800, step: Int32 = 300) async {
         wheel(scroll, delta: 0, phase: 1)
-        for _ in 0..<6 {
-            wheel(scroll, delta: 300, phase: 2)
+        for scrolled in stride(from: Int32(0), to: distance, by: Int(step)) {
+            wheel(scroll, delta: min(step, distance - scrolled), phase: 2)
             _ = await eventually(seconds: 0.03) { false }
         }
         wheel(scroll, delta: 0, phase: 4)

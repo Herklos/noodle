@@ -2026,10 +2026,18 @@ enum ConversationScroll {
             if scrolling || bottom { atBottom = bottom }
         }
 
-        /// Whether to offer the way back to the latest message: once the person has left the end and it
-        /// is out of sight. Not for a gap while lazy rows are measured, nor for a drag that starts at the end.
-        var awayFromEnd: Bool { !atBottom && !bottom }
+        /// Whether the end is further below than Scroll to Latest waits for.
+        var farFromEnd = false
+
+        /// Whether to offer the way back to the latest message: once the person has left the end and is
+        /// more than `scrollToLatestDistance` above it. Not for a gap while lazy rows are measured, nor for
+        /// a drag that starts at the end, nor for a few lines short of it.
+        var awayFromEnd: Bool { !atBottom && farFromEnd }
     }
+
+    /// How far above the end the person must be for Scroll to Latest to show, as on the Mac: about half
+    /// an iPhone's conversation, so a few lines short of the end do not bring it up.
+    static let scrollToLatestDistance: CGFloat = 300
 
     /// Measured together so a correction never uses an offset from the previous layout pass.
     struct Bounds: Equatable {
@@ -2043,6 +2051,9 @@ enum ConversationScroll {
             insets = geometry.contentInsets
         }
 
+        /// Where to scroll for the end. Against `containerSize`, which leaves out the insets, it lies past the
+        /// end by their height, and the scroll view stops at the end itself. Aimed at the end exactly, it
+        /// stopped short on iOS whenever SwiftUI's sizes were behind the scroll view's.
         var end: CGPoint {
             CGPoint(x: -insets.leading, y: max(content.height + insets.bottom - viewport.height, -insets.top))
         }
@@ -2056,9 +2067,40 @@ enum ConversationScroll {
         return wasAtBottom ? .top : nil
     }
 
+    /// How far short of the end still counts as at the bottom. SwiftUI's sizes can be a few points out from
+    /// the scroll view's: on the iPhone simulator, a conversation resting at its very end measured 6 points
+    /// above it, a row's spacing. Less than a line of text.
+    static let bottomSlack: CGFloat = 24
+
     /// Whether the end shows above the composer. A conversation shorter than the screen always is.
     static func isAtBottom(contentOffset: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat, bottomInset: CGFloat) -> Bool {
-        contentOffset + viewportHeight - bottomInset >= contentHeight - 2
+        contentOffset + viewportHeight - bottomInset >= contentHeight - bottomSlack
+    }
+
+    /// The scroll view's whole size, under the bars and the composer too. SwiftUI's `containerSize` leaves
+    /// out the content insets, which put the end their height further down than it is: a conversation
+    /// resting at its end never counted as at the bottom. On the iPhone simulator, a 540-point
+    /// `containerSize` with 68 and 98 points of insets came with a 706-point `visibleRect`.
+    static func viewport(of geometry: ScrollGeometry) -> CGSize {
+        let insets = geometry.contentInsets
+        return CGSize(width: geometry.containerSize.width + insets.leading + insets.trailing,
+                      height: geometry.containerSize.height + insets.top + insets.bottom)
+    }
+
+    static func isAtBottom(_ geometry: ScrollGeometry) -> Bool {
+        isAtBottom(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
+                   viewportHeight: viewport(of: geometry).height, bottomInset: geometry.contentInsets.bottom)
+    }
+
+    /// How far the conversation is above its end, none at or past it.
+    static func distanceFromEnd(_ geometry: ScrollGeometry) -> CGFloat {
+        let end = max(geometry.contentSize.height + geometry.contentInsets.bottom - viewport(of: geometry).height,
+                      -geometry.contentInsets.top)
+        return max(end - geometry.contentOffset.y, 0)
+    }
+
+    static func isFarFromEnd(_ geometry: ScrollGeometry) -> Bool {
+        distanceFromEnd(geometry) > scrollToLatestDistance
     }
 
     /// Whether the conversation has gone so far beyond its end that little or none of it shows above the
@@ -2068,6 +2110,12 @@ enum ConversationScroll {
                           bottomInset: CGFloat) -> Bool {
         let end = max(contentHeight + bottomInset - viewportHeight, -topInset)
         return contentOffset - end > (viewportHeight - topInset - bottomInset) / 3
+    }
+
+    static func isPastEnd(_ geometry: ScrollGeometry) -> Bool {
+        isPastEnd(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
+                  viewportHeight: viewport(of: geometry).height, topInset: geometry.contentInsets.top,
+                  bottomInset: geometry.contentInsets.bottom)
     }
 }
 
@@ -2110,11 +2158,7 @@ struct ConversationScrolling: ViewModifier {
             }
             // A scroll worked out before the conversation's height and the keyboard's room settle can stop
             // beyond the end, which stays blank until scrolled by hand: it goes back to the end instead.
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                ConversationScroll.isPastEnd(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
-                                             viewportHeight: geometry.containerSize.height, topInset: geometry.contentInsets.top,
-                                             bottomInset: geometry.contentInsets.bottom)
-            } action: { _, past in
+            .onScrollGeometryChange(for: Bool.self) { ConversationScroll.isPastEnd($0) } action: { _, past in
                 pastEnd = past
                 if past, !following.scrolling {
                     backToEnd()
@@ -2126,10 +2170,12 @@ struct ConversationScrolling: ViewModifier {
                     Task { if following.atBottom { scrollToEnd() } }
                 }
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                ConversationScroll.isAtBottom(contentOffset: geometry.contentOffset.y, contentHeight: geometry.contentSize.height,
-                                              viewportHeight: geometry.containerSize.height, bottomInset: geometry.contentInsets.bottom)
-            } action: { _, bottom in following.bottomChanged(bottom) }
+            .onScrollGeometryChange(for: Bool.self) { ConversationScroll.isAtBottom($0) } action: { _, bottom in
+                following.bottomChanged(bottom)
+            }
+            .onScrollGeometryChange(for: Bool.self) { ConversationScroll.isFarFromEnd($0) } action: { _, far in
+                following.farFromEnd = far
+            }
             // The edge-based scroll can count the composer's inset twice on iOS 27.1. Use the actual
             // bounds instead, and follow changes in lazy row measurements only while following the end.
             .onScrollGeometryChange(for: ConversationScroll.Bounds.self) { ConversationScroll.Bounds($0) } action: { _, bounds in

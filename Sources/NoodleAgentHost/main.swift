@@ -594,20 +594,20 @@ private final class HostSession: NSObject, AgentHostService {
                 if account.provider == .claudeCode {
                     // Claude Code signs in through the browser.
                     return self.runLogin(executable: account.executable, arguments: ["auth", "login", "--claudeai"],
-                                         environment: account.environment, name: account.provider.displayName,
+                                         environment: account.environment, provider: account.provider,
                                          challenge: nil, status: account.status, reply: reply)
                 }
                 if account.provider == .fx {
                     // FX signs in with Vercel.
                     return self.runLogin(executable: account.executable, arguments: ["login"], environment: account.environment,
-                                         name: account.provider.displayName, challenge: FxProtocol.loginChallenge,
+                                         provider: account.provider, challenge: FxProtocol.loginChallenge,
                                          status: account.status, reply: reply)
                 }
                 guard let arguments = HarnessProfileLogin.arguments(account.provider) else {
                     throw HostError("This harness does not support this sign-in flow.")
                 }
                 self.runLogin(executable: account.executable, arguments: arguments, environment: account.environment,
-                              name: account.provider.displayName,
+                              provider: account.provider,
                               challenge: { HarnessProfileLogin.challenge(provider: account.provider, text: $0) },
                               status: account.status, reply: reply)
             } catch { reply(false, error.localizedDescription) }
@@ -691,13 +691,14 @@ private final class HostSession: NSObject, AgentHostService {
 
     /// One account command at a time. Output is read only to find the sign-in
     /// challenge; nothing else the harness prints leaves the host.
-    private func runLogin(executable: URL, arguments: [String], environment: [String: String], name: String,
+    private func runLogin(executable: URL, arguments: [String], environment: [String: String], provider: HarnessProvider,
                           challenge: ((String) -> HarnessSignInChallenge?)?, status: @escaping () throws -> Bool,
                           reply: @escaping (Bool, String?) -> Void) {
         do {
             let login = Process()
-            login.executableURL = executable
-            login.arguments = arguments
+            let launch = HarnessProfileLogin.launch(provider, executable: executable, arguments: arguments)
+            login.executableURL = launch.executable
+            login.arguments = launch.arguments
             login.currentDirectoryURL = FileManager.default.temporaryDirectory
             login.standardInput = FileHandle.nullDevice
             login.standardOutput = FileHandle.nullDevice
@@ -734,7 +735,7 @@ private final class HostSession: NSObject, AgentHostService {
                     self.loginText = ""
                     do {
                         guard login.terminationStatus == 0 else {
-                            throw HostError("\(name) sign-in did not complete. Try signing in from Terminal.")
+                            throw HostError("\(provider.displayName) sign-in did not complete. Try signing in from Terminal.")
                         }
                         reply(try status(), nil)
                     } catch { reply(false, error.localizedDescription) }
