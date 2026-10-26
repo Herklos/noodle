@@ -938,7 +938,7 @@ struct CallBlockRow: View {
                 }
                 .navigationTitle("Call")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showsAll = false } } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showsAll = false }.keyboardShortcut(.cancelAction) } }
             }
             .presentationDetents([.medium, .large])
         }

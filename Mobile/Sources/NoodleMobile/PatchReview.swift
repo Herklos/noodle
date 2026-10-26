@@ -254,7 +254,7 @@ struct PatchReviewScreen: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         withAnimation { model.hidesViewed.toggle() }

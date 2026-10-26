@@ -93,7 +93,7 @@ struct AttachmentPreviewScreen: View {
             .ignoresSafeArea(edges: .bottom)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
                         Text(item.attachment.filename).font(.headline).lineLimit(1).truncationMode(.middle)

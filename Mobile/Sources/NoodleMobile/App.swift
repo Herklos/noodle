@@ -76,6 +76,7 @@ struct NoodleMobileApp: App {
                 await notifications.register(hubs.hubs, allowed: allowed)
             }
         }
+        .commands { NoodleCommands() }
     }
 }
 

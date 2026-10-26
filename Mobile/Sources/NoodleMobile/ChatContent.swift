@@ -749,6 +749,8 @@ struct ComposerField: UIViewRepresentable {
     /// Where the caret is, in UTF-16 units, as `NSRange` counts.
     @Binding var caret: Int
     let placeholder: String
+    /// Sends the message, from Return on a hardware keyboard.
+    var submit: (() -> Void)?
     let pasted: (ComposerPaste) -> Void
     @Environment(\.isEnabled) private var isEnabled
 
@@ -774,6 +776,7 @@ struct ComposerField: UIViewRepresentable {
         view.placeholder.isHidden = !text.isEmpty
         view.isEditable = isEnabled
         view.pasted = pasted
+        view.submit = submit
         context.coordinator.text = $text
         context.coordinator.caret = $caret
     }
@@ -834,10 +837,22 @@ final class PastingTextView: UITextView {
 
     required init?(coder: NSCoder) { fatalError("Not used from a storyboard.") }
 
+    /// Sends the message, from Return on a hardware keyboard.
+    var submit: (() -> Void)?
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard submit != nil else { return super.keyCommands }
+        return (super.keyCommands ?? []) + [Self.sendCommand]
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), pasted != nil, ComposerPaste.mayAttach(from: .general) { return true }
+        // Return that finishes a word being composed, as in Japanese, stays with the keyboard.
+        if action == #selector(sendFromKeyboard) { return submit != nil && markedTextRange == nil }
         return super.canPerformAction(action, withSender: sender)
     }
+
+    @objc func sendFromKeyboard() { submit?() }
 
     override func paste(_ sender: Any?) {
         if !attachPaste(from: .general) { super.paste(sender) }
@@ -1039,7 +1054,7 @@ struct SharedAttachments: View {
             .navigationTitle("Shared")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
         }
     }

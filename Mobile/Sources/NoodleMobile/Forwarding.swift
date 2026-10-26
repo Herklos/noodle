@@ -95,7 +95,7 @@ struct ForwardSheet: View {
             .navigationTitle("Forward")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(sending) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(sending) }
                 ToolbarItem(placement: .confirmationAction) {
                     if sending {
                         ProgressView()

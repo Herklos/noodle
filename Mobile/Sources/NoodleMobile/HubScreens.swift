@@ -282,7 +282,7 @@ struct HubTroubleshootingView: View {
             .navigationTitle("Help Me Connect")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
@@ -583,7 +583,7 @@ struct HubsView: View {
             .navigationTitle("Hubs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
             .navigationDestination(item: $details) { folder in
                 if let pairing = hubs.hubs.first(where: { $0.directory == folder }) {
@@ -760,7 +760,7 @@ struct ArchivedView: View {
             .navigationTitle("Archived")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
         }
     }
@@ -1036,7 +1036,7 @@ struct PairDeviceView: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
         }
         .task { await load() }
@@ -1189,7 +1189,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
             // Again on coming back from the list, which may have deleted some.
             .onAppear {

@@ -73,6 +73,33 @@ struct HomeNavigation: Equatable {
         if let selection, gone(selection) { self.selection = nil }
         if let index = path.firstIndex(where: gone) { path = Array(path[..<index]) }
     }
+
+    /// The conversation open now: the one selected in two columns, or the one on top in one.
+    var current: ChatLink? { selection ?? path.last }
+
+    /// Opens the conversation `offset` rows after the open one, or before it when negative, in the list's `order`,
+    /// as the keyboard's Next and Previous Conversation do. With none open, or one the list no longer shows, as
+    /// while searching, it starts at the top of the list going down and at the bottom going up; at either end it stays.
+    mutating func step(_ offset: Int, through order: [ChatLink], in layout: HomeLayout) {
+        guard offset != 0, let first = order.first, let last = order.last else { return }
+        let target: ChatLink
+        if let current, let index = order.firstIndex(of: current) {
+            target = order[min(max(index + offset, 0), order.count - 1)]
+        } else {
+            target = offset > 0 ? first : last
+        }
+        if target != current { open(target, in: layout) }
+    }
+
+    /// Closes the open conversation, as the keyboard's Close Conversation does: in two columns none is selected,
+    /// and in one the conversation beneath, or the list, shows.
+    mutating func close() {
+        if selection != nil {
+            selection = nil
+        } else if !path.isEmpty {
+            path.removeLast()
+        }
+    }
 }
 
 /// The width of the list's column on the left of two, and of the gap after it, where a crease is.

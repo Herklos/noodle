@@ -511,7 +511,7 @@ private struct HubCompanionEditor: View {
             .navigationTitle(kind == .computer ? "Edit Computer" : "Edit Browser")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
                         .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -690,7 +690,7 @@ private struct NewMachineSheet: View {
             .navigationTitle(kind == .computer ? "New Computer" : "New Browser")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(working) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create", action: create).disabled(working || !canCreate)
                 }
@@ -772,7 +772,7 @@ private struct NewToolSheet: View {
             .navigationTitle("New Tool")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
             .task {
                 defer { loading = false }

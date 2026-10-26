@@ -1430,6 +1430,8 @@ struct AgentsView: View {
     @State private var creating = false
     @State private var creatingGroup = false
     @State private var search = ""
+    /// Whether the search field has the keyboard, as Search Conversations gives it.
+    @FocusState private var searchFocused: Bool
     @State private var editing: Row?
     /// Where the system's vertical bar is, as on the iPhone Duo's cover screen; nil without one.
     @State private var verticalBar: HorizontalEdge?
@@ -1482,6 +1484,8 @@ struct AgentsView: View {
                 .ignoresSafeArea(.keyboard)
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         }
+        // A hardware keyboard's commands, in the menus holding ⌘ lists.
+        .focusedSceneValue(\.homeCommands, commands(rows))
         // Unfolding the iPhone Duo or resizing an iPad window keeps the conversation that was open.
         .onChange(of: layout) { old, new in navigation.adapt(from: old, to: new) }
         .onChange(of: opening, initial: true, open)
@@ -1562,16 +1566,62 @@ struct AgentsView: View {
         }
     }
 
-    private func list(_ rows: [Row]) -> some View {
+    /// The rows as the list shows them, in its sections.
+    private struct Listing {
+        var searching = false
+        var found: [Row] = []
+        var pinned: [Row] = []
+        var unread: [Row] = []
+        var rest: [Row] = []
+
+        /// Top to bottom, as Next and Previous Conversation go through them.
+        var order: [ChatLink] { (pinned + unread + rest).map(\.id) }
+    }
+
+    private func listing(_ rows: [Row]) -> Listing {
         // As in Messages: pinned bots in circles above the rest, and one plain list of matches while searching.
-        let searching = !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let found = rows.filter { $0.chats.matches($0.thread, search: search) }
-        let pinned = searching ? [] : found.filter(isPinned)
-        let others = searching ? found : found.filter { !isPinned($0) }
-        let order = searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
+        var listing = Listing(searching: !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        listing.found = rows.filter { $0.chats.matches($0.thread, search: search) }
+        listing.pinned = listing.searching ? [] : listing.found.filter(isPinned)
+        let others = listing.searching ? listing.found : listing.found.filter { !isPinned($0) }
+        let order = listing.searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
         let isUnread = { (row: Row) in row.chats.countsAsUnread(row.thread) }
         let unread = order.unread(others, isUnread: isUnread)
-        let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
+        listing.unread = unread
+        listing.rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
+        return listing
+    }
+
+    /// What the keyboard's commands do here.
+    private func commands(_ rows: [Row]) -> HomeCommands {
+        let order = listing(rows).order
+        let canCreate = !chats.isEmpty
+        let spaces = [SpaceCommand(id: "", title: "All", isShown: ticked.wrappedValue == "") { space = "" }]
+            + spaceHubs.map { hub in
+                let key = CurrentHub.space(of: hub.pairing)
+                return SpaceCommand(id: key, title: hub.pairing.hubName, isShown: ticked.wrappedValue == key) { space = key }
+            }
+            + spaceList.spaces.map { custom in
+                let key = custom.id.uuidString
+                return SpaceCommand(id: key, title: custom.name, isShown: ticked.wrappedValue == key) { space = key }
+            }
+        return HomeCommands(
+            newBot: canCreate ? { creating = true } : nil,
+            newGroup: canCreate ? { creatingGroup = true } : nil,
+            search: rows.isEmpty ? nil : {
+                // In one column the list is under the open conversation.
+                if layout != .split { navigation.path = [] }
+                searchFocused = true
+            },
+            next: order.isEmpty ? nil : { navigation.step(1, through: order, in: layout) },
+            previous: order.isEmpty ? nil : { navigation.step(-1, through: order, in: layout) },
+            close: navigation.current == nil ? nil : { navigation.close() },
+            spaces: chats.isEmpty ? [] : spaces)
+    }
+
+    private func list(_ rows: [Row]) -> some View {
+        let listing = listing(rows)
+        let (searching, found, pinned, unread, rest) = (listing.searching, listing.found, listing.pinned, listing.unread, listing.rest)
         return List {
             if !pinned.isEmpty, layout.pinsInList {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
@@ -1608,6 +1658,7 @@ struct AgentsView: View {
             }
         }
         .searchable(text: $search, prompt: "Search")
+        .searchFocused($searchFocused)
         .overlay {
             if searching && found.isEmpty && !rows.isEmpty {
                 ContentUnavailableView.search(text: search)
@@ -2937,7 +2988,7 @@ struct ChatView: View {
     /// The field, with the microphone or send button inside it, as in Messages.
     private var messageField: some View {
         HStack(alignment: .bottom, spacing: 6) {
-            ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message") { attachPasted($0) }
+            ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message", submit: send) { attachPasted($0) }
             // As in Messages: the microphone until there is something to send.
             if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty && notes.isEmpty {
                 Button { recorder.start() } label: {
@@ -3591,7 +3642,7 @@ struct AgentEditor: View {
                 Text(confirmation.message)
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
@@ -3705,7 +3756,7 @@ private struct SharedBotBackground: View {
         NavigationStack {
             BackgroundEditor(chats: chats, thread: thread)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
                 }
         }
     }
@@ -3843,7 +3894,7 @@ struct GroupEditor: View {
                 Text("The group and its messages are deleted from the Hub for all your devices. Its bots stay.")
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
@@ -4023,7 +4074,7 @@ private struct SpaceEditor: View {
             .navigationTitle("Edit Spaces")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
         }
         .onChange(of: list.spaces.isEmpty) { _, isEmpty in

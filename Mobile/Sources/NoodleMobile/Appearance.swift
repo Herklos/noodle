@@ -480,7 +480,7 @@ struct PersonPictureEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .disabled(saving)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving { ProgressView() } else { Button("Done", action: save).disabled(loading) }
                 }

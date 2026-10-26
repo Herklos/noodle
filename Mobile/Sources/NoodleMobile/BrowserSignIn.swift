@@ -66,7 +66,7 @@ struct BrowserSignInSheet: View {
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(working) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fill", action: fill).disabled(working || entry.isEmpty)
                 }
