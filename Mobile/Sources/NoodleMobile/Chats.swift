@@ -1633,6 +1633,7 @@ struct AgentsView: View {
                         } primaryAction: { navigation.open(row.id, in: layout) }
                         .buttonStyle(.plain)
                         .menuIndicator(.hidden)
+                        .hoverEffect(.lift)
                     }
                 }
                 .padding(.vertical, 8)
@@ -1828,6 +1829,8 @@ struct AgentsView: View {
             let selected = navigation.selection == row.id
             Button { navigation.open(row.id, in: layout) } label: { label.contentShape(.rect) }
                 .buttonStyle(.plain)
+                // The pointer marks the row it is over, as in the Mac's list.
+                .hoverEffect(.highlight)
                 .listRowBackground(selected ? Color.accentColor.opacity(0.15) : nil)
                 .accessibilityAddTraits(selected ? .isSelected : [])
         } else {
@@ -2938,6 +2941,7 @@ struct ChatView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.highlight)
                 .glassEffect(.regular.interactive(), in: Circle())
                 .glassEffectID("attach", in: attachGlass)
                 .accessibilityLabel("Add")
@@ -2977,6 +2981,7 @@ struct ChatView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hoverEffect(.highlight)
     }
 
     private func setAttaching(_ open: Bool) {
@@ -2998,12 +3003,14 @@ struct ChatView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.highlight)
                 .accessibilityLabel("Record Voice Message")
             } else {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
                         .frame(width: 30, height: Self.controlHeight)
                 }
+                .hoverEffect(.lift)
                 .accessibilityLabel("Send")
             }
         }
@@ -3041,6 +3048,7 @@ struct ChatView: View {
                                 .background(Color(.secondarySystemBackground), in: Capsule())
                             }
                             .buttonStyle(.plain)
+                            .hoverEffect(.highlight)
                         }
                     }
                 }
@@ -3276,6 +3284,7 @@ private struct Bubble: View {
                 if let avatar {
                     Button { showAgent(avatar) } label: { AgentAvatar(draft: avatar.draft, size: Self.avatarSize) }
                         .buttonStyle(.plain)
+                        .hoverEffect(.lift)
                         .accessibilityLabel("Show profile for \(avatar.draft.name)")
                 } else if besideAvatars {
                     Color.clear.frame(width: Self.avatarSize, height: 0)
@@ -3314,6 +3323,7 @@ private struct Bubble: View {
                         .overlay(Capsule().stroke(Color(.systemBackground), lineWidth: 2))
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.lift)
             }
         }
     }
@@ -3354,11 +3364,14 @@ private struct Bubble: View {
             let folded = !expanded && MessageFolding.isLong(text)
             MessageText(text: text, folded: folded, foreground: foreground, background: background) { expanded = true }
                 .onLongPressGesture(minimumDuration: 0.35) { lift(text, folded: folded, at: index, quote: text) } onPressingChanged: { pressing = $0 ? index : nil }
+                // A right-click lifts it too, on iPad with a mouse or trackpad.
+                .onSecondaryClick { lift(text, folded: folded, at: index, quote: text) }
                 .accessibilityAction(named: "React") { lift(text, folded: folded, at: index, quote: text) }
         case .table(let table):
             MessageTableCard(table: table, foreground: foreground, background: background)
                 .onLongPressGesture(minimumDuration: 0.35) { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
                     onPressingChanged: { pressing = $0 ? index : nil }
+                .onSecondaryClick { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
                 .accessibilityAction(named: "React") { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
         }
     }

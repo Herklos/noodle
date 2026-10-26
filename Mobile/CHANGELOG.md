@@ -7,6 +7,7 @@
 - On iPad and the unfolded iPhone Duo, your bots and groups are in a column on the left, with the pinned ones on top, and the chat you open shows beside them, as on the Mac. On the iPhone Duo the fold runs between the two, with nothing on it. A tapped notification, widget or link opens its chat there too. Folding or unfolding the iPhone Duo keeps the chat you had open.
 - On the iPhone Duo's cover screen, your pinned bots and groups are in the bar on the right, under the time, instead of above the list. Tap one to open its chat, or touch and hold it for its menu. A dot marks one with unread replies, and pins that don't fit are in the bar's … menu.
 - Keyboard shortcuts on iPad, as on the Mac. Hold ⌘ to see them: ⌘N for a new bot, ⇧⌘N for a new group, ⌘F to search, ⌥⌘↓ and ⌥⌘↑ for the next and previous chat, Esc to close the chat, and ⌘1 to ⌘9 for your spaces. Return sends your message and Shift-Return starts a new line. Esc closes sheets, as Cancel or Done does.
+- With a mouse or trackpad on iPad, right-click a message for its reactions and actions, as touching and holding it does. Right-click a bot or group in the list for its menu. Rows, pinned bots and the message field's buttons light up under the pointer.
 
 ### Changed
 
@@ -22,6 +23,7 @@
 - In a chat on iPad, send a long message: check it wraps at a readable width rather than across the whole chat.
 - On an iPhone Duo, folded, pin three bots: check they show in the bar on the right, under the time, and not above the list, with a dot on one with unread replies. Tap one: check its chat opens. Touch and hold one: check its menu shows, with Unpin. Pin ten: check the ones that don't fit are in the bar's … menu. Unfold it, or use another iPhone: check the pins are above the list as before.
 - On iPad with a keyboard: hold ⌘ and check the shortcuts show. Press ⌥⌘↓ and ⌥⌘↑: check the chats open one after another, in the list's order. Press Esc: check the chat closes. Press ⌘F: check the search field takes your typing. Press ⌘N and ⇧⌘N: check New Bot and New Group open, and Esc closes them. With two Hubs, press ⌘2: check the first Hub's space shows. In a chat, type and press Return: check it sends; press Shift-Return: check it starts a new line. With the on-screen keyboard, check return still starts a new line.
+- On iPad with a mouse or trackpad: move the pointer over the list's rows, the pinned bots and the buttons beside the message field: check each lights up. Right-click a message: check its reactions and actions show, as after touching and holding it. Right-click a row and a pinned bot: check their menus show. Touch and hold a message with a finger: check it still works.
 - On an iPhone Duo, folded and not paired: check the wordmark is centred above Pair. Tap Pair: check its buttons are centred in the sheet. Once paired, tap …: check its buttons are centred too. On another iPhone, check the pairing screen and these sheets look as before.
 
 ## [0.46.1] - 2026-10-26

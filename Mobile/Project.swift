@@ -59,6 +59,8 @@ let project = Project(
                 "NoodleAppGroup": "group.$(MOBILE_APP_BUNDLE_ID)",
                 // Conversations told to iOS, which the share sheet suggests and reply notifications show as messages.
                 "NSUserActivityTypes": ["INSendMessageIntent"],
+                // A mouse or trackpad on iPad clicks as a pointer, not a finger, so a right-click opens a message's actions.
+                "UIApplicationSupportsIndirectInputEvents": true,
             ]),
             // The widgets' bot entity too, for the Shortcuts actions that take a bot.
             sources: ["Sources/NoodleMobile/**", "Sources/Shared/**", "Sources/NoodleMobileWidgets/BotEntity.swift"],
