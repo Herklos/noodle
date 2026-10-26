@@ -224,7 +224,10 @@ private final class Once<T>: @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let reader = LocalMacWire.Reader(input)
             do {
-                while let data = try reader.read() {
+                // This block never returns while the desktop is connected, so each message drains
+                // its own autorelease pool; otherwise every frame's pixels stayed in memory.
+                while try autoreleasepool(invoking: {
+                    guard let data = try reader.read() else { return false }
                     let reply = try LocalMacWire.decode(LocalMacReply.self, from: data)
                     if let region = reply.region {
                         guard let descriptor = reader.takeDescriptor() else {
@@ -242,7 +245,8 @@ private final class Once<T>: @unchecked Sendable {
                         }
                     }
                     DispatchQueue.main.async { [weak self] in self?.receive(reply, image: image) }
-                }
+                    return true
+                }) {}
                 DispatchQueue.main.async { [weak self] in self?.disconnect("The background desktop connection closed. Retry Start to reconnect.") }
             } catch { DispatchQueue.main.async { [weak self] in self?.disconnect(error.localizedDescription) } }
         }

@@ -50,6 +50,55 @@ import XCTest
         XCTAssertEqual(requests[1].protectedDisplayIDs, [2])
         runtime.close()
     }
+    /// A desktop sends up to 60 frames a second. Every frame shown stayed in memory until the
+    /// computer stopped, and a Local Mac left open for 17 hours held 41 GB of them.
+    func testFramesAreFreedOnceANewerOneIsShown() async throws {
+        let connection = try LocalMacTestDesktop()
+        let streaming = expectation(description: "capture started")
+        let helper = Task.detached { () throws -> Void in
+            defer { connection.close() }
+            while let request = try connection.read() {
+                var reply = LocalMacReply(id: request.id)
+                var status = LocalMacStatus(screenCapture: true, accessibility: true, postEvents: true, display: .init())
+                status.displayID = 99; reply.status = status
+                try connection.send(reply)
+                if request.operation == .stream { streaming.fulfill() }
+            }
+        }
+        let runtime = LocalMacComputer(displayIDs: { [2] }, presentsWindows: false)
+        try await connection.connect(runtime, protectedDisplays: [2])
+        await fulfillment(of: [streaming], timeout: 10)
+        final class Shown { weak var image: NSImage? }
+        var shown: [Shown] = []
+        let watch = runtime.$image.compactMap { $0 }.sink { image in
+            let entry = Shown(); entry.image = image; shown.append(entry)
+        }
+        func allocated() -> Int {
+            var statistics = malloc_statistics_t()
+            malloc_zone_statistics(nil, &statistics)
+            return statistics.size_in_use
+        }
+        // The helper drops a frame while both of its slots are with the app, so this sends until
+        // enough have been shown.
+        func show(_ count: Int) async throws {
+            let target = shown.count + count
+            for attempt in 0..<5_000 where shown.count < target {
+                try connection.sendFrame([UInt8(attempt % 256), 0, 0, 255], width: 1280, height: 800)
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            XCTAssertGreaterThanOrEqual(shown.count, target)
+        }
+        try await show(5)
+        let before = allocated()
+        try await show(50)
+        let grown = allocated() - before
+        watch.cancel()
+        XCTAssertEqual(shown.dropLast().filter { $0.image != nil }.count, 0, "frames replaced by newer ones")
+        // 50 frames of 1280 × 800 are 200 MB; a few may still be on their way to the screen.
+        XCTAssertLessThan(grown, 10 * 1280 * 800 * 4, "bytes still allocated after 50 frames")
+        runtime.close()
+        try await helper.value
+    }
     func testMissingPermissionKeepsConnectionUsableAndDefersCaptureUntilGranted() async throws {
         let input = Pipe(), output = Pipe()
         var granted = false
