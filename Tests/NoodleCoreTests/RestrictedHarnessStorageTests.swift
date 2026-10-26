@@ -480,6 +480,37 @@ final class RestrictedHarnessStorageTests: XCTestCase {
         XCTAssertFalse(try RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: second) { _ in nil })
     }
 
+    /// Claude Code clears its login when a refresh is refused, as it is when another copy
+    /// spent the token. That copy must never replace a working login, least of all the renewal
+    /// that spent the token, which an exchange of the clearing bot would otherwise get to first.
+    func testALoginClaudeCodeClearedNeverReplacesAWorkingOne() throws {
+        let (home, first, second) = try fixture()
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"one","refreshToken":"r1","expiresAt":1800000000000}}"#.utf8)
+        let secret: (String, String) throws -> Data? = { _, _ in login }
+        for workspace in [first, second] {
+            try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        let a = try WorkspaceMailbox(workspace: first, path: ".noodle/home/.claude")
+        let b = try WorkspaceMailbox(workspace: second, path: ".noodle/home/.claude")
+        let renewed = Data(#"{"claudeAiOauth":{"accessToken":"two","refreshToken":"r2","expiresAt":1800028800000}}"#.utf8)
+        let cleared = Data(#"{"claudeAiOauth":{"accessToken":"one","refreshToken":"","expiresAt":0}}"#.utf8)
+        try a.writeData(renewed, named: ".credentials.json")
+        try b.writeData(cleared, named: ".credentials.json")
+        for workspace in [second, first, second] {
+            try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        XCTAssertEqual(try a.read(".credentials.json", limit: 4096), renewed)
+        XCTAssertEqual(try b.read(".credentials.json", limit: 4096), renewed)
+
+        // Alone, a cleared copy is not passed on either; its bot gets the shared login back.
+        try b.writeData(cleared, named: ".credentials.json")
+        for workspace in [second, first] {
+            try RestrictedHarnessStorage.exchange(provider: .claudeCode, workspace: workspace, loginHome: home, secret: secret)
+        }
+        XCTAssertEqual(try a.read(".credentials.json", limit: 4096), renewed)
+        XCTAssertEqual(try b.read(".credentials.json", limit: 4096), renewed)
+    }
+
     func testALoginRefreshedInTheKeychainReachesRunningBotsWithoutARestart() throws {
         let (home, first, second) = try fixture()
         var login = Data(#"{"claudeAiOauth":{"accessToken":"first","refreshToken":"one"}}"#.utf8)

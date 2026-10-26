@@ -506,7 +506,7 @@ public enum RestrictedHarnessStorage {
                 let shared = store.flatMap { $0.contains(name) ? try? $0.read(name, limit: 1_048_576) : nil }
                 let agreed = try? runtime.read(stamp(name), limit: 256)
                 let copy = destination.contains(name) ? try destination.read(name, limit: 1_048_576) : nil
-                if let store, let shared, let copy, agreed != tag(copy), agreed == tag(shared) {
+                if let store, let shared, let copy, takesBack(copy, shared: shared, agreed: agreed) {
                     // This bot refreshed the login since it last took it.
                     try store.writeData(copy, named: name)
                     try runtime.writeData(tag(copy), named: stamp(name))
@@ -537,8 +537,25 @@ public enum RestrictedHarnessStorage {
             let shared = store.flatMap { $0.contains(name) ? try? $0.read(name, limit: 1_048_576) : nil }
             let agreed = try? runtime.read(stamp(name), limit: 256)
             let copy = destination.flatMap { $0.contains(name) ? try? $0.read(name, limit: 1_048_576) : nil }
-            if let shared, let copy, agreed != tag(copy), agreed == tag(shared) { return copy }
+            if let shared, let copy, takesBack(copy, shared: shared, agreed: agreed) { return copy }
             return shared
+        }
+
+        /// Whether the bot's copy replaces the shared login: when the bot changed it since it
+        /// last took it, unless the change is Claude Code clearing a login it could not refresh,
+        /// which must never win over a working one. A working copy also replaces a cleared one.
+        private func takesBack(_ copy: Data, shared: Data, agreed: Data?) -> Bool {
+            guard agreed != tag(copy) else { return false }
+            if agreed == tag(shared) { return works(copy) || !works(shared) }
+            return works(copy) && !works(shared)
+        }
+
+        /// False only for a Claude Code login without a refresh token, as Claude Code leaves it
+        /// once a refresh is refused.
+        private func works(_ login: Data) -> Bool {
+            guard provider == .claudeCode else { return true }
+            let oauth = (try? JSONSerialization.jsonObject(with: login) as? [String: Any])?["claudeAiOauth"] as? [String: Any]
+            return (oauth?["refreshToken"] as? String).map { !$0.isEmpty } ?? false
         }
 
         func tag(_ data: Data) -> Data {

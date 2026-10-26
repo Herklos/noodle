@@ -6,6 +6,13 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude Code bots no longer all lose their sign-in overnight. When one bot's Claude Code gave up on a login another renewal had just replaced, Noodle passed its emptied login to every other bot, and the renewal was lost.
+- Signing in to a harness or one of its profiles in Settings brings back the bots waiting on that sign-in straight away. Before, they stayed paused for up to ten minutes, and the profile kept saying "Sign-in required" meanwhile.
+- A conversation whose bot waits for sign-in offers Sign In… instead of Kick, which could not help.
+- Starting a harness sign-in, install or update in Settings › Harness shows its progress beside the harness's links instead of on a line of its own, so the rows below no longer jump.
+
 ## [0.76.1] - 2026-10-26
 
 ### Fixed

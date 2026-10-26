@@ -35,6 +35,23 @@ struct HubSettingsProblem: Equatable {
                                        installer: ManagedHarnessInstaller(store: hub.repository.managedHarnesses),
                                        profiles: hub.repository.harnessProfiles)
         setup.subscriptionUsage = hub.runtime.subscriptionUsage
+        hub.harnessProfiles.onSignedIn = { [weak self] id in
+            guard let self, let provider = self.harnessProfiles.profile(id)?.provider else { return }
+            self.runtime.retryAfterSignIn(provider: provider, profile: id, agents: self.agents, repository: self.repository)
+        }
+        setup.onSignedIn = { [weak self] provider in
+            guard let self else { return }
+            self.runtime.retryAfterSignIn(provider: provider, profile: nil, agents: self.agents, repository: self.repository)
+        }
+        // Lets a bot waiting for sign-in come back by itself once its login works again.
+        hub.runtime.checkSignIn = { [weak self] agent in
+            guard let self, let installation = self.runtime.installation(for: agent) else { return nil }
+            guard self.runtime.runningHarness(for: agent.id) == nil,
+                  let profile = try? self.repository.loadAgentHarnessProfile(agent) else {
+                return await self.setup.signedIn(installation)
+            }
+            return await self.harnessProfiles.signedIn(profile, installation: installation)
+        }
     }
 
     var runtime: AgentRuntimeCoordinator { hub.runtime }

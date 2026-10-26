@@ -997,6 +997,21 @@ public final class AgentRuntimeCoordinator {
         restart(agent: agent, repository: repository, sessionRecovery: sessionRecovery(recovery, for: agent))
     }
 
+    /// A sign-in in Settings retries at once the bots waiting on that login, as Retry Now would.
+    /// `profile` is nil for the harness's Default login.
+    public func retryAfterSignIn(provider: HarnessProvider, profile: UUID?, agents: [AgentRecord], repository: WorkspaceRepository) {
+        guard !isStoppingAll else { return }
+        for agent in agents where snapshot(for: agent.id).phase == .failed && snapshot(for: agent.id).failure == .authenticationRequired {
+            // A bot on a fallback harness waits on that harness's own login.
+            guard harnessFallbacks[agent.id] == nil, !changingAccess.contains(agent.id),
+                  runningAgent(agent).harnessIdentifier == provider.rawValue,
+                  (try? repository.loadAgentHarnessProfile(agent)) == profile else { continue }
+            forgetSignInRetries(agent.id)
+            RestrictedHarnessStorage.forgetRefusedLogin(provider: provider, workspace: repository.directory(for: agent))
+            restart(agent: agent, repository: repository, sessionRecovery: sessionRecovery(.retry, for: agent))
+        }
+    }
+
     /// Replaces the bot's harness session with a fresh one, keeping its workspace, memory and messages.
     public func startNewSession(agent: AgentRecord, repository: WorkspaceRepository) {
         guard !neverStarts(agent.id) else { return }

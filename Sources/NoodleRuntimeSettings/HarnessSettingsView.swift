@@ -204,19 +204,6 @@ public struct HarnessInstallationRow: View {
                         Task { await setup.refresh([liveInstallation ?? installation]) }
                     }
                 }
-                if let activity = setup.activity[id] {
-                    HStack {
-                        if let fraction = setup.installProgress[id] {
-                            ProgressView(value: fraction).frame(width: 120)
-                        } else {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(activity).font(.caption)
-                        Spacer()
-                        Button("Cancel") { setup.cancel(id) }
-                            .buttonStyle(.link)
-                    }
-                }
                 if let challenge = setup.challenges[id] {
                     HarnessSignInChallengeView(challenge: challenge)
                 } else if setup.activity[id] == nil {
@@ -386,7 +373,7 @@ public struct HarnessInstallationRow: View {
         let available = installation.isAvailable
         let managed = available && setup.isManaged(installation)
         let updateAvailable = available && version?.updateAvailable == true
-        if (available && id.supportsProfiles) || updateAvailable || managed || id == .apple || needsSignIn {
+        if (available && id.supportsProfiles) || updateAvailable || managed || id == .apple || needsSignIn || setup.activity[id] != nil {
             HStack(spacing: 12) {
                 if available, id.supportsProfiles {
                     Button("Profiles") { showsProfiles = true }
@@ -440,6 +427,20 @@ public struct HarnessInstallationRow: View {
                         // Only this harness's own check matters; version lookups and the
                         // other harnesses' checks would otherwise keep the link disabled.
                         .disabled(setup.checking.contains(id) || liveInstallation?.isAvailable != true)
+                }
+                // On the links' line, so starting and ending it never moves the rows below.
+                if let activity = setup.activity[id] {
+                    HStack(spacing: 6) {
+                        if let fraction = setup.installProgress[id] {
+                            ProgressView(value: fraction).frame(width: 120)
+                        } else {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Text(activity).font(.caption).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Cancel") { setup.cancel(id) }
+                        .buttonStyle(.link)
                 }
             }
         }

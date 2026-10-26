@@ -289,6 +289,34 @@ import XCTest
         XCTAssertFalse(f.factory.processes.last!.launch.recoverInterruptedWork, "Nothing was interrupted, so no turn is started")
     }
 
+    /// Signing in in Settings retries at once the bots waiting on that login, and only those,
+    /// even on a login the host noted as refused, instead of leaving them paused for minutes.
+    func testSigningInRetriesTheBotsWaitingOnThatLoginAtOnce() throws {
+        let f = try fixture(), profile = UUID()
+        let onProfile = try f.agent(harness: .claudeCode), onDefault = try f.agent(harness: .claudeCode)
+        try f.repository.updateAgentHarnessProfile(onProfile, profile: profile)
+        let workspace = f.repository.directory(for: onProfile)
+        let runtime = try WorkspaceMailbox(workspace: AgentStorageLayout(workspace: workspace).package, path: "runtime", create: true)
+        try runtime.writeData(Data("login-key:spent".utf8), named: "auth-seed-claude-code-.credentials.json.sha256")
+        try RestrictedHarnessStorage.loginFailed(provider: .claudeCode, workspace: workspace, now: f.clock.date)
+        try f.start(onProfile).transition(.failed, failure: .authenticationRequired)
+        try f.start(onDefault).transition(.failed, failure: .authenticationRequired)
+        let agents = [onProfile, onDefault]
+
+        f.runtime.retryAfterSignIn(provider: .codex, profile: profile, agents: agents, repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 2, "Another harness's sign-in changes nothing")
+        f.runtime.retryAfterSignIn(provider: .claudeCode, profile: profile, agents: agents, repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 3)
+        XCTAssertEqual(f.runtime.snapshot(for: onProfile.id).phase, .ready)
+        XCTAssertNil(RestrictedHarnessStorage.refusedUntil(provider: .claudeCode, workspace: workspace))
+        XCTAssertEqual(f.runtime.snapshot(for: onDefault.id).failure, .authenticationRequired, "Its login did not change")
+        f.runtime.retryAfterSignIn(provider: .claudeCode, profile: nil, agents: agents, repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 4)
+        XCTAssertEqual(f.runtime.snapshot(for: onDefault.id).phase, .ready)
+        f.runtime.retryAfterSignIn(provider: .claudeCode, profile: nil, agents: agents, repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 4, "A running bot is left alone")
+    }
+
     func testBotWaitingForSignInComesBackAfterItsStatusChanged() async throws {
         let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
         f.runtime.checkSignIn = { _ in true }

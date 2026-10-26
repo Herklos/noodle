@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude Code bots no longer all lose their sign-in when one bot's Claude Code gives up on a login a renewal had just replaced.
+- Bots waiting for sign-in come back once you sign in again: straight away when you sign in in Settings, and otherwise within a few minutes once their sign-in works. Before, they stayed paused, and the profile kept saying "Sign-in required".
+- Starting a harness sign-in, install or update in Settings › Harness shows its progress beside the harness's links instead of on a line of its own, so the rows below no longer jump.
+
 ## [0.43.1] - 2026-10-26
 
 ### Fixed

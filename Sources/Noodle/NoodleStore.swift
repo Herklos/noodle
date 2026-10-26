@@ -369,6 +369,14 @@ final class NoodleStore {
             NoodleNotifications.postPaused(agent, summary: summary, detail: snapshot.detail, conversationID: conversation?.id)
         }
         self.runtime.onHarnessSwitch = { [weak self] id, line in self?.postHarnessSwitch(line, agentID: id) }
+        self.harnessProfiles.onSignedIn = { [weak self] id in
+            guard let self, let provider = self.harnessProfiles.profile(id)?.provider else { return }
+            self.runtime.retryAfterSignIn(provider: provider, profile: id, agents: self.agents, repository: self.repository)
+        }
+        self.harnessSetup.onSignedIn = { [weak self] provider in
+            guard let self else { return }
+            self.runtime.retryAfterSignIn(provider: provider, profile: nil, agents: self.agents, repository: self.repository)
+        }
         self.runtime.checkSignIn = { [weak self] agent in
             guard let self, let installation = self.runtime.installation(for: agent) else { return nil }
             // A bot on a fallback harness runs on that harness's own login, not its profile.

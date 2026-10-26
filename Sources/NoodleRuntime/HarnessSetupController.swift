@@ -33,6 +33,8 @@ public final class HarnessSetupController {
             }
         }
     }
+    /// Called once a sign-in here completes, so bots waiting on the harness's Default login retry at once.
+    @ObservationIgnored public var onSignedIn: ((HarnessProvider) -> Void)?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let versionChecker: (any HarnessVersionChecking)?
     @ObservationIgnored private let installer: (any HarnessInstalling)?
@@ -205,6 +207,7 @@ public final class HarnessSetupController {
                 guard let self, self.signInAttempts[id]?.id == token else { return }
                 self.record(installation, authentication: status)
                 self.errors[id] = nil
+                if status != .unauthenticated { self.onSignedIn?(id) }
             } catch {
                 guard let self, self.signInAttempts[id]?.id == token else { return }
                 if !(error is CancellationError), !Task.isCancelled { self.errors[id] = error.localizedDescription }

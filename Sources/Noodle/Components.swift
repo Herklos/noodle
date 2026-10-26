@@ -166,9 +166,11 @@ extension NoodleStore {
 
 /// Over a conversation while one of its bots waits for Kick or a Hub's limit holds it: why, in a few words,
 /// and Kick for one on this Mac. In a group, Kick starts the first bot that waits; the next one shows once it is back.
+/// A bot waiting for sign-in gets Sign In instead, since only signing in brings it back.
 /// It sits in the toolbar, so its window presents the Kick alert: see `AgentKickConfirmation`.
 struct ConversationPauseControl: View {
     @Environment(NoodleStore.self) private var store
+    @Environment(\.openSettings) private var openSettings
     let conversation: BotConversation
     @Binding var kickRequest: AgentKickRequest?
 
@@ -179,7 +181,14 @@ struct ConversationPauseControl: View {
                     .foregroundStyle(.red)
                     .lineLimit(1)
                     .help(store.pauseDetail(for: conversation) ?? summary)
-                if let agent = store.agentsWaitingForKick(in: conversation).first {
+                if let agent = store.agentsWaitingForKick(in: conversation).first,
+                   store.runtime.snapshot(for: agent.id).failure == .authenticationRequired {
+                    Button("Sign In…") {
+                        store.showHarnessSettings()
+                        openSettings()
+                    }
+                    .help("Sign in to the harness \(agent.displayName) uses")
+                } else if let agent = store.agentsWaitingForKick(in: conversation).first {
                     Button("Kick") {
                         kickRequest = store.runtime.kick(agent: agent, repository: store.repository)
                     }

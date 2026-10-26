@@ -16,6 +16,8 @@ public final class HarnessProfilesController {
     @ObservationIgnored private let store: HarnessProfileStore
     /// Where a profile's plan limits go when its sign-in check reads them.
     @ObservationIgnored public var subscriptionUsage: SubscriptionUsageStore?
+    /// Called with the profile once a sign-in here completes, so bots waiting on it retry at once.
+    @ObservationIgnored public var onSignedIn: ((UUID) -> Void)?
     @ObservationIgnored private var operations: [UUID: (id: UUID, task: Task<Void, Never>)] = [:]
 
     public init(store: HarnessProfileStore) {
@@ -105,6 +107,7 @@ public final class HarnessProfilesController {
                 try Task.checkCancellation()
                 guard let self, self.operations[id]?.id == token else { return }
                 self.authentication[id] = status
+                if status != .unauthenticated { self.onSignedIn?(id) }
             } catch {
                 guard let self, self.operations[id]?.id == token else { return }
                 if !(error is CancellationError), !Task.isCancelled { self.errors[id] = error.localizedDescription }
