@@ -848,7 +848,7 @@ struct VoiceTranscriptSheet: View {
                         Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = transcript.text }
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
         }
     }

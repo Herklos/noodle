@@ -185,6 +185,7 @@ struct MessageActions: View {
                             .background { if mine { Circle().fill(.tint.opacity(0.3)) } }
                     }
                     .buttonStyle(.plain)
+                    .hoverEffect(.lift)
                     .accessibilityAddTraits(mine ? .isSelected : [])
                 }
             }
@@ -216,6 +217,7 @@ struct MessageActions: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hoverEffect(.highlight)
     }
 
     private func choose(_ action: () -> Void) {

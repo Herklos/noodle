@@ -1,3 +1,5 @@
+import Foundation
+import HubLink
 @testable import NoodleMobile
 import SwiftUI
 import Testing
@@ -142,6 +144,89 @@ import Testing
         #expect(ReadableWidth.sideRoom(rowWidth: 369) == 48)
         #expect(ReadableWidth.sideRoom(rowWidth: 442) == 48)
         #expect(ReadableWidth.sideRoom(rowWidth: 942) == 942 - ReadableWidth.bubble)
+    }
+
+    /// iPad sizes, inside the safe area: an 11-inch iPad on its side and upright, and a 13-inch on its side.
+    static let iPadSizes = [CGSize(width: 1194, height: 814), CGSize(width: 834, height: 1150), CGSize(width: 1366, height: 1004)]
+    /// An iPhone Pro Max upright and on its side, an iPhone mini, and iPad windows in Split View or Stage Manager.
+    static let narrowSizes = [CGSize(width: 440, height: 868), CGSize(width: 838, height: 419), CGSize(width: 375, height: 762),
+                              CGSize(width: 320, height: 1004), CGSize(width: 507, height: 814), CGSize(width: 694, height: 1004),
+                              CGSize(width: 980, height: 480)]
+
+    /// On iPad the Pair screen's and the welcome's text and buttons keep the largest iPhone's width, centred,
+    /// rather than spanning the screen; on a phone, upright or on its side, and in a narrow window they take its width.
+    @Test func screensKeepAReadableColumnOnIPad() {
+        for size in Self.iPadSizes + [Self.inner] {
+            #expect(ReadableWidth.column(in: size) == 440, "\(size)")
+        }
+        for size in Self.narrowSizes + [Self.cover, .zero] {
+            #expect(ReadableWidth.column(in: size) == .infinity, "\(size)")
+        }
+    }
+
+    /// The … button's rarely used actions are a menu beside the list on iPad, as on the Mac, and the short sheet
+    /// on a phone, in the same order with the same names.
+    @Test func moreIsAMenuOnIPad() {
+        #expect(MoreChoice.inMenu(.split))
+        #expect(!MoreChoice.inMenu(.stack))
+        #expect(!MoreChoice.inMenu(.stackBesideBar))
+        #expect(MoreChoice.allCases.map(\.title) == ["New Bot", "New Group", "Play", "Hubs", "Settings"])
+        #expect(MoreChoice.allCases.map(\.systemImage) == ["person.badge.plus", "person.2", "gamecontroller", "server.rack", "gear"])
+    }
+
+    /// Resizing an iPad window in Split View or Stage Manager, through every width from a third of the screen to
+    /// all of it and back, keeps the conversation open: beside the list when there is room, over it when not.
+    @Test func resizingAWindowKeepsTheConversationOpen() {
+        let widths: [CGFloat] = [1194, 981, 768, 700, 699, 694, 639, 551, 507, 438, 375, 320, 375, 507, 694, 700, 834, 1194, 1366]
+        var navigation = HomeNavigation(selection: Self.scout)
+        var layout = HomeLayout.split
+        for width in widths {
+            let next = HomeLayout.choose(size: CGSize(width: width, height: 1004), verticalBar: nil)
+            #expect(next == (width >= 700 ? .split : .stack), "\(width)")
+            if next != layout { navigation.adapt(from: layout, to: next) }
+            layout = next
+            #expect(navigation.current == Self.scout, "\(width)")
+            #expect(navigation == (layout == .split ? HomeNavigation(selection: Self.scout) : HomeNavigation(path: [Self.scout])), "\(width)")
+        }
+        // A window made short in Stage Manager goes to one column too, and back.
+        for height: CGFloat in [1004, 499, 500, 1004] {
+            let next = HomeLayout.choose(size: CGSize(width: 1194, height: height), verticalBar: nil)
+            navigation.adapt(from: layout, to: next)
+            layout = next
+            #expect(navigation.current == Self.scout, "\(height)")
+        }
+    }
+
+    /// The narrowest window with two columns still leaves the conversation more room than an iPhone mini's screen.
+    @Test func theNarrowestTwoColumnsLeaveRoomForTheConversation() {
+        let columns = SplitColumns.layout(width: HomeLayout.splitWidth)
+        #expect(columns.list == SplitColumns.narrowest)
+        #expect(HomeLayout.splitWidth - columns.list - columns.gap >= 375)
+    }
+
+    /// Files waiting to be sent stay with their conversation when it is shown again, as after the window is
+    /// resized between one column and two; each conversation keeps its own, and sending clears them.
+    @Test func waitingFilesStayWithTheirConversation() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let chats = HubChats(pairing: HubPairing(directory: directory, deviceName: "iPad"))
+        let scout = LinkBot(id: UUID(), conversationID: UUID(), draft: LinkBotDraft(name: "Scout", provider: "claude"),
+                            createdAt: Date(timeIntervalSince1970: 0))
+        let atlas = LinkBot(id: UUID(), conversationID: UUID(), draft: LinkBotDraft(name: "Atlas", provider: "codex"),
+                            createdAt: Date(timeIntervalSince1970: 0))
+        let file = OutgoingFile(url: directory.appendingPathComponent("Photo.jpg"), filename: "Photo.jpg", mediaType: "image/jpeg")
+        #expect(chats.pendingFiles(for: scout).isEmpty)
+        chats.setPendingFiles([file], for: scout)
+        #expect(chats.pendingFiles(for: scout) == [file])
+        #expect(chats.pendingFiles(for: atlas).isEmpty)
+        chats.setPendingFiles([], for: scout)
+        #expect(chats.pendingFiles(for: scout).isEmpty)
+    }
+
+    /// A menu naming this device shows an iPad on iPad.
+    @Test func theDevicesPictureIsAnIPadOnIPad() {
+        #expect(ThisDevice.symbol(for: .pad) == "ipad")
+        #expect(ThisDevice.symbol(for: .phone) == "iphone")
     }
 
     /// Draws a view in a window whose safe area leaves `trailingInset` on the right, as the vertical bar

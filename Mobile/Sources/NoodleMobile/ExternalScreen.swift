@@ -292,10 +292,12 @@ struct NoodletMenuView: View {
 struct GameMenuOverlay: View {
     let gameMenu: GameMenu
     let menu: NoodletMenu
+    /// Whether it is on the TV, rather than over the game on the phone or iPad.
+    let onTV: Bool
 
     var body: some View {
         if let selected = gameMenu.selected {
-            if menu.fromPlay { ConsoleMenuView(menu: menu, selected: selected) } else { NoodletMenuView(menu: menu, selected: selected) }
+            if menu.fromPlay { ConsoleMenuView(menu: menu, selected: selected, onTV: onTV) } else { NoodletMenuView(menu: menu, selected: selected) }
         }
     }
 }

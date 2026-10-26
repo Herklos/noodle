@@ -263,6 +263,16 @@ enum HubThread: HubConversation {
         try? JSONEncoder().encode(drafts).write(to: draftsURL, options: .atomic)
     }
 
+    /// Files waiting above the message field, by conversation, while the app runs: a conversation shown again,
+    /// as when an iPad window is resized between one column and two, still has them.
+    @ObservationIgnored private var pendingFiles: [UUID: [OutgoingFile]] = [:]
+
+    func pendingFiles(for conversation: some HubConversation) -> [OutgoingFile] { pendingFiles[conversation.conversationID] ?? [] }
+
+    func setPendingFiles(_ files: [OutgoingFile], for conversation: some HubConversation) {
+        pendingFiles[conversation.conversationID] = files.isEmpty ? nil : files
+    }
+
     /// The bot's phase as its dot shows it: offline while its Hub does not answer.
     func phase(of agent: LinkBot) -> LinkBotPhase? { HubConnection(pairing).phase(of: agent.phase) }
 
@@ -1430,6 +1440,8 @@ struct AgentsView: View {
     @State private var creating = false
     @State private var creatingGroup = false
     @State private var search = ""
+    /// Whether the search field has the keyboard, as Search Conversations gives it.
+    @FocusState private var searchFocused: Bool
     @State private var editing: Row?
     /// Where the system's vertical bar is, as on the iPhone Duo's cover screen; nil without one.
     @State private var verticalBar: HorizontalEdge?
@@ -1466,7 +1478,7 @@ struct AgentsView: View {
 
     var body: some View {
         let rows = rows
-        Group {
+        presentations(Group {
             if layout == .split {
                 split(rows)
             } else {
@@ -1475,13 +1487,15 @@ struct AgentsView: View {
                         .navigationDestination(for: ChatLink.self) { conversation($0) }
                 }
             }
-        }
+        })
         // The room the screen has, whatever the keyboard covers, so typing never changes the layout.
         .background {
             Color.clear
                 .ignoresSafeArea(.keyboard)
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         }
+        // A hardware keyboard's commands, in the menus holding ⌘ lists.
+        .focusedSceneValue(\.homeCommands, commands(rows))
         // Unfolding the iPhone Duo or resizing an iPad window keeps the conversation that was open.
         .onChange(of: layout) { old, new in navigation.adapt(from: old, to: new) }
         .onChange(of: opening, initial: true, open)
@@ -1562,16 +1576,62 @@ struct AgentsView: View {
         }
     }
 
-    private func list(_ rows: [Row]) -> some View {
+    /// The rows as the list shows them, in its sections.
+    private struct Listing {
+        var searching = false
+        var found: [Row] = []
+        var pinned: [Row] = []
+        var unread: [Row] = []
+        var rest: [Row] = []
+
+        /// Top to bottom, as Next and Previous Conversation go through them.
+        var order: [ChatLink] { (pinned + unread + rest).map(\.id) }
+    }
+
+    private func listing(_ rows: [Row]) -> Listing {
         // As in Messages: pinned bots in circles above the rest, and one plain list of matches while searching.
-        let searching = !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let found = rows.filter { $0.chats.matches($0.thread, search: search) }
-        let pinned = searching ? [] : found.filter(isPinned)
-        let others = searching ? found : found.filter { !isPinned($0) }
-        let order = searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
+        var listing = Listing(searching: !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        listing.found = rows.filter { $0.chats.matches($0.thread, search: search) }
+        listing.pinned = listing.searching ? [] : listing.found.filter(isPinned)
+        let others = listing.searching ? listing.found : listing.found.filter { !isPinned($0) }
+        let order = listing.searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
         let isUnread = { (row: Row) in row.chats.countsAsUnread(row.thread) }
         let unread = order.unread(others, isUnread: isUnread)
-        let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
+        listing.unread = unread
+        listing.rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
+        return listing
+    }
+
+    /// What the keyboard's commands do here.
+    private func commands(_ rows: [Row]) -> HomeCommands {
+        let order = listing(rows).order
+        let canCreate = !chats.isEmpty
+        let spaces = [SpaceCommand(id: "", title: "All", isShown: ticked.wrappedValue == "") { space = "" }]
+            + spaceHubs.map { hub in
+                let key = CurrentHub.space(of: hub.pairing)
+                return SpaceCommand(id: key, title: hub.pairing.hubName, isShown: ticked.wrappedValue == key) { space = key }
+            }
+            + spaceList.spaces.map { custom in
+                let key = custom.id.uuidString
+                return SpaceCommand(id: key, title: custom.name, isShown: ticked.wrappedValue == key) { space = key }
+            }
+        return HomeCommands(
+            newBot: canCreate ? { creating = true } : nil,
+            newGroup: canCreate ? { creatingGroup = true } : nil,
+            search: rows.isEmpty ? nil : {
+                // In one column the list is under the open conversation.
+                if layout != .split { navigation.path = [] }
+                searchFocused = true
+            },
+            next: order.isEmpty ? nil : { navigation.step(1, through: order, in: layout) },
+            previous: order.isEmpty ? nil : { navigation.step(-1, through: order, in: layout) },
+            close: navigation.current == nil ? nil : { navigation.close() },
+            spaces: chats.isEmpty ? [] : spaces)
+    }
+
+    private func list(_ rows: [Row]) -> some View {
+        let listing = listing(rows)
+        let (searching, found, pinned, unread, rest) = (listing.searching, listing.found, listing.pinned, listing.unread, listing.rest)
         return List {
             if !pinned.isEmpty, layout.pinsInList {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
@@ -1583,6 +1643,7 @@ struct AgentsView: View {
                         } primaryAction: { navigation.open(row.id, in: layout) }
                         .buttonStyle(.plain)
                         .menuIndicator(.hidden)
+                        .hoverEffect(.lift)
                     }
                 }
                 .padding(.vertical, 8)
@@ -1608,6 +1669,7 @@ struct AgentsView: View {
             }
         }
         .searchable(text: $search, prompt: "Search")
+        .searchFocused($searchFocused)
         .overlay {
             if searching && found.isEmpty && !rows.isEmpty {
                 ContentUnavailableView.search(text: search)
@@ -1634,9 +1696,24 @@ struct AgentsView: View {
             }
             // A plain button, as in Messages, not the round glass default.
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showingMore = true } label: { Image(systemName: "ellipsis") }
+                if MoreChoice.inMenu(layout) {
+                    Menu {
+                        ForEach(MoreChoice.allCases, id: \.self) { choice in
+                            Button(choice.title, systemImage: choice.systemImage) {
+                                chosen = choice
+                                openChosen()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
                     .foregroundStyle(.tint)
                     .accessibilityLabel("More")
+                } else {
+                    Button { showingMore = true } label: { Image(systemName: "ellipsis") }
+                        .foregroundStyle(.tint)
+                        .accessibilityLabel("More")
+                }
             }
             .sharedBackgroundVisibility(.hidden)
             // Beside the vertical bar, the pinned bots are in it, under the time, as a column of pictures.
@@ -1665,34 +1742,42 @@ struct AgentsView: View {
                 try? await hub.reload()
             }
         }
-        .sheet(isPresented: $showingMore, onDismiss: openChosen) {
-            MoreSheet { choice in
-                chosen = choice
-                showingMore = false
+    }
+
+    /// The sheets and covers the list opens. They are on the screen as a whole, not on the list, which is built
+    /// again when an iPad window is resized between one column and two, so one that is open stays open, with
+    /// what was typed in it.
+    private func presentations(_ content: some View) -> some View {
+        content
+            .sheet(isPresented: $showingMore, onDismiss: openChosen) {
+                MoreSheet { choice in
+                    chosen = choice
+                    showingMore = false
+                }
             }
-        }
-        .sheet(isPresented: $showingProfile) { HubsView(chats: chats) }
-        .sheet(isPresented: $showingSettings) { SettingsView(chats: chats) }
-        .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
-        // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
-        .sheet(isPresented: $creating) {
-            if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace) }
-        }
-        .sheet(isPresented: $creatingGroup) {
-            if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace) }
-        }
-        .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
-            TextField("Name", text: $spaceName)
-            Button("Cancel", role: .cancel) {}
-            Button("Create") { saveSpace() }
-                .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }
-        .sheet(isPresented: $editingSpaces) {
-            SpaceEditor(list: spaceList,
-                        hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
-                        moveHubs: moveHubs, change: { changeSpaces($0) })
-        }
-        .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread) }
+            .sheet(isPresented: $showingProfile) { HubsView(chats: chats).formSheetSizing() }
+            .sheet(isPresented: $showingSettings) { SettingsView(chats: chats).formSheetSizing() }
+            .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
+            // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
+            .sheet(isPresented: $creating) {
+                if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
+            }
+            .sheet(isPresented: $creatingGroup) {
+                if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
+            }
+            .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
+                TextField("Name", text: $spaceName)
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { saveSpace() }
+                    .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .sheet(isPresented: $editingSpaces) {
+                SpaceEditor(list: spaceList,
+                            hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
+                            moveHubs: moveHubs, change: { changeSpaces($0) })
+                    .formSheetSizing()
+            }
+            .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread).formSheetSizing() }
     }
 
     /// All, a space for each joined Hub with its bots and groups alone and the pins it keeps, then the spaces the person made.
@@ -1777,6 +1862,8 @@ struct AgentsView: View {
             let selected = navigation.selection == row.id
             Button { navigation.open(row.id, in: layout) } label: { label.contentShape(.rect) }
                 .buttonStyle(.plain)
+                // The pointer marks the row it is over, as in the Mac's list.
+                .hoverEffect(.highlight)
                 .listRowBackground(selected ? Color.accentColor.opacity(0.15) : nil)
                 .accessibilityAddTraits(selected ? .isSelected : [])
         } else {
@@ -1974,7 +2061,34 @@ extension EnvironmentValues {
     @Entry var showAgent: @MainActor (LinkBot) -> Void = { _ in }
 }
 
-enum MoreChoice { case createBot, createGroup, console, profiles, settings }
+/// The rarely used actions, behind the list's … button.
+enum MoreChoice: CaseIterable {
+    case createBot, createGroup, console, profiles, settings
+
+    var title: String {
+        switch self {
+        case .createBot: "New Bot"
+        case .createGroup: "New Group"
+        case .console: "Play"
+        case .profiles: "Hubs"
+        case .settings: "Settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .createBot: "person.badge.plus"
+        case .createGroup: "person.2"
+        case .console: "gamecontroller"
+        case .profiles: "server.rack"
+        case .settings: "gear"
+        }
+    }
+
+    /// On a phone they are in a short sheet from the bottom; on iPad and the unfolded iPhone Duo, in a menu
+    /// from the button, as on the Mac.
+    static func inMenu(_ layout: HomeLayout) -> Bool { layout == .split }
+}
 
 /// The rarely used actions, in a short sheet from the bottom.
 struct MoreSheet: View {
@@ -1982,23 +2096,20 @@ struct MoreSheet: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            option("New Bot", systemImage: "person.badge.plus", .createBot)
-            option("New Group", systemImage: "person.2", .createGroup)
-            option("Play", systemImage: "gamecontroller", .console)
-            option("Hubs", systemImage: "server.rack", .profiles)
-            option("Settings", systemImage: "gear", .settings)
+            ForEach(MoreChoice.allCases, id: \.self) { option($0) }
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
         .padding(24)
         .centredInSheet()
         .presentationDetents([.height(356)])
+        .shortSheetSizing()
         .presentationDragIndicator(.visible)
     }
 
-    private func option(_ title: String, systemImage: String, _ choice: MoreChoice) -> some View {
+    private func option(_ choice: MoreChoice) -> some View {
         Button { choose(choice) } label: {
-            Label(title, systemImage: systemImage).frame(maxWidth: .infinity)
+            Label(choice.title, systemImage: choice.systemImage).frame(maxWidth: .infinity)
         }
     }
 }
@@ -2587,8 +2698,10 @@ struct ChatView: View {
         .onAppear {
             chats.markRead(thread)
             draft = chats.draft(for: thread)
+            files = chats.pendingFiles(for: thread)
         }
         .onChange(of: draft) { chats.setDraft(draft, for: thread) }
+        .onChange(of: files) { chats.setPendingFiles(files, for: thread) }
         .onChange(of: messages.last?.id) { chats.markRead(thread) }
         // Behind the attach panel, as in Messages: the conversation blurs, and tapping it closes the panel.
         .overlay {
@@ -2673,8 +2786,9 @@ struct ChatView: View {
                 openingShared = $0
                 showingShared = false
             }
+            .formSheetSizing()
         }
-        .sheet(isPresented: $editing) { ThreadEditor(chats: chats, thread: thread) }
+        .sheet(isPresented: $editing) { ThreadEditor(chats: chats, thread: thread).formSheetSizing() }
         .sheet(item: $profile, onDismiss: finishProfileChoice) { bot in
             AgentProfile(bot: bot, actions: AgentProfile.actions(for: bot, canOpen: openThread != nil,
                                                                 inCall: chats.calls.call?.threadID == bot.id)) { action in
@@ -2682,7 +2796,7 @@ struct ChatView: View {
                 profile = nil
             }
         }
-        .sheet(item: $editingBot) { ThreadEditor(chats: chats, thread: .bot($0)) }
+        .sheet(item: $editingBot) { ThreadEditor(chats: chats, thread: .bot($0)).formSheetSizing() }
         .environment(\.showAgent) { profile = $0 }
         .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: 10,
                       matching: .any(of: [.images, .videos]))
@@ -2704,7 +2818,7 @@ struct ChatView: View {
         .environment(\.watchLive) { watchingAt = $1; watching = $0 }
         .environment(\.reviewPatch) { reviewing = $0 }
         .environment(\.forwardAttachment) { forwarding = $0 }
-        .sheet(item: $forwarding) { ForwardSheet(request: $0, hubs: joinedHubs.isEmpty ? [chats] : joinedHubs) }
+        .sheet(item: $forwarding) { ForwardSheet(request: $0, hubs: joinedHubs.isEmpty ? [chats] : joinedHubs).formSheetSizing() }
         .sheet(item: $reviewing) { request in
             PatchReviewScreen(request: request, viewed: chats.viewedPatchFiles(request.attachment, in: thread),
                               annotating: annotating(in: thread)) {
@@ -2887,6 +3001,7 @@ struct ChatView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.highlight)
                 .glassEffect(.regular.interactive(), in: Circle())
                 .glassEffectID("attach", in: attachGlass)
                 .accessibilityLabel("Add")
@@ -2926,6 +3041,7 @@ struct ChatView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hoverEffect(.highlight)
     }
 
     private func setAttaching(_ open: Bool) {
@@ -2937,7 +3053,7 @@ struct ChatView: View {
     /// The field, with the microphone or send button inside it, as in Messages.
     private var messageField: some View {
         HStack(alignment: .bottom, spacing: 6) {
-            ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message") { attachPasted($0) }
+            ComposerField(text: $draft, caret: $caret, placeholder: unavailableReason ?? "Message", submit: send) { attachPasted($0) }
             // As in Messages: the microphone until there is something to send.
             if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty && notes.isEmpty {
                 Button { recorder.start() } label: {
@@ -2947,12 +3063,14 @@ struct ChatView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.highlight)
                 .accessibilityLabel("Record Voice Message")
             } else {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
                         .frame(width: 30, height: Self.controlHeight)
                 }
+                .hoverEffect(.lift)
                 .accessibilityLabel("Send")
             }
         }
@@ -2990,6 +3108,7 @@ struct ChatView: View {
                                 .background(Color(.secondarySystemBackground), in: Capsule())
                             }
                             .buttonStyle(.plain)
+                            .hoverEffect(.highlight)
                         }
                     }
                 }
@@ -3159,6 +3278,7 @@ struct AgentProfile: View {
         .padding(24)
         .centredInSheet()
         .presentationDetents([.medium])
+        .shortSheetSizing()
         .presentationDragIndicator(.visible)
     }
 }
@@ -3225,6 +3345,7 @@ private struct Bubble: View {
                 if let avatar {
                     Button { showAgent(avatar) } label: { AgentAvatar(draft: avatar.draft, size: Self.avatarSize) }
                         .buttonStyle(.plain)
+                        .hoverEffect(.lift)
                         .accessibilityLabel("Show profile for \(avatar.draft.name)")
                 } else if besideAvatars {
                     Color.clear.frame(width: Self.avatarSize, height: 0)
@@ -3263,6 +3384,7 @@ private struct Bubble: View {
                         .overlay(Capsule().stroke(Color(.systemBackground), lineWidth: 2))
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.lift)
             }
         }
     }
@@ -3303,11 +3425,14 @@ private struct Bubble: View {
             let folded = !expanded && MessageFolding.isLong(text)
             MessageText(text: text, folded: folded, foreground: foreground, background: background) { expanded = true }
                 .onLongPressGesture(minimumDuration: 0.35) { lift(text, folded: folded, at: index, quote: text) } onPressingChanged: { pressing = $0 ? index : nil }
+                // A right-click lifts it too, on iPad with a mouse or trackpad.
+                .onSecondaryClick { lift(text, folded: folded, at: index, quote: text) }
                 .accessibilityAction(named: "React") { lift(text, folded: folded, at: index, quote: text) }
         case .table(let table):
             MessageTableCard(table: table, foreground: foreground, background: background)
                 .onLongPressGesture(minimumDuration: 0.35) { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
                     onPressingChanged: { pressing = $0 ? index : nil }
+                .onSecondaryClick { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
                 .accessibilityAction(named: "React") { lift(MessageSegment.previewText(message.body), folded: false, at: index) }
         }
     }
@@ -3591,7 +3716,7 @@ struct AgentEditor: View {
                 Text(confirmation.message)
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
@@ -3705,7 +3830,7 @@ private struct SharedBotBackground: View {
         NavigationStack {
             BackgroundEditor(chats: chats, thread: thread)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
                 }
         }
     }
@@ -3843,7 +3968,7 @@ struct GroupEditor: View {
                 Text("The group and its messages are deleted from the Hub for all your devices. Its bots stay.")
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
@@ -4023,7 +4148,7 @@ private struct SpaceEditor: View {
             .navigationTitle("Edit Spaces")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
         }
         .onChange(of: list.spaces.isEmpty) { _, isEmpty in

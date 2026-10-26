@@ -566,10 +566,11 @@ struct ConsoleCarousel<Card: View>: View {
 struct ConsoleMenuView: View {
     let menu: NoodletMenu
     let selected: Int
+    /// Told, not guessed from the width: a large iPad on its side is as wide as a TV showing 720p.
+    let onTV: Bool
 
     var body: some View {
         GeometryReader { proxy in
-            let onTV = proxy.size.width > 1200
             let cardWidth = ConsoleStack.cardWidth(in: proxy.size, onTV: onTV)
             let items = menu.items
             ZStack {

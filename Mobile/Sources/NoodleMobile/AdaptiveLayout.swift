@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// How the home screen lays out the bots and conversations in the room it has.
 enum HomeLayout: Equatable {
@@ -17,9 +18,13 @@ enum HomeLayout: Equatable {
 
     /// The layout for the room inside the safe area, and the edge of the system's vertical bar, if there is one.
     static func choose(size: CGSize, verticalBar: HorizontalEdge?) -> HomeLayout {
-        if size.width >= splitWidth, size.height >= splitHeight { return .split }
+        if isWide(size) { return .split }
         return verticalBar == nil ? .stack : .stackBesideBar
     }
+
+    /// Whether a screen or window this size is an iPad's or the unfolded iPhone Duo's rather than a phone's,
+    /// upright or on its side: room for two columns.
+    static func isWide(_ size: CGSize) -> Bool { size.width >= splitWidth && size.height >= splitHeight }
 
     /// Whether the list shows the pinned bots above the others; beside the vertical bar they are in the bar.
     var pinsInList: Bool { self != .stackBesideBar }
@@ -73,6 +78,33 @@ struct HomeNavigation: Equatable {
         if let selection, gone(selection) { self.selection = nil }
         if let index = path.firstIndex(where: gone) { path = Array(path[..<index]) }
     }
+
+    /// The conversation open now: the one selected in two columns, or the one on top in one.
+    var current: ChatLink? { selection ?? path.last }
+
+    /// Opens the conversation `offset` rows after the open one, or before it when negative, in the list's `order`,
+    /// as the keyboard's Next and Previous Conversation do. With none open, or one the list no longer shows, as
+    /// while searching, it starts at the top of the list going down and at the bottom going up; at either end it stays.
+    mutating func step(_ offset: Int, through order: [ChatLink], in layout: HomeLayout) {
+        guard offset != 0, let first = order.first, let last = order.last else { return }
+        let target: ChatLink
+        if let current, let index = order.firstIndex(of: current) {
+            target = order[min(max(index + offset, 0), order.count - 1)]
+        } else {
+            target = offset > 0 ? first : last
+        }
+        if target != current { open(target, in: layout) }
+    }
+
+    /// Closes the open conversation, as the keyboard's Close Conversation does: in two columns none is selected,
+    /// and in one the conversation beneath, or the list, shows.
+    mutating func close() {
+        if selection != nil {
+            selection = nil
+        } else if !path.isEmpty {
+            path.removeLast()
+        }
+    }
 }
 
 /// The width of the list's column on the left of two, and of the gap after it, where a crease is.
@@ -108,6 +140,27 @@ enum ReadableWidth {
 
     /// The room beside a message in a row this wide: at least the usual, and enough to keep it readable.
     static func sideRoom(rowWidth: CGFloat) -> CGFloat { max(sideRoom, rowWidth - bubble) }
+
+    /// The widest a screen's column of text and buttons gets on a wide screen, margins included: the largest
+    /// iPhone's width, so the Pair button is as wide on iPad as there.
+    static let column: CGFloat = 440
+
+    /// How wide a screen's column of text and buttons may be in a window this size: the whole window on a phone,
+    /// upright or on its side, and `column` on iPad and the unfolded iPhone Duo.
+    static func column(in size: CGSize) -> CGFloat { HomeLayout.isWide(size) ? column : .infinity }
+}
+
+/// A screen's column of text and buttons, such as the Pair screen's, centred at a readable width on a wide screen.
+/// On a phone it takes the whole width, as before.
+struct ReadableColumn: ViewModifier {
+    @State private var size = CGSize.zero
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: ReadableWidth.column(in: size))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background { Color.clear.onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 } }
+    }
 }
 
 /// The edge of the system's vertical bar, as on the iPhone Duo's cover screen, from iOS 27.1; nil elsewhere.
@@ -139,6 +192,17 @@ extension View {
 
     /// Centres a short sheet's content in the sheet beside the system's vertical bar.
     func centredInSheet() -> some View { modifier(SheetCentring()) }
+
+    /// Holds a screen's column of text and buttons to a readable width on a wide screen.
+    func readableColumn() -> some View { modifier(ReadableColumn()) }
+
+    /// A form, list or editor in a sheet: on iPad as wide as a form, rather than as large as a page, which
+    /// stretches its rows. A phone's sheet always spans its screen, so it is unchanged there.
+    func formSheetSizing() -> some View { presentationSizing(.form) }
+
+    /// A short sheet of a few buttons: on iPad as wide as a form and only as tall as what it holds, since iPad
+    /// leaves out the height a phone's sheet is given.
+    func shortSheetSizing() -> some View { presentationSizing(.form.fitted(horizontal: false, vertical: true)) }
 }
 
 /// Beside the iPhone Duo's vertical bar a short sheet spans the screen, under the bar, but keeps the bar's
@@ -156,4 +220,12 @@ struct SheetCentring: ViewModifier {
     }
 
     static func ignoredEdges(verticalBar: HorizontalEdge?) -> Edge.Set { verticalBar == nil ? [] : .horizontal }
+}
+
+/// This phone or iPad, as a menu names it, such as Open on iPad.
+@MainActor enum ThisDevice {
+    /// Its picture: an iPad's for an iPad, otherwise a phone's.
+    static func symbol(for idiom: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom) -> String {
+        idiom == .pad ? "ipad" : "iphone"
+    }
 }

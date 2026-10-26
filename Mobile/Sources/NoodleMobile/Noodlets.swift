@@ -259,7 +259,7 @@ struct NoodletDeviceScreen: View {
                     MovableView(view: page.web).ignoresSafeArea(edges: fullScreen ? .all : .bottom)
                 }
                 if let screenControls, page != nil { GamepadOverlay(gamepad: screenControls, haptics: haptics, onKey: press) }
-                if !onTV { GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu).ignoresSafeArea() }
+                if !onTV { GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu, onTV: false).ignoresSafeArea() }
                 // Over the page until it first draws, then fading away to show it.
                 ZStack {
                     backdrop
@@ -330,7 +330,7 @@ struct NoodletDeviceScreen: View {
         .externalScreen(enabled: Binding(get: { manifest.controls != nil && !onPhone }, set: { onPhone = !$0 }),
                         available: $tvAvailable) {
             if let page { MovableView(view: page.web) }
-            GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu)
+            GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu, onTV: true)
         }
         .tvConnectionAlert(isPresented: $connectingTV)
         .task { await start() }

@@ -347,13 +347,14 @@ struct AnnotationCommentSheet: View {
             .navigationTitle(request.draft == nil ? "Add a Comment" : "Edit Comment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: confirm).disabled(trimmed.isEmpty || dictating)
                 }
             }
         }
         .presentationDetents([.medium, .large])
+        .formSheetSizing()
         .presentationDragIndicator(.visible)
         .onAppear { focused = true }
         .onDisappear { Task { await dictation.discard() } }
