@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.77.0] - 2026-10-26
+
 ### Added
 
 - You can sign out of a harness in Settings › Harness: click its sign-in status for Sign In Again and Sign Out, and, for Codex and Claude Code, the account it is signed in to. Signing out removes only Noodle's own sign-in for that harness; the one you use in Terminal is kept. Bots that use it pause until you sign in again. A profile's sign-in status in Profiles works the same way.
