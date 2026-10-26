@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.4] - 2026-10-26
+
 ### Fixed
 
 - A Local Mac desktop no longer keeps every frame it has shown in memory. Left open for a day, it could take tens of gigabytes and slow the whole Mac down.
