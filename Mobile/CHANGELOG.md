@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.46.1] - 2026-10-26
+
 ### Fixed
 
 - The down arrow in a conversation no longer stays over the latest message after you scroll back down to it, and it waits until you are well above the latest message, not a few lines short of it. Scrolled back down to the latest message by hand, a conversation follows new replies again. Before, it left out the room under the bar and the message field, so it thought you hadn't reached the end yet.
