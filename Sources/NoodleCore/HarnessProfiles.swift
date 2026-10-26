@@ -316,12 +316,15 @@ public enum HarnessProfileLogin {
     /// Grok Build and Muse Code open the browser by themselves as soon as their
     /// sign-in starts. Kept away from Launch Services, they only print the page,
     /// which Noodle shows with the code for the person to open when ready.
+    /// Denying lsopen is not enough: Grok Build has CoreServicesUIAgent open the
+    /// page for it, so neither service may be reached.
     /// Claude Code has no code to show, so its sign-in still opens the browser.
     public static func launch(_ provider: HarnessProvider, executable: URL,
                               arguments: [String]) -> (executable: URL, arguments: [String]) {
         guard self.arguments(provider) != nil else { return (executable, arguments) }
-        return (URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
-                ["-p", "(version 1)(allow default)(deny lsopen)", executable.path] + arguments)
+        let profile = #"(version 1)(allow default)(deny lsopen)"#
+            + #"(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name "com.apple.coreservices.uiagent"))"#
+        return (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile, executable.path] + arguments)
     }
 
     /// A streaming read can end midway through a line; only whole lines count.

@@ -230,8 +230,7 @@ final class HarnessProfileTests: XCTestCase {
         for provider in [HarnessProvider.grokBuild, .muse] {
             let launch = HarnessProfileLogin.launch(provider, executable: executable, arguments: ["login"])
             XCTAssertEqual(launch.executable.path, "/usr/bin/sandbox-exec", provider.rawValue)
-            XCTAssertEqual(launch.arguments, ["-p", "(version 1)(allow default)(deny lsopen)", executable.path, "login"],
-                           provider.rawValue)
+            XCTAssertEqual(launch.arguments.suffix(2), [executable.path, "login"], provider.rawValue)
         }
         // Claude Code has no code to show, so its sign-in still opens the browser.
         for provider in [HarnessProvider.claudeCode, .codex, .fx, .antigravity, .openCode] {
@@ -245,14 +244,18 @@ final class HarnessProfileTests: XCTestCase {
             + "  (Could not open browser automatically — open the URL above manually.)\n\nConfirm this code in your browser:\n\n  8WJ9-APKN\n"
         XCTAssertEqual(HarnessProfileLogin.challenge(provider: .grokBuild, text: grok)?.code, "8WJ9-APKN")
 
-        // The profile itself is accepted by this Mac's sandbox-exec.
-        let check = Process()
-        let launch = HarnessProfileLogin.launch(.grokBuild, executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
+        // Denying lsopen alone was not enough: Grok Build has CoreServicesUIAgent open the
+        // page for it. Launch Services must be out of reach; lsappinfo asks it, harmlessly.
+        let check = Process(), output = Pipe()
+        let launch = HarnessProfileLogin.launch(.grokBuild, executable: URL(fileURLWithPath: "/usr/bin/lsappinfo"), arguments: ["list"])
         check.executableURL = launch.executable
         check.arguments = launch.arguments
+        check.standardOutput = output
         try check.run()
+        let listed = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         check.waitUntilExit()
         XCTAssertEqual(check.terminationStatus, 0)
+        XCTAssertFalse(listed.contains("ASN:"), "Launch Services answered inside the sign-in sandbox")
     }
 
     func testMuseProfileNeverFallsBackToTheSharedKeychainLogin() throws {
