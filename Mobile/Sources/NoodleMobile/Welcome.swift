@@ -107,6 +107,7 @@ struct HubWelcomeView: View {
                         actions
                     }
                     .padding(24)
+                    .readableColumn()
                     .transition(.opacity.combined(with: .offset(y: 24)))
                 }
             }

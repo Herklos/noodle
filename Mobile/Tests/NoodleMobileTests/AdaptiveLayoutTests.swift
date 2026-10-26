@@ -144,6 +144,40 @@ import Testing
         #expect(ReadableWidth.sideRoom(rowWidth: 942) == 942 - ReadableWidth.bubble)
     }
 
+    /// iPad sizes, inside the safe area: an 11-inch iPad on its side and upright, and a 13-inch on its side.
+    static let iPadSizes = [CGSize(width: 1194, height: 814), CGSize(width: 834, height: 1150), CGSize(width: 1366, height: 1004)]
+    /// An iPhone Pro Max upright and on its side, an iPhone mini, and iPad windows in Split View or Stage Manager.
+    static let narrowSizes = [CGSize(width: 440, height: 868), CGSize(width: 838, height: 419), CGSize(width: 375, height: 762),
+                              CGSize(width: 320, height: 1004), CGSize(width: 507, height: 814), CGSize(width: 694, height: 1004),
+                              CGSize(width: 980, height: 480)]
+
+    /// On iPad the Pair screen's and the welcome's text and buttons keep the largest iPhone's width, centred,
+    /// rather than spanning the screen; on a phone, upright or on its side, and in a narrow window they take its width.
+    @Test func screensKeepAReadableColumnOnIPad() {
+        for size in Self.iPadSizes + [Self.inner] {
+            #expect(ReadableWidth.column(in: size) == 440, "\(size)")
+        }
+        for size in Self.narrowSizes + [Self.cover, .zero] {
+            #expect(ReadableWidth.column(in: size) == .infinity, "\(size)")
+        }
+    }
+
+    /// The … button's rarely used actions are a menu beside the list on iPad, as on the Mac, and the short sheet
+    /// on a phone, in the same order with the same names.
+    @Test func moreIsAMenuOnIPad() {
+        #expect(MoreChoice.inMenu(.split))
+        #expect(!MoreChoice.inMenu(.stack))
+        #expect(!MoreChoice.inMenu(.stackBesideBar))
+        #expect(MoreChoice.allCases.map(\.title) == ["New Bot", "New Group", "Play", "Hubs", "Settings"])
+        #expect(MoreChoice.allCases.map(\.systemImage) == ["person.badge.plus", "person.2", "gamecontroller", "server.rack", "gear"])
+    }
+
+    /// A menu naming this device shows an iPad on iPad.
+    @Test func theDevicesPictureIsAnIPadOnIPad() {
+        #expect(ThisDevice.symbol(for: .pad) == "ipad")
+        #expect(ThisDevice.symbol(for: .phone) == "iphone")
+    }
+
     /// Draws a view in a window whose safe area leaves `trailingInset` on the right, as the vertical bar
     /// does, on top of any the screen has, and finds where it put anything darker than the white behind it.
     static func ink(of view: some View, trailingInset: CGFloat) async throws -> (ink: CGRect, bounds: CGRect, safe: UIEdgeInsets) {

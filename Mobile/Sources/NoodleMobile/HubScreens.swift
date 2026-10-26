@@ -41,6 +41,8 @@ struct JoinView: View {
                 }
             }
             .padding(24)
+            // On iPad the Pair button is as wide as on the largest iPhone, not the whole screen.
+            .readableColumn()
             .opacity(ready ? 1 : 0)
             .offset(y: ready ? 0 : 12)
         }
@@ -236,6 +238,7 @@ private struct JoinProblem: View {
                     hubs.clearJoinError()
                     Task { await hubs.join(helping.invitation.url().absoluteString) }
                 }
+                .formSheetSizing()
             }
         } else {
             Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
@@ -469,6 +472,7 @@ struct PairingSources: View {
         .padding(24)
         .centredInSheet()
         .presentationDetents([.height(Self.height)])
+        .shortSheetSizing()
         .presentationDragIndicator(.visible)
     }
 
@@ -694,9 +698,9 @@ struct ProfileView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $pairingDevice) { PairDeviceView(title: "Pair a Device") { try await pairing.invite() } }
-        .sheet(isPresented: $editingPicture) { PersonPictureEditor(pairing: pairing) }
-        .sheet(isPresented: $showingArchived) { if let chats { ArchivedView(chats: chats) } }
+        .sheet(isPresented: $pairingDevice) { PairDeviceView(title: "Pair a Device") { try await pairing.invite() }.formSheetSizing() }
+        .sheet(isPresented: $editingPicture) { PersonPictureEditor(pairing: pairing).formSheetSizing() }
+        .sheet(isPresented: $showingArchived) { if let chats { ArchivedView(chats: chats).formSheetSizing() } }
         .task { await loadCompanions() }
         .wordmarkRefreshable {
             await pairing.refresh()
@@ -948,6 +952,7 @@ struct UserView: View {
                 if let invitation = await users.invite(user) { return invitation }
                 throw LinkError(users.error ?? "The Hub made no invitation.")
             }
+            .formSheetSizing()
         }
     }
 }

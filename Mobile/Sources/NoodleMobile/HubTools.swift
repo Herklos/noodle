@@ -330,7 +330,7 @@ struct HubToolsScreen: View {
             }
         }
         .sheet(isPresented: $adding) {
-            NewHubToolSheet(chats: chats, agent: agent, kind: kind)
+            NewHubToolSheet(chats: chats, agent: agent, kind: kind).formSheetSizing()
         }
         .confirmationDialog("Delete “\(rows.first(where: { $0.id == deleting })?.name ?? "")”?",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -450,7 +450,7 @@ struct HubCompanionsScreen: View {
             }
         }
         .navigationTitle(kind == .computer ? "Computers" : "Browsers")
-        .sheet(item: $editing) { HubCompanionEditor(chats: chats, kind: kind, item: $0) }
+        .sheet(item: $editing) { HubCompanionEditor(chats: chats, kind: kind, item: $0).formSheetSizing() }
         .confirmationDialog("Delete “\(deleting?.name ?? "")”?",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { item in
@@ -962,7 +962,7 @@ struct LiveSurfaceScreen: View {
         if attachment.liveKind == .browser, chats.signsInToBrowsers, showing {
             Button("Sign In…", systemImage: "key", action: findSignIn).disabled(findingSignIn)
         }
-        if let runHere { Button("Run on \(UIDevice.current.model)", systemImage: "iphone", action: runHere) }
+        if let runHere { Button("Run on \(UIDevice.current.model)", systemImage: ThisDevice.symbol(), action: runHere) }
     }
 
     var body: some View {
@@ -976,7 +976,7 @@ struct LiveSurfaceScreen: View {
                         .ignoresSafeArea(edges: fullScreen ? .all : .bottom)
                 }
                 if let screenControls, showing { GamepadOverlay(gamepad: screenControls, haptics: haptics, onKey: hold) }
-                if !onTV { GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu).ignoresSafeArea() }
+                if !onTV { GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu, onTV: false).ignoresSafeArea() }
                 if !showing {
                     if let failure { Text(failure).foregroundStyle(.secondary).padding() }
                     else { ProgressView().tint(.white) }
@@ -1007,7 +1007,7 @@ struct LiveSurfaceScreen: View {
         // The TV's view tells the Hub its size, so the game is drawn for the TV.
         .externalScreen(enabled: Binding(get: { controls != nil && !onPhone }, set: { onPhone = !$0 }), available: $tvAvailable) {
             SurfaceView(feed: feed) { control in channel?.send(LinkSurface.control(control)) }
-            GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu)
+            GameMenuOverlay(gameMenu: gameMenu, menu: noodletMenu, onTV: true)
         }
         .tvConnectionAlert(isPresented: $connectingTV)
         .sheet(isPresented: Binding(get: { signInForm != nil }, set: { if !$0 { signInForm = nil } })) {

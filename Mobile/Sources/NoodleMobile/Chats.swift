@@ -1686,9 +1686,24 @@ struct AgentsView: View {
             }
             // A plain button, as in Messages, not the round glass default.
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showingMore = true } label: { Image(systemName: "ellipsis") }
+                if MoreChoice.inMenu(layout) {
+                    Menu {
+                        ForEach(MoreChoice.allCases, id: \.self) { choice in
+                            Button(choice.title, systemImage: choice.systemImage) {
+                                chosen = choice
+                                openChosen()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
                     .foregroundStyle(.tint)
                     .accessibilityLabel("More")
+                } else {
+                    Button { showingMore = true } label: { Image(systemName: "ellipsis") }
+                        .foregroundStyle(.tint)
+                        .accessibilityLabel("More")
+                }
             }
             .sharedBackgroundVisibility(.hidden)
             // Beside the vertical bar, the pinned bots are in it, under the time, as a column of pictures.
@@ -1723,15 +1738,15 @@ struct AgentsView: View {
                 showingMore = false
             }
         }
-        .sheet(isPresented: $showingProfile) { HubsView(chats: chats) }
-        .sheet(isPresented: $showingSettings) { SettingsView(chats: chats) }
+        .sheet(isPresented: $showingProfile) { HubsView(chats: chats).formSheetSizing() }
+        .sheet(isPresented: $showingSettings) { SettingsView(chats: chats).formSheetSizing() }
         .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
         // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
         .sheet(isPresented: $creating) {
-            if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace) }
+            if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
         }
         .sheet(isPresented: $creatingGroup) {
-            if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace) }
+            if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace).formSheetSizing() }
         }
         .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: $spaceName)
@@ -1743,8 +1758,9 @@ struct AgentsView: View {
             SpaceEditor(list: spaceList,
                         hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
                         moveHubs: moveHubs, change: { changeSpaces($0) })
+                .formSheetSizing()
         }
-        .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread) }
+        .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread).formSheetSizing() }
     }
 
     /// All, a space for each joined Hub with its bots and groups alone and the pins it keeps, then the spaces the person made.
@@ -2028,7 +2044,34 @@ extension EnvironmentValues {
     @Entry var showAgent: @MainActor (LinkBot) -> Void = { _ in }
 }
 
-enum MoreChoice { case createBot, createGroup, console, profiles, settings }
+/// The rarely used actions, behind the list's … button.
+enum MoreChoice: CaseIterable {
+    case createBot, createGroup, console, profiles, settings
+
+    var title: String {
+        switch self {
+        case .createBot: "New Bot"
+        case .createGroup: "New Group"
+        case .console: "Play"
+        case .profiles: "Hubs"
+        case .settings: "Settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .createBot: "person.badge.plus"
+        case .createGroup: "person.2"
+        case .console: "gamecontroller"
+        case .profiles: "server.rack"
+        case .settings: "gear"
+        }
+    }
+
+    /// On a phone they are in a short sheet from the bottom; on iPad and the unfolded iPhone Duo, in a menu
+    /// from the button, as on the Mac.
+    static func inMenu(_ layout: HomeLayout) -> Bool { layout == .split }
+}
 
 /// The rarely used actions, in a short sheet from the bottom.
 struct MoreSheet: View {
@@ -2036,23 +2079,20 @@ struct MoreSheet: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            option("New Bot", systemImage: "person.badge.plus", .createBot)
-            option("New Group", systemImage: "person.2", .createGroup)
-            option("Play", systemImage: "gamecontroller", .console)
-            option("Hubs", systemImage: "server.rack", .profiles)
-            option("Settings", systemImage: "gear", .settings)
+            ForEach(MoreChoice.allCases, id: \.self) { option($0) }
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
         .padding(24)
         .centredInSheet()
         .presentationDetents([.height(356)])
+        .shortSheetSizing()
         .presentationDragIndicator(.visible)
     }
 
-    private func option(_ title: String, systemImage: String, _ choice: MoreChoice) -> some View {
+    private func option(_ choice: MoreChoice) -> some View {
         Button { choose(choice) } label: {
-            Label(title, systemImage: systemImage).frame(maxWidth: .infinity)
+            Label(choice.title, systemImage: choice.systemImage).frame(maxWidth: .infinity)
         }
     }
 }
@@ -2727,8 +2767,9 @@ struct ChatView: View {
                 openingShared = $0
                 showingShared = false
             }
+            .formSheetSizing()
         }
-        .sheet(isPresented: $editing) { ThreadEditor(chats: chats, thread: thread) }
+        .sheet(isPresented: $editing) { ThreadEditor(chats: chats, thread: thread).formSheetSizing() }
         .sheet(item: $profile, onDismiss: finishProfileChoice) { bot in
             AgentProfile(bot: bot, actions: AgentProfile.actions(for: bot, canOpen: openThread != nil,
                                                                 inCall: chats.calls.call?.threadID == bot.id)) { action in
@@ -2736,7 +2777,7 @@ struct ChatView: View {
                 profile = nil
             }
         }
-        .sheet(item: $editingBot) { ThreadEditor(chats: chats, thread: .bot($0)) }
+        .sheet(item: $editingBot) { ThreadEditor(chats: chats, thread: .bot($0)).formSheetSizing() }
         .environment(\.showAgent) { profile = $0 }
         .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: 10,
                       matching: .any(of: [.images, .videos]))
@@ -2758,7 +2799,7 @@ struct ChatView: View {
         .environment(\.watchLive) { watchingAt = $1; watching = $0 }
         .environment(\.reviewPatch) { reviewing = $0 }
         .environment(\.forwardAttachment) { forwarding = $0 }
-        .sheet(item: $forwarding) { ForwardSheet(request: $0, hubs: joinedHubs.isEmpty ? [chats] : joinedHubs) }
+        .sheet(item: $forwarding) { ForwardSheet(request: $0, hubs: joinedHubs.isEmpty ? [chats] : joinedHubs).formSheetSizing() }
         .sheet(item: $reviewing) { request in
             PatchReviewScreen(request: request, viewed: chats.viewedPatchFiles(request.attachment, in: thread),
                               annotating: annotating(in: thread)) {
@@ -3218,6 +3259,7 @@ struct AgentProfile: View {
         .padding(24)
         .centredInSheet()
         .presentationDetents([.medium])
+        .shortSheetSizing()
         .presentationDragIndicator(.visible)
     }
 }

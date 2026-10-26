@@ -354,6 +354,7 @@ struct AnnotationCommentSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .formSheetSizing()
         .presentationDragIndicator(.visible)
         .onAppear { focused = true }
         .onDisappear { Task { await dictation.discard() } }

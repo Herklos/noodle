@@ -143,7 +143,7 @@ struct AttachmentView: View {
         .accessibilityHint("Opens it live")
         .contextMenu {
             if attachment.liveKind == .noodlet {
-                Button("Open on \(UIDevice.current.model)", systemImage: "iphone") { watchLive(attachment, .device) }
+                Button("Open on \(UIDevice.current.model)", systemImage: ThisDevice.symbol()) { watchLive(attachment, .device) }
                 Button("Open on Hub", systemImage: "play.display") { watchLive(attachment, .hub) }
             }
         }
