@@ -19,9 +19,16 @@ public final class HarnessProfilesController {
     /// Called with the profile once a sign-in here completes, so bots waiting on it retry at once.
     @ObservationIgnored public var onSignedIn: ((UUID) -> Void)?
     @ObservationIgnored private var operations: [UUID: (id: UUID, task: Task<Void, Never>)] = [:]
+    /// Who each profile is signed in as, when its check could tell. Kept only while the app runs.
+    public private(set) var accounts: [UUID: String] = [:]
+    /// The name the check under way reported, until it returns.
+    @ObservationIgnored private var reportedAccounts: [UUID: String] = [:]
+    @ObservationIgnored private let signOutLogin: @MainActor (HarnessProfile) async throws -> Void
 
-    public init(store: HarnessProfileStore) {
+    /// `signOut` removes a profile's login; by default the Agent Host does, as it signs in.
+    public init(store: HarnessProfileStore, signOut: (@MainActor (HarnessProfile) async throws -> Void)? = nil) {
         self.store = store
+        signOutLogin = signOut ?? { try await HarnessAccountOperation().signOut(profile: $0.id) }
         reload()
     }
 
@@ -53,9 +60,40 @@ public final class HarnessProfilesController {
         try store.delete(profile)
         subscriptionUsage?.forget(profile.provider, profile: profile.id)
         authentication[profile.id] = nil
+        accounts[profile.id] = nil
         errors[profile.id] = nil
         terminalSignIns[profile.id] = nil
         reload()
+    }
+
+    /// Signs the profile out of this app, keeping it to sign in to again. `then` runs once
+    /// its login is gone, so the bots that used it can stop using their copies.
+    public func signOut(_ profile: HarnessProfile, then done: @escaping @MainActor () -> Void = {}) {
+        guard operations[profile.id] == nil else { return }
+        let id = profile.id, token = UUID(), signOut = signOutLogin
+        errors[id] = nil
+        terminalSignIns[id] = nil
+        activity[id] = "Signing out…"
+        let task = Task { [weak self] in
+            defer { self?.finish(id, token: token) }
+            do {
+                try await signOut(profile)
+                done()
+                guard let self, self.operations[id]?.id == token else { return }
+                self.record(id, .unauthenticated)
+                self.subscriptionUsage?.forget(profile.provider, profile: id)
+            } catch {
+                guard let self, self.operations[id]?.id == token else { return }
+                if !(error is CancellationError), !Task.isCancelled { self.errors[id] = error.localizedDescription }
+            }
+        }
+        operations[id] = (token, task)
+    }
+
+    private func record(_ id: UUID, _ status: HarnessAuthenticationStatus) {
+        authentication[id] = status
+        let reported = reportedAccounts.removeValue(forKey: id)
+        accounts[id] = status == .authenticated ? reported ?? accounts[id] : nil
     }
 
     public func refresh(_ installation: HarnessInstallation) async {
@@ -68,7 +106,7 @@ public final class HarnessProfilesController {
             do {
                 let status = try await provider.status(for: installation)
                 guard operations[profile.id] == nil, self.profile(profile.id) != nil else { continue }
-                authentication[profile.id] = status
+                record(profile.id, status)
                 errors[profile.id] = nil
                 if status != .unauthenticated { terminalSignIns[profile.id] = nil }
             } catch is CancellationError { return }
@@ -82,7 +120,7 @@ public final class HarnessProfilesController {
               let provider = setupProvider(for: profile),
               let status = try? await provider.status(for: installation),
               operations[id] == nil, self.profile(id) != nil else { return nil }
-        authentication[id] = status
+        record(id, status)
         if status != .unauthenticated { terminalSignIns[id] = nil }
         return status != .unauthenticated
     }
@@ -106,7 +144,7 @@ public final class HarnessProfilesController {
                 }
                 try Task.checkCancellation()
                 guard let self, self.operations[id]?.id == token else { return }
-                self.authentication[id] = status
+                self.record(id, status)
                 if status != .unauthenticated { self.onSignedIn?(id) }
             } catch {
                 guard let self, self.operations[id]?.id == token else { return }
@@ -135,6 +173,9 @@ public final class HarnessProfilesController {
         (provider as? CodexAccountProvider)?.onUsage = { [weak usage = self.subscriptionUsage] in
             usage?.record($0, provider: .codex, profile: profile.id)
         }
+        // Each check runs on a provider of its own, so a name it reports is that check's.
+        reportedAccounts[profile.id] = nil
+        provider?.onAccount = { [weak self] in self?.reportedAccounts[profile.id] = $0 }
         return provider
     }
 
@@ -188,7 +229,7 @@ public final class HarnessProfilesController {
 }
 
 /// A harness's installation guide, with sign-in and its check on the default login.
-@MainActor private final class DefaultLoginSetupProvider: HarnessSetupProviding {
+@MainActor private final class DefaultLoginSetupProvider: HarnessSetupProviding, HarnessAccountNaming {
     let installationGuide: HarnessInstallationGuide
     let account: any HarnessProfileAccount
     let profile: HarnessProfile
@@ -198,6 +239,11 @@ public final class HarnessProfilesController {
     init(guide: HarnessInstallationGuide, account: any HarnessProfileAccount, profile: HarnessProfile,
          store: HarnessProfileStore, prepare: @escaping () throws -> Void) {
         installationGuide = guide; self.account = account; self.profile = profile; self.store = store; self.prepare = prepare
+    }
+
+    var onAccount: (@MainActor (String) -> Void)? {
+        get { account.onAccount }
+        set { account.onAccount = newValue }
     }
 
     func terminalSignIn(for installation: HarnessInstallation) -> String? {
@@ -218,7 +264,7 @@ public final class HarnessProfilesController {
 }
 
 /// The account half of harness setup; a profile has no installation of its own.
-@MainActor private protocol HarnessProfileAccount {
+@MainActor private protocol HarnessProfileAccount: HarnessAccountNaming {
     func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus
     func signIn(for installation: HarnessInstallation,
                 onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus
@@ -231,6 +277,7 @@ extension CodexAccountProvider: HarnessProfileAccount {}
 /// Antigravity and OpenCode have no such login: the host only checks the profile.
 @MainActor private final class HostProfileSetupProvider: HarnessProfileAccount {
     private let profile: HarnessProfile
+    var onAccount: (@MainActor (String) -> Void)?
     init(profile: HarnessProfile) { self.profile = profile }
 
     func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
@@ -246,6 +293,7 @@ extension CodexAccountProvider: HarnessProfileAccount {}
             throw HarnessSetupError("Install the harness first.")
         }
         return try await HarnessAccountOperation().run(executablePath: path, signIn: signIn, provider: profile.provider,
-                                                       profile: profile.id, onChallenge: onChallenge)
+                                                       profile: profile.id, onChallenge: onChallenge,
+                                                       onAccount: onAccount)
     }
 }

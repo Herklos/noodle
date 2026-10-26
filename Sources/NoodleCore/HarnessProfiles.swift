@@ -102,16 +102,20 @@ public struct HarnessProfileStore: Sendable {
     }
 
     private func populate(_ folder: URL, with profile: HarnessProfile) throws {
-        let account = folder.appendingPathComponent("home", isDirectory: true)
-            .appendingPathComponent(Self.accountPath(profile.provider), isDirectory: true)
+        try populateHome(folder.appendingPathComponent("home", isDirectory: true), provider: profile.provider)
+        try save(profile, in: folder)
+    }
+
+    /// A login home nobody has signed in to yet.
+    private func populateHome(_ home: URL, provider: HarnessProvider) throws {
+        let account = home.appendingPathComponent(Self.accountPath(provider), isDirectory: true)
         try FileManager.default.createDirectory(at: account, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        if profile.provider == .codex {
+        if provider == .codex {
             // Keep the login inside this folder, never in a shared Keychain item.
             try AtomicFile.write(Data("cli_auth_credentials_store = \"file\"\n".utf8),
                                  to: account.appendingPathComponent("config.toml"))
         }
-        try save(profile, in: folder)
     }
 
     public func rename(_ profile: HarnessProfile, to rawName: String) throws -> HarnessProfile {
@@ -126,6 +130,31 @@ public struct HarnessProfileStore: Sendable {
         try FileManager.default.removeItem(at: try requireFolder(profile.id))
         RestrictedHarnessStorage.removeSharedLogin(provider: profile.provider, root: directory.deletingLastPathComponent(),
                                                    loginHome: loginHome(profile))
+    }
+
+    /// Signs the profile out of this app: its login home starts again empty, the copy its
+    /// bots shared goes, and so does the Keychain item Claude Code keeps for its folder.
+    /// The person's own login, in their home and the CLI's own Keychain items, and every
+    /// other profile are left alone. A default profile that was never made has no login.
+    public func signOut(_ profile: HarnessProfile,
+                        deleteSecret: (String, String) throws -> Void = RestrictedHarnessStorage.deleteSecret) throws {
+        guard AgentStorageLayout.exists(folder(profile.id)) else { return }
+        let home = loginHome(profile)
+        // Made aside and swapped in whole, so the Agent Host never finds the folder without a home.
+        let fresh = try requireFolder(profile.id).appendingPathComponent(".home-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: fresh) }
+        try populateHome(fresh, provider: profile.provider)
+        if AgentStorageLayout.exists(home) {
+            guard renamex_np(fresh.path, home.path, UInt32(RENAME_SWAP)) == 0 else {
+                throw HarnessSetupError("Could not sign out: \(String(cString: strerror(errno))).")
+            }
+        } else {
+            try FileManager.default.moveItem(at: fresh, to: home)
+        }
+        RestrictedHarnessStorage.removeSharedLogin(provider: profile.provider, root: directory.deletingLastPathComponent(),
+                                                   loginHome: home)
+        if let item = loginItem(profile) { try deleteSecret(item, NSUserName()) }
     }
 
     /// The stand-in for the user's home when reading this profile's login.

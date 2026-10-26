@@ -377,6 +377,75 @@ final class HarnessProfileTests: XCTestCase {
             "Claude Code-credentials", NSUserName()))
     }
 
+    /// Signing out of the app's own Default login for one harness removes that login alone:
+    /// never the person's own Terminal login, another harness's Default or a named profile.
+    func testSigningOutTheDefaultLoginRemovesOnlyThatLogin() throws {
+        let claude = try store.defaultProfile(.claudeCode)
+        let codex = try store.defaultProfile(.codex)
+        let work = try store.create(provider: .claudeCode, named: "Work")
+        let terminal = root.deletingLastPathComponent().appendingPathComponent("person", isDirectory: true)
+        try FileManager.default.createDirectory(at: terminal, withIntermediateDirectories: true)
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"a"}}"#.utf8)
+        for profile in [claude, work] {
+            let files = try WorkspaceMailbox(workspace: store.loginHome(profile), path: ".claude")
+            try files.writeData(login, named: ".credentials.json")
+            try files.writeData(Data("{}".utf8), named: ".claude.json")
+        }
+        try WorkspaceMailbox(workspace: store.loginHome(codex), path: ".codex").writeData(Data("codex-login".utf8), named: "auth.json")
+        try WorkspaceMailbox(workspace: terminal, path: ".claude", create: true).writeData(login, named: ".credentials.json")
+        // Bots on each Claude Code login share a copy of it.
+        for profile in [claude, work] {
+            let agent = try repository.createAgent(named: "Bot \(profile.displayName)", harnessIdentifier: "claude-code").agent
+            try RestrictedHarnessStorage.prepare(provider: .claudeCode, workspace: repository.storage(for: agent.id).workspace,
+                                                 loginHome: store.loginHome(profile)) { _, _ in login }
+        }
+        let logins = root.appendingPathComponent("HarnessLogins")
+        let shared = try FileManager.default.contentsOfDirectory(atPath: logins.path).count
+
+        var deleted: [String] = []
+        try store.signOut(claude) { service, account in
+            deleted.append(service)
+            XCTAssertEqual(account, NSUserName())
+        }
+        let digest = SHA256.hash(data: Data(store.accountHome(claude).path.utf8)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(deleted, ["Claude Code-credentials-" + digest.prefix(8)], "Only the Default login's own item")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.accountHome(claude).path), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.loginHome(claude).path), [".claude"])
+        XCTAssertEqual(try store.validated(claude.id), claude, "The Default login is ready to sign in again")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: logins.path).count, shared - 1)
+
+        for (profile, name) in [(work, ".credentials.json"), (codex, "auth.json")] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: store.accountHome(profile).appendingPathComponent(name).path), name)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: terminal.appendingPathComponent(".claude/.credentials.json").path))
+        XCTAssertEqual(try store.load(), [work])
+
+        // Codex's Default keeps the setting that holds its login in files, and has no Keychain item.
+        try store.signOut(codex) { service, _ in XCTFail("Codex has no Keychain item to delete: \(service)") }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.accountHome(codex).appendingPathComponent("auth.json").path))
+        XCTAssertEqual(try String(contentsOf: store.accountHome(codex).appendingPathComponent("config.toml"), encoding: .utf8),
+                       "cli_auth_credentials_store = \"file\"\n")
+        // A Default that was never made has nothing to sign out of.
+        try store.signOut(HarnessProfileStore.defaultRecord(.grokBuild)) { _, _ in XCTFail() }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.loginHome(HarnessProfileStore.defaultRecord(.grokBuild)).path))
+    }
+
+    func testOnlyAProfilesOwnClaudeKeychainItemIsEverDeleted() throws {
+        XCTAssertThrowsError(try RestrictedHarnessStorage.deleteSecret(service: "Claude Code-credentials", account: "me") { _ in
+            XCTFail("The person's own Claude Code login must never be deleted")
+            return (0, Data())
+        })
+        var arguments: [String] = []
+        try RestrictedHarnessStorage.deleteSecret(service: "Claude Code-credentials-0123abcd", account: "me") {
+            arguments = $0
+            return (44, Data())
+        }
+        XCTAssertEqual(arguments, ["delete-generic-password", "-s", "Claude Code-credentials-0123abcd", "-a", "me"])
+        XCTAssertThrowsError(try RestrictedHarnessStorage.deleteSecret(service: "Claude Code-credentials-0123abcd", account: "me") { _ in
+            (51, Data())
+        })
+    }
+
     func testProfileClaudeKeychainItemIsReadWithTheSecurityTool() throws {
         var arguments: [String] = []
         let data = try RestrictedHarnessStorage.readSecret(service: "Claude Code-credentials-0123abcd", account: "me") {

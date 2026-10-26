@@ -174,6 +174,97 @@ import NoodleCore
     }
 }
 
+@MainActor final class HarnessSignInStatusTests: HiddenViewTests {
+    /// Every status about signing in opens the login's sign-in; the rest stay plain labels.
+    func testSignInStatusesOfferTheirActions() {
+        let menu = { (status: HarnessAuthenticationStatus?, waiting: Bool) in
+            HarnessSignInMenu.make(status: status, waitingForSignIn: waiting, account: "pdp@example.com", busy: false)
+        }
+        XCTAssertEqual(menu(.authenticated, false), HarnessSignInMenu(account: "pdp@example.com", actions: [.signInAgain, .signOut]))
+        XCTAssertEqual(menu(.unauthenticated, false), HarnessSignInMenu(account: nil, actions: [.signIn]))
+        XCTAssertEqual(menu(.unauthenticated, true), HarnessSignInMenu(account: nil, actions: [.signIn]))
+        // A refused login still reads as signed in, so it can be signed out of as well as in to.
+        XCTAssertEqual(menu(.authenticated, true), HarnessSignInMenu(account: nil, actions: [.signIn, .signOut]))
+        XCTAssertEqual(menu(.managedExternally, false), HarnessSignInMenu(account: nil, actions: [.signIn, .signOut]))
+        XCTAssertNil(menu(.notRequired, false), "Ready is not about signing in")
+        XCTAssertNil(menu(nil, false), "Checking or installed is not about signing in")
+        XCTAssertNil(HarnessSignInMenu.make(status: .authenticated, waitingForSignIn: false, account: nil, busy: true))
+    }
+
+    /// "Signed in" opens the account the Default login is signed in to, with Sign In Again and Sign Out.
+    func testSignedInStatusOpensTheDefaultLoginsAccountAndSignOut() async throws {
+        let f = try fixture()
+        let installed = HarnessInstallation(provider: .codex, executablePath: "/fixtures/codex")
+        HarnessPresentationCache.save([.codex: .init(installation: installed, authentication: .unauthenticated)], to: f.runtime.defaults)
+        let provider = NamedAccountSetupProvider()
+        let setup = HarnessSetupController(providers: [.codex: provider], defaults: f.runtime.defaults, signOut: { _ in })
+        let view = host(HarnessInstallationRow(store: f.store, installation: installed, liveInstallation: installed,
+            isRefreshing: false, setup: setup, install: {}).environment(f.store))
+        let window = try XCTUnwrap(view.window)
+        window.orderFront(nil)
+        _ = try await control("Sign-in required", in: view)
+        press(try await control("Show sign-in", in: view))
+        var panel = try await popover(containing: "Sign In", besides: window)
+        XCTAssertFalse(hasControl("Sign Out", in: panel), "Nothing to sign out of")
+        press(try await control("Sign In", in: panel))
+        try await wait { panel.window?.isVisible != true }
+        _ = try await control("Signed in", in: view)
+        XCTAssertEqual(setup.accounts[.codex], "pdp@example.com")
+        press(try await control("Show sign-in", in: view))
+        panel = try await popover(containing: "pdp@example.com", besides: window)
+        for name in ["Default", "Sign In Again", "Sign Out"] { _ = try await control(name, in: panel) }
+        XCTAssertFalse(hasControl("Kick", in: panel), "No bot is in trouble")
+        window.close()
+    }
+
+    /// A bot in trouble comes first, then the login's sign-in.
+    func testNeedsAttentionListsTheBotsBeforeTheSignIn() async throws {
+        let f = try fixture(), bot = try f.runtime.start(f.a)
+        let installed = HarnessInstallation(provider: .codex, executablePath: "/fixtures/codex")
+        HarnessPresentationCache.save([.codex: .init(installation: installed, authentication: .authenticated)], to: f.runtime.defaults)
+        let setup = HarnessSetupController(providers: [:], defaults: f.runtime.defaults)
+        bot.transition(.failed, detail: "Fixture account failure")
+        let view = host(HarnessInstallationRow(store: f.store, installation: installed, liveInstallation: installed,
+            isRefreshing: false, setup: setup, install: {}).environment(f.store))
+        let window = try XCTUnwrap(view.window)
+        window.orderFront(nil)
+        _ = try await control("Needs attention", in: view)
+        press(try await control("Show affected bots", in: view))
+        let panel = try await popover(containing: f.a.displayName, besides: window)
+        let frame = { (node: NSObject) in (node.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue }
+        let kickButton = try await control("Kick", in: panel), signOutButton = try await control("Sign Out", in: panel)
+        let kick = try XCTUnwrap(frame(kickButton)), signOut = try XCTUnwrap(frame(signOutButton))
+        XCTAssertGreaterThan(kick.minY, signOut.maxY, "Bots first, in screen coordinates that grow upwards")
+        window.close()
+    }
+
+    private func popover(containing name: String, besides window: NSWindow) async throws -> NSView {
+        var popover: NSView?
+        try await wait {
+            popover = NSApp.windows.filter { $0.isVisible && $0 !== window && $0.sheetParent == nil }
+                .compactMap(\.contentView).first { self.hasControl(name, in: $0) }
+            return popover != nil
+        }
+        return try XCTUnwrap(popover)
+    }
+}
+
+/// Signs in to an account it names, as Codex and Claude Code checks do.
+@MainActor private final class NamedAccountSetupProvider: HarnessSetupProviding, HarnessAccountNaming {
+    let installationGuide = HarnessInstallationGuide(command: nil, instructions: "Fixture instructions", documentationURL: URL(string: "https://example.invalid/setup")!)
+    var onAccount: (@MainActor (String) -> Void)?
+    var signedIn = false
+    func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
+        guard signedIn else { return .unauthenticated }
+        onAccount?("pdp@example.com")
+        return .authenticated
+    }
+    func signIn(for installation: HarnessInstallation, onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus {
+        signedIn = true
+        return try await status(for: installation)
+    }
+}
+
 @MainActor private final class StalledSetupProvider: HarnessSetupProviding {
     let installationGuide = HarnessInstallationGuide(command: nil, instructions: "Fixture instructions", documentationURL: URL(string: "https://example.invalid/setup")!)
     let gate = RoutingGate<HarnessAuthenticationStatus>()

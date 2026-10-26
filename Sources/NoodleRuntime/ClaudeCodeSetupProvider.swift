@@ -22,13 +22,18 @@ public final class HarnessAccountOperation {
     /// reads a harness's private configuration or credentials.
     public func run(executablePath: String, signIn: Bool, provider: HarnessProvider, profile: UUID,
              onChallenge: (@MainActor (HarnessSignInChallenge) -> Void)? = nil,
-             onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
+             onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil,
+             onAccount: (@MainActor (String) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
                 connection.onFailure = { [weak self] error in
                     Task { @MainActor in self?.finish(.failure(HarnessSetupError(error))) }
+                }
+                // Sent by an account check before its reply.
+                connection.onAccountName = { name in
+                    Task { @MainActor in if let name = HarnessAccountName.from(name) { onAccount?(name) } }
                 }
                 // Sent by a Codex account check before its reply.
                 connection.onAccountUsage = { data in
@@ -65,6 +70,27 @@ public final class HarnessAccountOperation {
             }
         } onCancel: {
             Task { @MainActor in self.finish(.failure(CancellationError())) }
+        }
+    }
+
+    /// Signs a profile, or a harness's default login, out in the Agent Host, which
+    /// resolves its folder from the identifier and removes its Keychain item.
+    public func signOut(profile: UUID) async throws {
+        let _: HarnessAuthenticationStatus = try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            connection.onFailure = { [weak self] error in
+                Task { @MainActor in self?.finish(.failure(HarnessSetupError(error))) }
+            }
+            timeout = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(40))
+                guard !Task.isCancelled else { return }
+                self?.finish(.failure(HarnessSetupError("Signing out timed out.")))
+            }
+            connection.signOutProfile(profile: profile) { [weak self] error in
+                Task { @MainActor in
+                    self?.finish(error.map { .failure(HarnessSetupError($0)) } ?? .success(.unauthenticated))
+                }
+            }
         }
     }
 

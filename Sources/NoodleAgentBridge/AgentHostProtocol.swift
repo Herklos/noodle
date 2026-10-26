@@ -66,6 +66,8 @@ public enum AgentHostIdentity {
                                     withReply reply: @escaping (Bool, String?) -> Void)
     func signInProfile(profileID: String, executablePath: String,
                        withReply reply: @escaping (Bool, String?) -> Void)
+    /// Removes the profile's login, files and Keychain item alike; replies with why it could not.
+    func signOutProfile(profileID: String, withReply reply: @escaping (String?) -> Void)
     func fxModels(executablePath: String, withReply reply: @escaping (Data?, String?) -> Void)
     func codexModels(executablePath: String, withReply reply: @escaping (Data?, String?) -> Void)
     func inspectGrok(withReply reply: @escaping (Data?, String?) -> Void)
@@ -85,4 +87,6 @@ public enum AgentHostIdentity {
     func signInChallenge(_ url: String, code: String)
     /// A Codex account check read the account's plan limits: a JSON-encoded SubscriptionUsage.
     func accountUsage(_ data: Data)
+    /// An account check read the signed-in account's email address or name.
+    func accountName(_ name: String)
 }

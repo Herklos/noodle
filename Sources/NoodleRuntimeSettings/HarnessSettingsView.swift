@@ -112,6 +112,7 @@ public struct HarnessInstallationRow: View {
     @State private var kickRequest: AgentKickRequest?
     @State private var newSessionAgent: AgentRecord?
     @State private var showsAgentIssues = false
+    @State private var confirmsSignOut = false
     @Environment(\.openURL) private var openURL
 
     private var id: HarnessProvider { installation.provider }
@@ -249,17 +250,55 @@ public struct HarnessInstallationRow: View {
         .padding(.vertical, 6)
         .modifier(AgentKickConfirmation(store: store, request: $kickRequest))
         .modifier(NewSessionConfirmation(store: store, agent: $newSessionAgent))
+        .alert("Sign Out of \(id.displayName)?", isPresented: $confirmsSignOut) {
+            Button("Sign Out", role: .destructive) {
+                let login = HarnessProfileStore.defaultRecord(id)
+                setup.signOut(liveInstallation ?? installation) { [store] in store.restartAgents(signedInWith: login) }
+            }
+            Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
+        } message: {
+            Text("Bots that use this sign-in pause until you sign in again. Your Terminal sign-in is kept.")
+        }
+    }
+
+    /// The app's own Default login for the harness, offered from its status once nothing else is under way.
+    private var signInMenu: HarnessSignInMenu? {
+        guard id.supportsProfiles, installation.isAvailable else { return nil }
+        return HarnessSignInMenu.make(status: setup.authentication[id], waitingForSignIn: hasAgentsWaitingForSignIn,
+                                      account: setup.accounts[id],
+                                      busy: setup.activity[id] != nil || setup.challenges[id] != nil)
     }
 
     @ViewBuilder private var statusLabel: some View {
         let label = SettingsStatusLabel(title: statusText, systemImage: statusIcon, color: statusColor)
-        if affectedAgents.isEmpty {
+        if affectedAgents.isEmpty, signInMenu == nil {
             label
         } else {
             Button { showsAgentIssues.toggle() } label: { label.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
-                .help("Show affected bots")
-                .popover(isPresented: $showsAgentIssues, arrowEdge: .bottom) { agentIssues }
+                .help(affectedAgents.isEmpty ? "Show sign-in" : "Show affected bots")
+                .popover(isPresented: $showsAgentIssues, arrowEdge: .bottom) { statusPopover }
+        }
+    }
+
+    /// The bots in trouble first, then the Default login's sign-in.
+    private var statusPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !affectedAgents.isEmpty { agentIssues }
+            if let menu = signInMenu {
+                if !affectedAgents.isEmpty { Divider() }
+                HarnessSignInSection(menu: menu, name: "Default", isDefault: true, perform: perform)
+            }
+        }
+        .frame(width: 340, alignment: .leading)
+    }
+
+    private func perform(_ action: HarnessSignInMenu.Action) {
+        showsAgentIssues = false
+        switch action {
+        case .signIn, .signInAgain:
+            if let liveInstallation, liveInstallation.isAvailable { setup.signIn(liveInstallation) }
+        case .signOut: confirmsSignOut = true
         }
     }
 

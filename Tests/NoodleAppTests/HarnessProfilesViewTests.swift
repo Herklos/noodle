@@ -19,6 +19,29 @@ import NoodleCore
         }
     }
 
+    /// A bot's Profile chooser names the Default login by its account, and keeps it first.
+    func testProfileChooserNamesTheDefaultLoginByItsAccount() async throws {
+        let f = try fixture()
+        let work = try f.store.harnessProfiles.create(provider: .codex, named: "Work")
+        let chooser = host(HarnessProfileChooser(profiles: [work], defaultName: "pdp@example.com · Default",
+                                                 selection: .constant(nil)).environment(f.store))
+        _ = try await control("pdp@example.com · Default", in: chooser)
+        _ = try await control("Work", in: chooser)
+        XCTAssertFalse(hasControl("Default", in: chooser), "The account names the Default login")
+    }
+
+    /// Signing a login out restarts the bots it signs in: those on the profile, or for the
+    /// Default login those that chose none.
+    func testTheBotsALoginSignsInAreThoseThatUseIt() throws {
+        let f = try fixture()
+        let work = try f.store.harnessProfiles.create(provider: .codex, named: "Work")
+        try f.repository.updateAgentHarnessProfile(f.b, profile: work.id)
+        let host: any BotSettingsHost = f.store
+        XCTAssertEqual(host.agents(signedInWith: work).map(\.id), [f.b.id])
+        XCTAssertEqual(host.agents(signedInWith: HarnessProfileStore.defaultRecord(.codex)).map(\.id), [f.a.id])
+        XCTAssertEqual(host.agents(signedInWith: HarnessProfileStore.defaultRecord(.claudeCode)).map(\.id), [])
+    }
+
     /// The sign-in check only reads the saved login, so a bot on the profile that the vendor
     /// refused is what tells that the profile needs signing in again.
     func testAProfileWhoseBotWasRefusedItsLoginSaysSignInIsRequired() async throws {

@@ -41,6 +41,21 @@ public extension HarnessSetupProviding {
     func terminalSignIn(for installation: HarnessInstallation) -> String? { nil }
 }
 
+/// A login's check that can tell which account is signed in, so Settings can show it.
+@MainActor public protocol HarnessAccountNaming: AnyObject {
+    /// Receives the signed-in account's email address or name, before the check returns.
+    var onAccount: (@MainActor (String) -> Void)? { get set }
+}
+
+public enum HarnessAccountName {
+    /// The account's name as a harness reported it, fit for one line of Settings; nil when there is none.
+    public static func from(_ value: Any?) -> String? {
+        guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+              text.count <= 320, !text.contains(where: \.isNewline) else { return nil }
+        return text
+    }
+}
+
 public enum HarnessStorage {
     /// Where harnesses are installed and keep their logins, as this process sees it.
     public static var userHome: URL {
@@ -73,11 +88,12 @@ public enum HarnessStorage {
     }
 }
 
-@MainActor public final class CodexSetupProvider: HarnessSetupProviding {
+@MainActor public final class CodexSetupProvider: HarnessSetupProviding, HarnessAccountNaming {
     private let codexHome: URL
     private let environment: [String: String]?
     /// Receives the account's plan limits, read with each sign-in check of a signed-in account.
     public var onUsage: (@MainActor (SubscriptionUsage) -> Void)?
+    public var onAccount: (@MainActor (String) -> Void)?
     /// The Agent Host passes its own fixed environment; the app uses its own.
     public init(codexHome: URL, environment: [String: String]? = nil) {
         self.codexHome = codexHome
@@ -117,7 +133,7 @@ public enum HarnessStorage {
             throw HarnessSetupError("Install the harness first.")
         }
         return CodexAccountSession(executableURL: URL(fileURLWithPath: path), codexHome: codexHome, environment: environment,
-                                   refresh: refresh, onUsage: onUsage)
+                                   refresh: refresh, onUsage: onUsage, onAccount: onAccount)
     }
 }
 
@@ -146,6 +162,11 @@ enum CodexAccountResponse {
             throw HarnessSetupError("The harness returned an unsupported account response.")
         }
         return required ? .unauthenticated : .notRequired
+    }
+
+    /// The signed-in ChatGPT account's email address, when Codex says.
+    static func accountName(_ result: [String: Any]) -> String? {
+        HarnessAccountName.from((result["account"] as? [String: Any])?["email"])
     }
 
     static func challenge(_ result: [String: Any]) throws -> HarnessSignInChallenge {
@@ -179,17 +200,19 @@ enum CodexAccountResponse {
 
     private let refresh: Bool
     private let onUsage: (@MainActor (SubscriptionUsage) -> Void)?
+    private let onAccount: (@MainActor (String) -> Void)?
     /// The sign-in status already read while the plan limits are asked for. The
     /// limits are extra: if they cannot be read, the check still reports this.
     private var readStatus: HarnessAuthenticationStatus?
 
     init(executableURL: URL, codexHome: URL, environment: [String: String]? = nil, refresh: Bool = false,
-         onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil) {
+         onUsage: (@MainActor (SubscriptionUsage) -> Void)? = nil, onAccount: (@MainActor (String) -> Void)? = nil) {
         self.executableURL = executableURL
         self.codexHome = codexHome
         baseEnvironment = environment
         self.refresh = refresh
         self.onUsage = onUsage
+        self.onAccount = onAccount
     }
 
     func run(onChallenge: (@MainActor (HarnessSignInChallenge) -> Void)? = nil) async throws -> HarnessAuthenticationStatus {
@@ -277,7 +300,10 @@ enum CodexAccountResponse {
                     if onChallenge != nil, !loginCompleted {
                         send("account/login/start", id: 3, params: ["type": "chatgptDeviceCode"])
                         setTimeout(seconds: 30)
-                    } else if status == .authenticated, onUsage != nil {
+                        return
+                    }
+                    if status == .authenticated, let name = CodexAccountResponse.accountName(result) { onAccount?(name) }
+                    if status == .authenticated, onUsage != nil {
                         // Older Codex takes no parameters here, so none are sent.
                         readStatus = status
                         send("account/rateLimits/read", id: 5, params: nil)

@@ -8,7 +8,9 @@ which comes with Noodle and runs on your Mac.
 Noodle keeps its own sign-in for each harness, separate from the one the
 harness uses in Terminal and from a Noodle Hub on the same Mac, so signing in or
 out in one never signs the other out. Sign in once in Noodle, even if the
-harness is already signed in on this Mac.
+harness is already signed in on this Mac. To sign out, or to sign in to another
+account, click the harness's sign-in status and choose **Sign Out** or **Sign In
+Again**; bots that use the sign-in pause until you sign in again.
 
 The first time you open Noodle with no bots, the welcome offers Codex by
 OpenAI, Claude by Anthropic, Muse by Meta and Grok by xAI; the other harnesses
@@ -74,7 +76,9 @@ shows a command to paste into Terminal; run it, then choose **Check Again**.
 
 Choose the profile for a bot in **Edit Bot → Harness → Profile**; the row appears
 once that harness has a profile. **Default** is the sign-in in the harness's own
-row in **Settings → Harness**.
+row in **Settings → Harness**, shown with the Codex or Claude Code account it is
+signed in to. Click a profile's sign-in status in **Profiles** to sign it out
+without deleting it.
 
 - Grok Build sign-ins expire after seven days; sign the profile in again from
   **Profiles**.

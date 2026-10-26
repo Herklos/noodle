@@ -614,6 +614,19 @@ private final class HostSession: NSObject, AgentHostService {
         }
     }
 
+    /// Only this app's own login for the profile goes. The folder derives from the
+    /// identifier, so the caller cannot name the person's own login or another app's.
+    func signOutProfile(profileID: String, withReply reply: @escaping (String?) -> Void) {
+        queue.async {
+            do {
+                guard let id = UUID(uuidString: profileID) else { throw HostError("Invalid profile identifier.") }
+                let profiles = HostPaths.profiles
+                try profiles.signOut(try profiles.validated(id))
+                reply(nil)
+            } catch { reply(error.localizedDescription) }
+        }
+    }
+
     /// Codex reports its account over its own app-server protocol, not a login
     /// command. The app runs this itself for a Codex it can execute; a copy Noodle
     /// installed sits in the app's container, where only this host can run it.
@@ -623,12 +636,13 @@ private final class HostSession: NSObject, AgentHostService {
         codexAccount = Task { @MainActor [weak self] in
             let provider = CodexSetupProvider(codexHome: home, environment: environment)
             let installation = HarnessInstallation(provider: .codex, executablePath: executable.path)
-            // Only plan limits cross back, never anything from the login itself.
+            // Only plan limits and the account's email address cross back, never the login itself.
             if !signIn {
                 provider.onUsage = { usage in
                     if let data = try? JSONEncoder().encode(usage) { self?.client?.accountUsage(data) }
                 }
             }
+            provider.onAccount = { self?.client?.accountName($0) }
             do {
                 let status = try await signIn
                     ? provider.signIn(for: installation) { self?.client?.signInChallenge($0.url.absoluteString, code: $0.code) }
@@ -679,7 +693,7 @@ private final class HostSession: NSObject, AgentHostService {
             case .antigravity:
                 return try AntigravityInspection.authenticated(executable: executable, environment: environment)
             case .claudeCode:
-                return try self.claudeAuthenticationStatus(executable, environment: environment)
+                return try self.claudeAuthenticationStatus(executable, environment: environment) { self.client?.accountName($0) }
             case .fx:
                 return try FxInspection.status(executable: executable, environment: environment).authenticated
             case .openCode:
@@ -769,7 +783,9 @@ private final class HostSession: NSObject, AgentHostService {
         }
     }
 
-    private func claudeAuthenticationStatus(_ executable: URL, environment: [String: String]? = nil) throws -> Bool {
+    /// `onAccount` hears the signed-in account's email address, the only detail of the login that leaves the host.
+    private func claudeAuthenticationStatus(_ executable: URL, environment: [String: String]? = nil,
+                                            onAccount: ((String) -> Void)? = nil) throws -> Bool {
         let process = Process(), output = Pipe()
         process.executableURL = executable
         process.arguments = ["auth", "status", "--json"]
@@ -785,6 +801,7 @@ private final class HostSession: NSObject, AgentHostService {
               let loggedIn = object["loggedIn"] as? Bool else {
             throw HostError("Claude Code returned an unsupported account response.")
         }
+        if loggedIn, let email = HarnessAccountName.from(object["email"]) { onAccount?(email) }
         return loggedIn
     }
 }

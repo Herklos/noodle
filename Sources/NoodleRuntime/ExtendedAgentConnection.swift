@@ -9,6 +9,7 @@ public final class ExtendedAgentConnection: NSObject, AgentHostClient {
     public var onFailure: ((String) -> Void)?
     var onSignInChallenge: ((String, String) -> Void)?
     var onAccountUsage: ((Data) -> Void)?
+    var onAccountName: ((String) -> Void)?
     private var stopping = false
 
     public init(bundle: Bundle = .main) throws {
@@ -121,10 +122,14 @@ public final class ExtendedAgentConnection: NSObject, AgentHostClient {
         proxy(failure: { reply(false, $0) })?.signInProfile(
             profileID: profile.uuidString, executablePath: executablePath, withReply: reply)
     }
+    func signOutProfile(profile: UUID, reply: @escaping (String?) -> Void) {
+        proxy(failure: { reply($0) })?.signOutProfile(profileID: profile.uuidString, withReply: reply)
+    }
     public func receive(_ data: Data, isError: Bool) { onData?(data, isError) }
     public func terminated(_ status: Int32) { onExit?(status) }
     public func signInChallenge(_ url: String, code: String) { onSignInChallenge?(url, code) }
     public func accountUsage(_ data: Data) { onAccountUsage?(data) }
+    public func accountName(_ name: String) { onAccountName?(name) }
     func fxModels(executablePath: String, reply: @escaping (Data?, String?) -> Void) {
         proxy(failure: { reply(nil, $0) })?.fxModels(executablePath: executablePath, withReply: reply)
     }
