@@ -4,7 +4,12 @@
 
 ### Added
 
+- On iPad and the unfolded iPhone Duo, your bots and groups are in a column on the left, with the pinned ones on top, and the chat you open shows beside them, as on the Mac. A tapped notification, widget or link opens its chat there too. Folding or unfolding the iPhone Duo keeps the chat you had open.
 - On the iPhone Duo's cover screen, your pinned bots and groups are in the bar on the right, under the time, instead of above the list. Tap one to open its chat, or touch and hold it for its menu. A dot marks one with unread replies, and pins that don't fit are in the bar's … menu.
+
+### Changed
+
+- In a wide chat, as on iPad, messages stay a readable width instead of stretching across the screen.
 
 ### Fixed
 
@@ -12,6 +17,8 @@
 
 ### What to Test
 
+- On iPad or an unfolded iPhone Duo: check the bots are in a column on the left, the pinned ones on top, and No Conversation Selected on the right. Tap a bot: check its chat opens on the right and its row is marked. Tap a notification, or a bot in a widget: check its chat opens on the right. In a group, tap a bot's picture and choose Message: check its chat opens on the right. With a chat open, fold the iPhone Duo: check it stays open on the cover screen; unfold it: check it shows on the right. On an iPhone, upright and on its side, check the list and chats work as before.
+- In a chat on iPad, send a long message: check it wraps at a readable width rather than across the whole chat.
 - On an iPhone Duo, folded, pin three bots: check they show in the bar on the right, under the time, and not above the list, with a dot on one with unread replies. Tap one: check its chat opens. Touch and hold one: check its menu shows, with Unpin. Pin ten: check the ones that don't fit are in the bar's … menu. Unfold it, or use another iPhone: check the pins are above the list as before.
 - On an iPhone Duo, folded and not paired: check the wordmark is centred above Pair. Tap Pair: check its buttons are centred in the sheet. Once paired, tap …: check its buttons are centred too. On another iPhone, check the pairing screen and these sheets look as before.
 

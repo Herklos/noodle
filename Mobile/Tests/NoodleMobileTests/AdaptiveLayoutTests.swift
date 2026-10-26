@@ -32,11 +32,104 @@ import Testing
     /// Beside the vertical bar the pinned bots move into it, out of the list; without one the list shows
     /// them, as on any iPhone.
     @Test func pinnedBotsGoInTheVerticalBar() {
-        #expect(HomeLayout.choose(verticalBar: .trailing) == .stackBesideBar)
-        #expect(HomeLayout.choose(verticalBar: .leading) == .stackBesideBar)
+        #expect(HomeLayout.choose(size: Self.cover, verticalBar: .trailing) == .stackBesideBar)
+        #expect(HomeLayout.choose(size: Self.cover, verticalBar: .leading) == .stackBesideBar)
         #expect(!HomeLayout.stackBesideBar.pinsInList)
-        #expect(HomeLayout.choose(verticalBar: nil) == .stack)
+        #expect(HomeLayout.choose(size: Self.cover, verticalBar: nil) == .stack)
         #expect(HomeLayout.stack.pinsInList)
+    }
+
+    /// The cover screen's room beside the vertical bar, and the inner screen's, unfolded, in points inside the safe area.
+    static let cover = CGSize(width: 382, height: 562), inner = CGSize(width: 951, height: 621)
+
+    /// The unfolded iPhone Duo and iPad show the list and a conversation side by side, with the pinned bots in
+    /// the list; an iPhone keeps one column, upright or on its side.
+    @Test func wideScreensShowTwoColumns() {
+        #expect(HomeLayout.choose(size: Self.inner, verticalBar: nil) == .split)
+        #expect(HomeLayout.choose(size: Self.inner, verticalBar: .trailing) == .split)
+        #expect(HomeLayout.split.pinsInList)
+        // iPad mini upright, and a large iPad on its side.
+        #expect(HomeLayout.choose(size: CGSize(width: 744, height: 1069), verticalBar: nil) == .split)
+        #expect(HomeLayout.choose(size: CGSize(width: 1366, height: 980), verticalBar: nil) == .split)
+        // An iPhone Pro Max upright and on its side, and an iPad window in a third of the screen.
+        #expect(HomeLayout.choose(size: CGSize(width: 440, height: 868), verticalBar: nil) == .stack)
+        #expect(HomeLayout.choose(size: CGSize(width: 838, height: 419), verticalBar: nil) == .stack)
+        #expect(HomeLayout.choose(size: CGSize(width: 320, height: 980), verticalBar: nil) == .stack)
+    }
+
+    static let scout = ChatLink(hub: "Studio", thread: UUID()), house = ChatLink(hub: "Studio", thread: UUID())
+
+    /// A tapped notification, a widget or a row pushes its conversation alone over the list in one column,
+    /// and selects it beside the list in two.
+    @Test func openingAConversationSelectsItInTwoColumns() {
+        var navigation = HomeNavigation(path: [Self.house])
+        navigation.open(Self.scout, in: .stack)
+        #expect(navigation == HomeNavigation(path: [Self.scout]))
+
+        navigation = HomeNavigation(selection: Self.house)
+        navigation.open(Self.scout, in: .split)
+        #expect(navigation == HomeNavigation(selection: Self.scout))
+
+        navigation = HomeNavigation()
+        navigation.open(Self.scout, in: .stackBesideBar)
+        #expect(navigation == HomeNavigation(path: [Self.scout]))
+    }
+
+    /// A bot's profile in a group opens its conversation on top in one column, and selects it in two.
+    @Test func openingFromAConversationSelectsItInTwoColumns() {
+        var navigation = HomeNavigation(path: [Self.house])
+        navigation.openFromConversation(Self.scout, in: .stack)
+        #expect(navigation.path == [Self.house, Self.scout])
+        navigation.openFromConversation(Self.house, in: .stack)
+        #expect(navigation.path == [Self.house])
+
+        navigation = HomeNavigation(selection: Self.house)
+        navigation.openFromConversation(Self.scout, in: .split)
+        #expect(navigation == HomeNavigation(selection: Self.scout))
+    }
+
+    /// Unfolding keeps the conversation that was open, now beside the list, and folding keeps the selected one open.
+    @Test func changingLayoutKeepsTheConversationOpen() {
+        var navigation = HomeNavigation(path: [Self.house, Self.scout])
+        navigation.adapt(from: .stackBesideBar, to: .split)
+        #expect(navigation == HomeNavigation(selection: Self.scout))
+        navigation.adapt(from: .split, to: .stackBesideBar)
+        #expect(navigation == HomeNavigation(path: [Self.scout]))
+        navigation.adapt(from: .stackBesideBar, to: .stack)
+        #expect(navigation == HomeNavigation(path: [Self.scout]))
+
+        var empty = HomeNavigation()
+        empty.adapt(from: .stack, to: .split)
+        #expect(empty == HomeNavigation())
+        empty.adapt(from: .split, to: .stack)
+        #expect(empty == HomeNavigation())
+    }
+
+    /// A conversation deleted on another device closes, with any opened from it, in either layout.
+    @Test func aConversationThatIsGoneCloses() {
+        var navigation = HomeNavigation(path: [Self.house, Self.scout])
+        navigation.remove { $0 == Self.house }
+        #expect(navigation == HomeNavigation())
+
+        navigation = HomeNavigation(selection: Self.scout)
+        navigation.remove { $0 == Self.house }
+        #expect(navigation == HomeNavigation(selection: Self.scout))
+        navigation.remove { $0 == Self.scout }
+        #expect(navigation == HomeNavigation())
+    }
+
+    /// The list takes about a third of two columns, within limits.
+    @Test func theListTakesAboutAThird() {
+        #expect(SplitColumns.layout(width: 744).list == 320)
+        #expect(SplitColumns.layout(width: 1000).list == 360)
+        #expect(SplitColumns.layout(width: 1366).list == 400)
+    }
+
+    /// Messages keep the usual room beside them on a phone, and stay a readable width in a wide conversation.
+    @Test func messagesStayAReadableWidth() {
+        #expect(ReadableWidth.sideRoom(rowWidth: 369) == 48)
+        #expect(ReadableWidth.sideRoom(rowWidth: 442) == 48)
+        #expect(ReadableWidth.sideRoom(rowWidth: 942) == 942 - ReadableWidth.bubble)
     }
 
     /// Draws a view in a window whose safe area leaves `trailingInset` on the right, as the vertical bar

@@ -1402,7 +1402,10 @@ struct AgentsView: View {
     /// A tapped notification's conversation, until it opens.
     @Binding var opening: NotificationRoute?
     @Environment(\.scenePhase) private var phase
-    @State private var path: [ChatLink] = []
+    /// The conversation open, over the list or beside it.
+    @State private var navigation = HomeNavigation()
+    /// The room the screen has, which decides between one column and two.
+    @State private var size = CGSize.zero
     /// Kept per Hub, so what each Hub loaded stays while others join or leave.
     @State private var chats: [HubChats] = []
     /// The space shown: a Hub's by `CurrentHub.space`, or one the person made by its ID; empty for All.
@@ -1431,7 +1434,7 @@ struct AgentsView: View {
     /// Where the system's vertical bar is, as on the iPhone Duo's cover screen; nil without one.
     @State private var verticalBar: HorizontalEdge?
 
-    private var layout: HomeLayout { HomeLayout.choose(verticalBar: verticalBar) }
+    private var layout: HomeLayout { HomeLayout.choose(size: size, verticalBar: verticalBar) }
 
     private struct Row: Identifiable {
         let chats: HubChats
@@ -1463,147 +1466,24 @@ struct AgentsView: View {
 
     var body: some View {
         let rows = rows
-        NavigationStack(path: $path) {
-            // As in Messages: pinned bots in circles above the rest, and one plain list of matches while searching.
-            let searching = !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let found = rows.filter { $0.chats.matches($0.thread, search: search) }
-            let pinned = searching ? [] : found.filter(isPinned)
-            let others = searching ? found : found.filter { !isPinned($0) }
-            let order = searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
-            let isUnread = { (row: Row) in row.chats.countsAsUnread(row.thread) }
-            let unread = order.unread(others, isUnread: isUnread)
-            let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
-            List {
-                if !pinned.isEmpty, layout.pinsInList {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
-                        ForEach(pinned) { row in
-                            // A menu held on each circle: context menus in one list row all lift the row
-                            // and show the first circle's menu, whichever was pressed.
-                            Menu { menu(for: row) } label: {
-                                PinnedAgent(chats: row.chats, thread: row.thread, unread: row.chats.isUnread(row.thread))
-                            } primaryAction: { path = [row.id] }
-                            .buttonStyle(.plain)
-                            .menuIndicator(.hidden)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    // Room above the first row for its bubbles.
-                    .padding(.top, pinned.prefix(3).contains { $0.chats.note(for: $0.thread) != nil } ? 8 : 0)
-                    .listRowSeparator(.hidden)
-                }
-                if unread.isEmpty {
-                    agentRows(rest)
-                } else {
-                    Section("Unread") { agentRows(unread) }
-                    if !rest.isEmpty { Section("Others") { agentRows(rest) } }
+        Group {
+            if layout == .split {
+                split(rows)
+            } else {
+                NavigationStack(path: $navigation.path) {
+                    list(rows)
+                        .navigationDestination(for: ChatLink.self) { conversation($0) }
                 }
             }
-            .listStyle(.plain)
-            .readingVerticalBar($verticalBar)
-            // The saved chats still show while a Hub cannot be reached, so this says so above them.
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if !rows.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(chats.filter { $0.connectionProblem != nil }, id: \.pairing.directory) { ConnectionBanner(chats: $0) }
-                    }
-                }
-            }
-            .searchable(text: $search, prompt: "Search")
-            .overlay {
-                if searching && found.isEmpty && !rows.isEmpty {
-                    ContentUnavailableView.search(text: search)
-                } else if rows.isEmpty {
-                    if chats.isEmpty || chats.contains(where: { !$0.isLoaded && $0.error == nil }) {
-                        ProgressView()
-                    } else if let error = chats.lazy.compactMap(\.error).first {
-                        ContentUnavailableView {
-                            Label("Not Connected", systemImage: "wifi.exclamationmark")
-                        } description: {
-                            Text(error)
-                        } actions: {
-                            Button("Try Again") { for hub in chats { hub.tryAgain() } }
-                        }
-                    } else {
-                        ContentUnavailableView("No Bots", systemImage: "bubble.left.and.bubble.right")
-                    }
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: ChatLink.self) { link in
-                if let hub = chats.first(where: { CurrentHub.name(of: $0.pairing) == link.hub }) {
-                    ChatView(chats: hub, threadID: link.thread)
-                        .environment(\.joinedHubs, chats)
-                        .environment(\.openThread) { hub, thread in
-                            path = ChatLink.path(path, opening: ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread))
-                        }
-                }
-            }
-            .toolbar {
-                if !chats.isEmpty {
-                    ToolbarItem(placement: .principal) { spaceMenu }
-                }
-                // A plain button, as in Messages, not the round glass default.
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingMore = true } label: { Image(systemName: "ellipsis") }
-                        .foregroundStyle(.tint)
-                        .accessibilityLabel("More")
-                }
-                .sharedBackgroundVisibility(.hidden)
-                // Beside the vertical bar, the pinned bots are in it, under the time, as a column of pictures.
-                // What does not fit goes in the bar's own overflow menu, by name.
-                if #available(iOS 27.1, *) {
-                    if !layout.pinsInList, !pinned.isEmpty {
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            ForEach(pinned) { row in
-                                Menu { menu(for: row) } label: {
-                                    Label {
-                                        Text(row.thread.name)
-                                    } icon: {
-                                        BarPin(chats: row.chats, thread: row.thread, unread: row.chats.isUnread(row.thread))
-                                    }
-                                } primaryAction: { path = [row.id] }
-                                .menuIndicator(.hidden)
-                            }
-                        }
-                        .axisBehavior(.verticalPreferred)
-                    }
-                }
-            }
-            .wordmarkRefreshable {
-                for hub in chats {
-                    if !hub.isConnected { hub.reconnect() }
-                    try? await hub.reload()
-                }
-            }
-            .sheet(isPresented: $showingMore, onDismiss: openChosen) {
-                MoreSheet { choice in
-                    chosen = choice
-                    showingMore = false
-                }
-            }
-            .sheet(isPresented: $showingProfile) { HubsView(chats: chats) }
-            .sheet(isPresented: $showingSettings) { SettingsView(chats: chats) }
-            .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
-            // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
-            .sheet(isPresented: $creating) {
-                if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace) }
-            }
-            .sheet(isPresented: $creatingGroup) {
-                if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace) }
-            }
-            .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
-                TextField("Name", text: $spaceName)
-                Button("Cancel", role: .cancel) {}
-                Button("Create") { saveSpace() }
-                    .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .sheet(isPresented: $editingSpaces) {
-                SpaceEditor(list: spaceList,
-                            hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
-                            moveHubs: moveHubs, change: { changeSpaces($0) })
-            }
-            .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread) }
         }
+        // The room the screen has, whatever the keyboard covers, so typing never changes the layout.
+        .background {
+            Color.clear
+                .ignoresSafeArea(.keyboard)
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        }
+        // Unfolding the iPhone Duo or resizing an iPad window keeps the conversation that was open.
+        .onChange(of: layout) { old, new in navigation.adapt(from: old, to: new) }
         .onChange(of: opening, initial: true, open)
         // Pushes bring changes while the app runs; coming to the front asks as well.
         .task(id: phase == .active) {
@@ -1613,7 +1493,10 @@ struct AgentsView: View {
             }
             if phase == .active { await spaceSync?.fetch() }
         }
-        .onChange(of: chats.flatMap { $0.listedThreads.map(\.conversationID) }) { open() }
+        .onChange(of: chats.flatMap { $0.listedThreads.map(\.conversationID) }) {
+            open()
+            forgetGone()
+        }
         .onChange(of: widgetSource, initial: true) { _, source in
             if let source { BotWidgetPublisher.shared.publish(source) }
         }
@@ -1632,6 +1515,179 @@ struct AgentsView: View {
                 for hub in chats { group.addTask { await hub.follow() } }
             }
         }
+    }
+
+    /// As on the Mac: the list in a column on the left, pinned bots on top, and the open conversation beside it.
+    private func split(_ rows: [Row]) -> some View {
+        GeometryReader { proxy in
+            let columns = SplitColumns.layout(width: proxy.size.width)
+            HStack(spacing: 0) {
+                NavigationStack { list(rows) }
+                    .frame(width: columns.list)
+                Divider().ignoresSafeArea()
+                NavigationStack {
+                    if let link = navigation.selection {
+                        // Its own, so a draft or a recording stays with the conversation it was started in.
+                        conversation(link).id(link)
+                    } else {
+                        ContentUnavailableView("No Conversation Selected", systemImage: "bubble.left.and.bubble.right")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func conversation(_ link: ChatLink) -> some View {
+        if let hub = chats.first(where: { CurrentHub.name(of: $0.pairing) == link.hub }) {
+            ChatView(chats: hub, threadID: link.thread)
+                .environment(\.joinedHubs, chats)
+                .environment(\.openThread) { hub, thread in
+                    navigation.openFromConversation(ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread), in: layout)
+                }
+        }
+    }
+
+    /// A conversation deleted here or on another device, or whose Hub was left, closes, once its Hub has loaded.
+    private func forgetGone() {
+        navigation.remove { link in
+            guard let hub = chats.first(where: { CurrentHub.name(of: $0.pairing) == link.hub }) else { return true }
+            return hub.isLoaded && hub.thread(link.thread) == nil
+        }
+    }
+
+    private func list(_ rows: [Row]) -> some View {
+        // As in Messages: pinned bots in circles above the rest, and one plain list of matches while searching.
+        let searching = !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let found = rows.filter { $0.chats.matches($0.thread, search: search) }
+        let pinned = searching ? [] : found.filter(isPinned)
+        let others = searching ? found : found.filter { !isPinned($0) }
+        let order = searching ? .newestFirst : ConversationOrder(rawValue: conversationOrder) ?? .standard
+        let isUnread = { (row: Row) in row.chats.countsAsUnread(row.thread) }
+        let unread = order.unread(others, isUnread: isUnread)
+        let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
+        return List {
+            if !pinned.isEmpty, layout.pinsInList {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
+                    ForEach(pinned) { row in
+                        // A menu held on each circle: context menus in one list row all lift the row
+                        // and show the first circle's menu, whichever was pressed.
+                        Menu { menu(for: row) } label: {
+                            PinnedAgent(chats: row.chats, thread: row.thread, unread: row.chats.isUnread(row.thread))
+                        } primaryAction: { navigation.open(row.id, in: layout) }
+                        .buttonStyle(.plain)
+                        .menuIndicator(.hidden)
+                    }
+                }
+                .padding(.vertical, 8)
+                // Room above the first row for its bubbles.
+                .padding(.top, pinned.prefix(3).contains { $0.chats.note(for: $0.thread) != nil } ? 8 : 0)
+                .listRowSeparator(.hidden)
+            }
+            if unread.isEmpty {
+                agentRows(rest)
+            } else {
+                Section("Unread") { agentRows(unread) }
+                if !rest.isEmpty { Section("Others") { agentRows(rest) } }
+            }
+        }
+        .listStyle(.plain)
+        .readingVerticalBar($verticalBar)
+        // The saved chats still show while a Hub cannot be reached, so this says so above them.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !rows.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(chats.filter { $0.connectionProblem != nil }, id: \.pairing.directory) { ConnectionBanner(chats: $0) }
+                }
+            }
+        }
+        .searchable(text: $search, prompt: "Search")
+        .overlay {
+            if searching && found.isEmpty && !rows.isEmpty {
+                ContentUnavailableView.search(text: search)
+            } else if rows.isEmpty {
+                if chats.isEmpty || chats.contains(where: { !$0.isLoaded && $0.error == nil }) {
+                    ProgressView()
+                } else if let error = chats.lazy.compactMap(\.error).first {
+                    ContentUnavailableView {
+                        Label("Not Connected", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Try Again") { for hub in chats { hub.tryAgain() } }
+                    }
+                } else {
+                    ContentUnavailableView("No Bots", systemImage: "bubble.left.and.bubble.right")
+                }
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !chats.isEmpty {
+                ToolbarItem(placement: .principal) { spaceMenu }
+            }
+            // A plain button, as in Messages, not the round glass default.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showingMore = true } label: { Image(systemName: "ellipsis") }
+                    .foregroundStyle(.tint)
+                    .accessibilityLabel("More")
+            }
+            .sharedBackgroundVisibility(.hidden)
+            // Beside the vertical bar, the pinned bots are in it, under the time, as a column of pictures.
+            // What does not fit goes in the bar's own overflow menu, by name.
+            if #available(iOS 27.1, *) {
+                if !layout.pinsInList, !pinned.isEmpty {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        ForEach(pinned) { row in
+                            Menu { menu(for: row) } label: {
+                                Label {
+                                    Text(row.thread.name)
+                                } icon: {
+                                    BarPin(chats: row.chats, thread: row.thread, unread: row.chats.isUnread(row.thread))
+                                }
+                            } primaryAction: { navigation.open(row.id, in: layout) }
+                            .menuIndicator(.hidden)
+                        }
+                    }
+                    .axisBehavior(.verticalPreferred)
+                }
+            }
+        }
+        .wordmarkRefreshable {
+            for hub in chats {
+                if !hub.isConnected { hub.reconnect() }
+                try? await hub.reload()
+            }
+        }
+        .sheet(isPresented: $showingMore, onDismiss: openChosen) {
+            MoreSheet { choice in
+                chosen = choice
+                showingMore = false
+            }
+        }
+        .sheet(isPresented: $showingProfile) { HubsView(chats: chats) }
+        .sheet(isPresented: $showingSettings) { SettingsView(chats: chats) }
+        .fullScreenCover(isPresented: $showingConsole) { ConsoleView(hubs: chats) }
+        // On the Hub whose space is shown, so the new bot or group shows there; its Hub picker still offers the others.
+        .sheet(isPresented: $creating) {
+            if let hub = spaceChats ?? chats.first { AgentEditor(chats: hub, agent: nil, hubs: chats, created: joinShownSpace) }
+        }
+        .sheet(isPresented: $creatingGroup) {
+            if let hub = spaceChats ?? chats.first { GroupEditor(chats: hub, group: nil, hubs: chats, created: joinShownSpace) }
+        }
+        .alert("New Space", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
+            TextField("Name", text: $spaceName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") { saveSpace() }
+                .disabled(spaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .sheet(isPresented: $editingSpaces) {
+            SpaceEditor(list: spaceList,
+                        hubs: spaceHubs.map { SpaceEditor.Hub(key: CurrentHub.space(of: $0.pairing), name: $0.pairing.hubName) },
+                        moveHubs: moveHubs, change: { changeSpaces($0) })
+        }
+        .sheet(item: $editing) { row in ThreadEditor(chats: row.chats, thread: row.thread) }
     }
 
     /// All, a space for each joined Hub with its bots and groups alone and the pins it keeps, then the spaces the person made.
@@ -1708,14 +1764,28 @@ struct AgentsView: View {
         }
     }
 
+    /// A row pushes its conversation over the list in one column; in two it selects it, shown beside the list
+    /// and marked in it, as on the Mac.
+    @ViewBuilder
+    private func rowLink(_ row: Row, _ label: AgentRow) -> some View {
+        if layout == .split {
+            let selected = navigation.selection == row.id
+            Button { navigation.open(row.id, in: layout) } label: { label.contentShape(.rect) }
+                .buttonStyle(.plain)
+                .listRowBackground(selected ? Color.accentColor.opacity(0.15) : nil)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+        } else {
+            NavigationLink(value: row.id) { label }
+        }
+    }
+
     private func agentRows(_ rows: [Row]) -> some View {
         ForEach(rows) { row in
-            NavigationLink(value: row.id) {
-                AgentRow(chats: row.chats, thread: row.thread, latest: row.chats.latestMessage(of: row.thread),
-                         unread: row.chats.isUnread(row.thread),
-                         muted: row.chats.isMuted(row.thread),
-                         hub: chats.count > 1 && spaceChats == nil ? row.chats.pairing.hubName : nil)
-            }
+            rowLink(row,
+                    AgentRow(chats: row.chats, thread: row.thread, latest: row.chats.latestMessage(of: row.thread),
+                             unread: row.chats.isUnread(row.thread),
+                             muted: row.chats.isMuted(row.thread),
+                             hub: chats.count > 1 && spaceChats == nil ? row.chats.pairing.hubName : nil))
             // As in Messages: dividers between rows, none above the first.
             .listRowSeparator(row.id == rows.first?.id ? .hidden : .visible, edges: .top)
             // Room for the unread dot, as far from the edge as from the picture.
@@ -1821,7 +1891,7 @@ struct AgentsView: View {
         guard let route = opening,
               let hub = chats.first(where: { PushTopic.topic(for: $0.pairing) == route.topic }),
               let thread = hub.listedThreads.first(where: { $0.conversationID == route.conversation }) else { return }
-        path = [ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread.id)]
+        navigation.open(ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread.id), in: layout)
         opening = nil
         if Self.startsCall(route, to: thread, calling: hub.calls.call?.threadID) {
             hub.calls.start(threadID: thread.id, conversationID: thread.conversationID, name: thread.name)
@@ -2436,6 +2506,8 @@ struct ChatView: View {
     @State private var homeBar: CGFloat = 0
     /// Whether the keyboard is up, when the composer sits just above it rather than as low as search.
     @State private var keyboardUp = false
+    /// How wide the conversation is, which in a wide one holds messages to a readable width.
+    @State private var width: CGFloat = 0
     /// The bot whose profile is open from its picture in a group, and what was picked there, done once the profile has gone.
     @State private var profile: LinkBot?
     @State private var profileChoice: (action: AgentProfile.Action, bot: LinkBot)?
@@ -2486,7 +2558,8 @@ struct ChatView: View {
                         } else {
                             Bubble(chats: chats, thread: thread, message: message, author: authors[message.id],
                                    avatar: avatars[message.id].flatMap(chats.agent), besideAvatars: thread.group != nil,
-                                   delivery: message.id == latestOwn || chats.isUnsent(message) ? chats.delivery(of: message) : nil)
+                                   delivery: message.id == latestOwn || chats.isUnsent(message) ? chats.delivery(of: message) : nil,
+                                   sideRoom: ReadableWidth.sideRoom(rowWidth: width - 24))
                         }
                         // What was said on a call after this message and before the next.
                         if let block = blocks[message.id] { CallBlockRow(name: thread.name, block: block) }
@@ -2503,6 +2576,7 @@ struct ChatView: View {
         }
         .modifier(ConversationScrolling(latest: messages.last))
         .scrollDismissesKeyboard(.interactively)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .background { ConversationBackdrop(background: chats.background(for: thread), imageURL: chats.backgroundImageURL(for: thread)) }
         // Open means read, including replies that arrive while it is open.
         .onAppear {
@@ -3096,6 +3170,8 @@ private struct Bubble: View {
     let besideAvatars: Bool
     /// Shown under your latest message, and under any that did not go through.
     let delivery: String?
+    /// The room kept beside the message, on the side away from its author.
+    var sideRoom = ReadableWidth.sideRoom
     @State private var expanded = false
     /// The bubble being pressed, and where each of the message's bubbles is on screen.
     @State private var pressing: Int?
@@ -3121,7 +3197,7 @@ private struct Bubble: View {
         case .you:
             let failed = unsentActions(message)
             HStack {
-                Spacer(minLength: 48)
+                Spacer(minLength: sideRoom)
                 // As in Messages, a message that did not go through has a red mark beside it, offering what to do.
                 if let failed {
                     Menu { failed.menu } label: {
@@ -3154,7 +3230,7 @@ private struct Bubble: View {
                     }
                     content(foreground: .primary, background: Color(.secondarySystemBackground))
                 }
-                Spacer(minLength: 48)
+                Spacer(minLength: sideRoom)
             }
             .padding(.top, Self.reactionOverhang - Self.rowSpacing)
         }
