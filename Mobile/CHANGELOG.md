@@ -2,35 +2,49 @@
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-26
+
+### Added
+
+- Keyboard shortcuts on iPad, as on the Mac. Hold ⌘ to see them: ⌘N for a new bot, ⇧⌘N for a new group, ⌘F to search, ⌥⌘↓ and ⌥⌘↑ for the next and previous chat, Esc to close the chat, and ⌘1 to ⌘9 for your spaces. Return sends your message and Shift-Return starts a new line. Esc closes sheets, as Cancel or Done does.
+- With a mouse or trackpad on iPad, right-click a message for its reactions and actions, as touching and holding it does. Right-click a bot or group in the list for its menu. Rows, pinned bots and the message field's buttons light up under the pointer.
+
+### Changed
+
+- On iPad, … beside the list opens a menu, as on the Mac, instead of a sheet. Settings, Hubs, a bot's or group's editor and other forms open in a sheet sized for a form instead of one as large as a page. Short sheets, such as a bot's profile in a group and Pair's, are only as tall as their buttons. The Pair button and the welcome after pairing keep an iPhone's width in the middle of the screen. Open on iPad in a noodlet's menu shows an iPad.
+
+### Fixed
+
+- In Play on a 13-inch iPad on its side, the menu over a game is laid out for the iPad, not for a TV.
+- Resizing Noodle on iPad in Split View or Stage Manager, between the list beside the chat and the list alone, no longer closes Settings, a bot's editor or another sheet opened from the list, or drops the files waiting to be sent in the chat. Files waiting to be sent also stay when you leave a chat and come back to it, as its draft does.
+
+### What to Test
+
+- On iPad with a keyboard: hold ⌘ and check the shortcuts show. Press ⌥⌘↓ and ⌥⌘↑: check the chats open one after another, in the list's order. Press Esc: check the chat closes. Press ⌘F: check the search field takes your typing. Press ⌘N and ⇧⌘N: check New Bot and New Group open, and Esc closes them. With two Hubs, press ⌘2: check the first Hub's space shows. In a chat, type and press Return: check it sends; press Shift-Return: check it starts a new line. With the on-screen keyboard, check return still starts a new line.
+- On iPad with a mouse or trackpad: move the pointer over the list's rows, the pinned bots and the buttons beside the message field: check each lights up. Right-click a message: check its reactions and actions show, as after touching and holding it. Right-click a row and a pinned bot: check their menus show. Touch and hold a message with a finger: check it still works.
+- On iPad, upright and on its side: tap … beside the list: check a menu opens, and each item opens what it names. Open Settings, Hubs, New Bot and a bot's Edit: check each is a form-sized sheet, not a page-sized one. In a group, tap a bot's picture: check its profile sheet is only as tall as its buttons. Leave all Hubs: check the Pair button is about as wide as on an iPhone, in the middle; tap it: check its sheet is short. In Play, open the menu over a game on a 13-inch iPad on its side: check the cards look as on a smaller iPad. On an iPhone, check … still opens the sheet and these screens look as before.
+- On iPad, open a chat, add a photo without sending it, and open Settings. In Split View or Stage Manager, make the window narrow, then wide again, from a third of the screen to all of it: check Settings stays open, the chat stays open beside or over the list, and the photo still waits above the message field. On an iPhone, add a photo to a chat, go back to the list and open the chat again: check the photo still waits.
+
 ## [0.47.0] - 2026-10-26
 
 ### Added
 
 - On iPad and the unfolded iPhone Duo, your bots and groups are in a column on the left, with the pinned ones on top, and the chat you open shows beside them, as on the Mac. On the iPhone Duo the fold runs between the two, with nothing on it. A tapped notification, widget or link opens its chat there too. Folding or unfolding the iPhone Duo keeps the chat you had open.
 - On the iPhone Duo's cover screen, your pinned bots and groups are in the bar on the right, under the time, instead of above the list. Tap one to open its chat, or touch and hold it for its menu. A dot marks one with unread replies, and pins that don't fit are in the bar's … menu.
-- Keyboard shortcuts on iPad, as on the Mac. Hold ⌘ to see them: ⌘N for a new bot, ⇧⌘N for a new group, ⌘F to search, ⌥⌘↓ and ⌥⌘↑ for the next and previous chat, Esc to close the chat, and ⌘1 to ⌘9 for your spaces. Return sends your message and Shift-Return starts a new line. Esc closes sheets, as Cancel or Done does.
-- With a mouse or trackpad on iPad, right-click a message for its reactions and actions, as touching and holding it does. Right-click a bot or group in the list for its menu. Rows, pinned bots and the message field's buttons light up under the pointer.
 
 ### Changed
 
 - In a wide chat, as on iPad, messages stay a readable width instead of stretching across the screen.
-- On iPad, … beside the list opens a menu, as on the Mac, instead of a sheet. Settings, Hubs, a bot's or group's editor and other forms open in a sheet sized for a form instead of one as large as a page. Short sheets, such as a bot's profile in a group and Pair's, are only as tall as their buttons. The Pair button and the welcome after pairing keep an iPhone's width in the middle of the screen. Open on iPad in a noodlet's menu shows an iPad.
 
 ### Fixed
 
 - On the iPhone Duo's cover screen, the Noodle wordmark on the pairing screen is centred above the Pair button, and short sheets, such as Pair's and the one … opens, are centred under their grabber instead of off to the left of the bar with the time.
-- In Play on a 13-inch iPad on its side, the menu over a game is laid out for the iPad, not for a TV.
-- Resizing Noodle on iPad in Split View or Stage Manager, between the list beside the chat and the list alone, no longer closes Settings, a bot's editor or another sheet opened from the list, or drops the files waiting to be sent in the chat. Files waiting to be sent also stay when you leave a chat and come back to it, as its draft does.
 
 ### What to Test
 
 - On iPad or an unfolded iPhone Duo: check the bots are in a column on the left, the pinned ones on top, and No Conversation Selected on the right. Tap a bot: check its chat opens on the right and its row is marked. Tap a notification, or a bot in a widget: check its chat opens on the right. In a group, tap a bot's picture and choose Message: check its chat opens on the right. On the iPhone Duo, check the fold runs between the list and the chat, with no text or button on it. With a chat open, fold it: check the chat stays open on the cover screen; unfold it: check it shows on the right. On an iPhone, upright and on its side, check the list and chats work as before.
 - In a chat on iPad, send a long message: check it wraps at a readable width rather than across the whole chat.
 - On an iPhone Duo, folded, pin three bots: check they show in the bar on the right, under the time, and not above the list, with a dot on one with unread replies. Tap one: check its chat opens. Touch and hold one: check its menu shows, with Unpin. Pin ten: check the ones that don't fit are in the bar's … menu. Unfold it, or use another iPhone: check the pins are above the list as before.
-- On iPad with a keyboard: hold ⌘ and check the shortcuts show. Press ⌥⌘↓ and ⌥⌘↑: check the chats open one after another, in the list's order. Press Esc: check the chat closes. Press ⌘F: check the search field takes your typing. Press ⌘N and ⇧⌘N: check New Bot and New Group open, and Esc closes them. With two Hubs, press ⌘2: check the first Hub's space shows. In a chat, type and press Return: check it sends; press Shift-Return: check it starts a new line. With the on-screen keyboard, check return still starts a new line.
-- On iPad with a mouse or trackpad: move the pointer over the list's rows, the pinned bots and the buttons beside the message field: check each lights up. Right-click a message: check its reactions and actions show, as after touching and holding it. Right-click a row and a pinned bot: check their menus show. Touch and hold a message with a finger: check it still works.
-- On iPad, upright and on its side: tap … beside the list: check a menu opens, and each item opens what it names. Open Settings, Hubs, New Bot and a bot's Edit: check each is a form-sized sheet, not a page-sized one. In a group, tap a bot's picture: check its profile sheet is only as tall as its buttons. Leave all Hubs: check the Pair button is about as wide as on an iPhone, in the middle; tap it: check its sheet is short. In Play, open the menu over a game on a 13-inch iPad on its side: check the cards look as on a smaller iPad. On an iPhone, check … still opens the sheet and these screens look as before.
-- On iPad, open a chat, add a photo without sending it, and open Settings. In Split View or Stage Manager, make the window narrow, then wide again, from a third of the screen to all of it: check Settings stays open, the chat stays open beside or over the list, and the photo still waits above the message field. On an iPhone, add a photo to a chat, go back to the list and open the chat again: check the photo still waits.
 - On an iPhone Duo, folded and not paired: check the wordmark is centred above Pair. Tap Pair: check its buttons are centred in the sheet. Once paired, tap …: check its buttons are centred too. On another iPhone, check the pairing screen and these sheets look as before.
 
 ## [0.46.1] - 2026-10-26
