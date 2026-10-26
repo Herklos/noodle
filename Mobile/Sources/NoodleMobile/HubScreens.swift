@@ -22,13 +22,7 @@ struct JoinView: View {
 
     var body: some View {
         ZStack {
-            Wordmark(progress: written ? 1 : 0, wordWidth: 220)
-                .stroke(.primary, style: StrokeStyle(
-                    lineWidth: Wordmark.lineWidth(forWordWidth: 220), lineCap: .round, lineJoin: .round))
-                .ignoresSafeArea()
-                .accessibilityElement()
-                .accessibilityLabel("Noodle")
-                .accessibilityAddTraits(.isHeader)
+            PairingWordmark(progress: written ? 1 : 0)
             VStack(spacing: 16) {
                 Spacer()
                 if let joining = hubs.joining {
@@ -63,6 +57,24 @@ struct JoinView: View {
                 withAnimation(.easeOut(duration: 0.5).delay(4.05)) { ready = true }
             }
         }
+    }
+}
+
+/// The wordmark on the pairing screen and on the welcome after it, which takes over from it in place.
+/// It is centred down the whole screen, but across only the safe area, as the Pair button is: beside the
+/// iPhone Duo's vertical bar the two line up, rather than the wordmark sitting under the bar's half.
+struct PairingWordmark: View {
+    static let wordWidth: CGFloat = 220
+    let progress: Double
+
+    var body: some View {
+        Wordmark(progress: progress, wordWidth: Self.wordWidth)
+            .stroke(.primary, style: StrokeStyle(
+                lineWidth: Wordmark.lineWidth(forWordWidth: Self.wordWidth), lineCap: .round, lineJoin: .round))
+            .ignoresSafeArea(edges: .vertical)
+            .accessibilityElement()
+            .accessibilityLabel("Noodle")
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -455,6 +467,7 @@ struct PairingSources: View {
         }
         .controlSize(.large)
         .padding(24)
+        .centredInSheet()
         .presentationDetents([.height(Self.height)])
         .presentationDragIndicator(.visible)
     }

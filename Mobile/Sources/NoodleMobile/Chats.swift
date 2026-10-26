@@ -1892,6 +1892,7 @@ struct MoreSheet: View {
         .buttonStyle(.bordered)
         .controlSize(.large)
         .padding(24)
+        .centredInSheet()
         .presentationDetents([.height(356)])
         .presentationDragIndicator(.visible)
     }
@@ -3030,6 +3031,7 @@ struct AgentProfile: View {
             .controlSize(.large)
         }
         .padding(24)
+        .centredInSheet()
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
     }

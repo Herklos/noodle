@@ -82,8 +82,6 @@ struct HubWelcomeView: View {
         _welcome = State(initialValue: HubWelcome(pairing: pairing))
     }
 
-    /// As on the pairing screen, so the wordmark stays put when this one takes over.
-    private static let wordWidth: CGFloat = 220
     private static let liftedScale: CGFloat = 0.6
     private static let liftedCentre: CGFloat = 48
 
@@ -91,15 +89,10 @@ struct HubWelcomeView: View {
         GeometryReader { proxy in
             let screenHeight = proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
             ZStack {
-                Wordmark(progress: 1, wordWidth: Self.wordWidth)
-                    .stroke(.primary, style: StrokeStyle(
-                        lineWidth: Wordmark.lineWidth(forWordWidth: Self.wordWidth), lineCap: .round, lineJoin: .round))
+                // As on the pairing screen, so the wordmark stays put when this one takes over.
+                PairingWordmark(progress: 1)
                     .scaleEffect(lifted ? Self.liftedScale : 1)
                     .offset(y: lifted ? proxy.safeAreaInsets.top + Self.liftedCentre - screenHeight / 2 : 0)
-                    .ignoresSafeArea()
-                    .accessibilityElement()
-                    .accessibilityLabel("Noodle")
-                    .accessibilityAddTraits(.isHeader)
                 if lifted {
                     VStack(spacing: 32) {
                         Spacer().frame(height: Self.liftedCentre + 24)

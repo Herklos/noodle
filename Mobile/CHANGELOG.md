@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- On the iPhone Duo's cover screen, the Noodle wordmark on the pairing screen is centred above the Pair button, and short sheets, such as Pair's and the one … opens, are centred under their grabber instead of off to the left of the bar with the time.
+
+### What to Test
+
+- On an iPhone Duo, folded and not paired: check the wordmark is centred above Pair. Tap Pair: check its buttons are centred in the sheet. Once paired, tap …: check its buttons are centred too. On another iPhone, check the pairing screen and these sheets look as before.
+
 ## [0.46.1] - 2026-10-26
 
 ### Fixed
