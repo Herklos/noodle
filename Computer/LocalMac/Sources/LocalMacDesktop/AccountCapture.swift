@@ -25,47 +25,59 @@ import OSLog
         guard stream == nil, starting == nil else { return }
         let attempt = UUID(); starting = attempt
         defer { if starting == attempt { starting = nil; onChange?() } }
+        var retries = 0
         do {
-            try session.verifyCurrent()
-            try LocalMacCapturePolicy.validateProtectedDisplays(protectedDisplayIDs)
-            guard CGPreflightScreenCaptureAccess() else {
-                let name = LocalMacIdentity.desktop(Bundle.main.bundleIdentifier)?.desktopAppName ?? "Noodle Local Mac Desktop"
-                throw LocalMacError("Allow Screen Recording for \(name), then reconnect.")
+            while true {
+                do { try await open(attempt: attempt, protectedDisplayIDs: protectedDisplayIDs); return }
+                catch let failure as NSError where failure.domain == SCStreamErrorDomain {
+                    guard let delay = LocalMacCapturePolicy.retryDelay(code: failure.code, attempt: retries,
+                        accessGranted: CGPreflightScreenCaptureAccess()) else { throw failure }
+                    log.error("Capture start declined, retrying in \(delay, privacy: .public): \(failure.localizedDescription, privacy: .public)")
+                    retries += 1
+                    try await Task.sleep(for: delay)
+                    guard starting == attempt else { return }
+                }
             }
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-            guard starting == attempt else { return }
-            try session.verifyCurrent()
-            let candidates = content.displays.filter {
-                (try? LocalMacCapturePolicy.validate(displayID: $0.displayID,
-                    isBuiltin: CGDisplayIsBuiltin($0.displayID) != 0, protectedIDs: protectedDisplayIDs)) != nil
-            }
-            guard candidates.count == 1, let display = candidates.first else {
-                let seen = content.displays.map { LocalMacCapturePolicy.SeenDisplay(id: $0.displayID,
-                    isBuiltin: CGDisplayIsBuiltin($0.displayID) != 0, width: $0.width, height: $0.height) }
-                let report = LocalMacCapturePolicy.noSingleDisplay(seen, protectedIDs: protectedDisplayIDs)
-                log.error("\(report.log, privacy: .public)")
-                throw LocalMacError(report.message)
-            }
-            displayID = display.displayID; bounds = display.frame; protectedIDs = protectedDisplayIDs
-            let filter = SCContentFilter(display: display, excludingWindows: [])
-            let config = SCStreamConfiguration()
-            config.width = session.account.display.width; config.height = session.account.display.height
-            config.scalesToFit = true; config.preservesAspectRatio = true
-            config.pixelFormat = kCVPixelFormatType_32BGRA; config.colorSpaceName = CGColorSpace.sRGB
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-            config.queueDepth = 3; config.capturesAudio = false; config.showsCursor = true
-            let created = SCStream(filter: filter, configuration: config, delegate: self)
-            try created.addStreamOutput(self, type: .screen, sampleHandlerQueue: .main)
-            stream = created
-            try await created.startCapture()
-            guard starting == attempt, stream === created else { try? await created.stopCapture(); return }
-            error = nil
-            log.info("Capture started: desktop \(display.width) × \(display.height), output \(config.width) × \(config.height)")
         } catch {
             guard starting == attempt else { return }
             stream = nil; output.endFrames(stream: nil); displayID = nil; bounds = .zero
             self.error = error.localizedDescription
         }
+    }
+    private func open(attempt: UUID, protectedDisplayIDs: [UInt32]) async throws {
+        stream = nil; output.endFrames(stream: nil); displayID = nil; bounds = .zero
+        try session.verifyCurrent()
+        try LocalMacCapturePolicy.validateProtectedDisplays(protectedDisplayIDs)
+        guard CGPreflightScreenCaptureAccess() else {
+            let name = LocalMacIdentity.desktop(Bundle.main.bundleIdentifier)?.desktopAppName ?? "Noodle Local Mac Desktop"
+            throw LocalMacError("Allow Screen Recording for \(name), then reconnect.")
+        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard starting == attempt else { return }
+        try session.verifyCurrent()
+        let seen = content.displays.map { LocalMacCapturePolicy.SeenDisplay(id: $0.displayID,
+            isBuiltin: CGDisplayIsBuiltin($0.displayID) != 0, width: $0.width, height: $0.height) }
+        guard let selected = LocalMacCapturePolicy.select(seen, sessionMain: CGMainDisplayID(), protectedIDs: protectedDisplayIDs),
+              let display = content.displays.first(where: { $0.displayID == selected }) else {
+            let report = LocalMacCapturePolicy.noSingleDisplay(seen, protectedIDs: protectedDisplayIDs)
+            log.error("\(report.log, privacy: .public)")
+            throw LocalMacError(report.message)
+        }
+        displayID = display.displayID; bounds = display.frame; protectedIDs = protectedDisplayIDs
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let config = SCStreamConfiguration()
+        config.width = session.account.display.width; config.height = session.account.display.height
+        config.scalesToFit = true; config.preservesAspectRatio = true
+        config.pixelFormat = kCVPixelFormatType_32BGRA; config.colorSpaceName = CGColorSpace.sRGB
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        config.queueDepth = 3; config.capturesAudio = false; config.showsCursor = true
+        let created = SCStream(filter: filter, configuration: config, delegate: self)
+        try created.addStreamOutput(self, type: .screen, sampleHandlerQueue: .main)
+        stream = created
+        try await created.startCapture()
+        guard starting == attempt, stream === created else { try? await created.stopCapture(); return }
+        error = nil
+        log.info("Capture started: desktop \(display.width) × \(display.height), output \(config.width) × \(config.height)")
     }
 
     func stop() async {

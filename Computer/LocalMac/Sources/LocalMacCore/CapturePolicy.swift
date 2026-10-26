@@ -25,8 +25,26 @@ public enum LocalMacCapturePolicy {
             self.id = id; self.isBuiltin = isBuiltin; self.width = width; self.height = height
         }
     }
-    /// Reports what the account session saw when not exactly one display passes
-    /// `validate`, so a failure says what macOS gave it. Never picks a display.
+    /// The one display that passes `validate`. When the account can also see
+    /// another account session's display, its own session's main display
+    /// (`CGMainDisplayID` in the helper) decides; it must itself pass `validate`.
+    public static func select(_ seen: [SeenDisplay], sessionMain: UInt32, protectedIDs: [UInt32]) -> UInt32? {
+        let own = seen.filter { (try? validate(displayID: $0.id, isBuiltin: $0.isBuiltin, protectedIDs: protectedIDs)) != nil }
+        if own.count == 1 { return own[0].id }
+        return own.contains { $0.id == sessionMain } ? sessionMain : nil
+    }
+    /// ScreenCaptureKit's SCStreamError.userDeclined.
+    public static let declinedCaptureCode = -3801
+    /// tccd declines a granted helper while it is out of file descriptors, as
+    /// happens when several account sessions log in together; it recovers in
+    /// seconds. Only retried while the helper's own preflight still passes.
+    public static func retryDelay(code: Int, attempt: Int, accessGranted: Bool) -> Duration? {
+        guard code == declinedCaptureCode, accessGranted, (0..<3).contains(attempt) else { return nil }
+        return .seconds(1 << attempt)
+    }
+
+    /// Reports what the account session saw when `select` finds no display, so
+    /// a failure says what macOS gave it. Never picks a display.
     public static func noSingleDisplay(_ seen: [SeenDisplay], protectedIDs: [UInt32]) -> (message: String, log: String) {
         let own = seen.filter { (try? validate(displayID: $0.id, isBuiltin: $0.isBuiltin, protectedIDs: protectedIDs)) != nil }
         let summary = own.count > 1 ? "This account has more than one display of its own, so none is shown."

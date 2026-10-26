@@ -5,6 +5,9 @@
 ### Fixed
 
 - A Local Mac desktop no longer keeps every frame it has shown in memory. Left open for a day, it could take tens of gigabytes and slow the whole Mac down.
+- A Local Mac whose account can also see another account's display shows its own desktop instead of refusing with "more than one display of its own". The main desktop is still never captured. ([#190](https://github.com/pdparchitect/noodle/issues/190))
+- A Local Mac started alongside several others no longer stops on "The user declined TCCs" although Screen Recording is allowed. macOS briefly refuses the permission check while accounts log in, so the desktop now tries again for a few seconds.
+- When a Local Mac desktop cannot be shown, Try Again starts it again without stopping the computer.
 
 ## [0.33.3] - 2026-10-25
 

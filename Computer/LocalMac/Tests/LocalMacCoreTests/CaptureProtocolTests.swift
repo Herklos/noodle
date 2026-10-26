@@ -32,6 +32,28 @@ final class CaptureProtocolTests: XCTestCase {
         XCTAssertEqual(several.message, "This account has more than one display of its own, so none is shown.\n"
             + "Displays it sees: 5 (1280 × 800); 6 (1280 × 800); 4 (2560 × 1440, main desktop).")
     }
+    /// Issue #190: an account saw displays 14 and 15, neither the main desktop's, and refused both.
+    func testAccountsOwnMainDisplayIsChosenWhenItSeesAnotherSessionsDisplay() {
+        typealias Seen = LocalMacCapturePolicy.SeenDisplay
+        let seen = [Seen(id: 14, isBuiltin: false, width: 1920, height: 1080),
+            Seen(id: 15, isBuiltin: false, width: 1920, height: 1080), Seen(id: 2, isBuiltin: false, width: 3440, height: 1440)]
+        XCTAssertEqual(LocalMacCapturePolicy.select(seen, sessionMain: 15, protectedIDs: [2]), 15)
+        XCTAssertEqual(LocalMacCapturePolicy.select(Array(seen.prefix(1)), sessionMain: 0, protectedIDs: [2]), 14)
+        // The session's main display never overrides the main desktop, the built-in panel or an unseen display.
+        XCTAssertNil(LocalMacCapturePolicy.select(seen, sessionMain: 2, protectedIDs: [2]))
+        XCTAssertNil(LocalMacCapturePolicy.select(seen, sessionMain: 99, protectedIDs: [2]))
+        XCTAssertNil(LocalMacCapturePolicy.select(seen + [Seen(id: 1, isBuiltin: true, width: 1512, height: 982)],
+            sessionMain: 1, protectedIDs: [2]))
+    }
+    /// tccd refuses Screen Recording while it is out of file descriptors, which happened as a
+    /// fourth account logged in, although the grant was in place.
+    func testDeclinedCaptureIsRetriedOnlyWhileAccessIsGranted() {
+        let declined = LocalMacCapturePolicy.declinedCaptureCode
+        XCTAssertEqual((0..<4).map { LocalMacCapturePolicy.retryDelay(code: declined, attempt: $0, accessGranted: true) },
+            [.seconds(1), .seconds(2), .seconds(4), nil])
+        XCTAssertNil(LocalMacCapturePolicy.retryDelay(code: declined, attempt: 0, accessGranted: false))
+        XCTAssertNil(LocalMacCapturePolicy.retryDelay(code: -3802, attempt: 0, accessGranted: true))
+    }
     func testCaptureAuthorizationSurvivesWireRoundTrip() throws {
         var request = LocalMacRequest(.stream); request.enabled = true
         XCTAssertThrowsError(try request.validate())

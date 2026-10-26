@@ -101,6 +101,7 @@ struct LocalMacDesktopView: View {
                             VStack(spacing: 12) {
                                 Text(issue.message).multilineTextAlignment(.center)
                                 if issue.settings { Button("Settings…", action: openSettings) }
+                                else if runtime.canRetryCapture { Button("Try Again") { Task { await runtime.retryCapture() } } }
                             }.padding(24)
                         } else { ProgressView("Waiting for desktop…").allowsHitTesting(false) }
                     }

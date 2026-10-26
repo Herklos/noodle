@@ -148,6 +148,28 @@ import XCTest
         XCTAssertTrue(runtime.error?.contains("separate") == true)
         _ = try await helper.value
     }
+    /// A capture that failed in the helper left the desktop on its error with nothing to press,
+    /// and polling never asked again; only Stop and Start brought it back.
+    func testFailedCaptureCanBeTriedAgain() async throws {
+        let input = Pipe(), output = Pipe()
+        var failing = true
+        let helper = peer(input, output, count: 4) { request in
+            var reply = Self.reply(request, displayID: failing ? nil : 99)
+            if failing { reply.status?.detail = "The user declined TCCs" }
+            return reply
+        }
+        let runtime = LocalMacComputer(displayIDs: { [2] })
+        try await runtime.connect(input: output.fileHandleForReading, output: input.fileHandleForWriting, protectedDisplays: [2])
+        XCTAssertTrue(runtime.canRetryCapture)
+        await runtime.refreshStatus()
+        failing = false
+        await runtime.retryCapture()
+        XCTAssertFalse(runtime.canRetryCapture)
+        runtime.close()
+        let requests = try await helper.value
+        XCTAssertEqual(requests.map(\.operation), [.status, .stream, .status, .stream])
+        XCTAssertEqual(requests.last?.protectedDisplayIDs, [2])
+    }
 
     /// Answers until the client closes, for requests the client sends by itself.
     private final class RequestLog: @unchecked Sendable {

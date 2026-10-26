@@ -424,6 +424,15 @@ private final class Once<T>: @unchecked Sendable {
         do { try await startCaptureIfPermitted() }
         catch { self.error = error.localizedDescription }
     }
+    /// A capture that failed in the helper stays requested, so polling never
+    /// asks again; the person can.
+    var canRetryCapture: Bool { isConnected && captureStop == nil && status?.detail != nil && status?.displayID == nil }
+    func retryCapture() async {
+        guard canRetryCapture else { return }
+        streamRequested = false
+        do { try await startCaptureIfPermitted() }
+        catch { self.error = error.localizedDescription }
+    }
     func openWindowPreview(window selected: LocalMacWindow? = nil, bringToFront: Bool = true) async {
         guard isConnected, !disconnectExpected, status?.canControl == true,
               let window = selected ?? status?.focusedWindow else { return }
