@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.76.1] - 2026-10-26
+
 ### Fixed
 
 - The down arrow in a conversation waits until you have scrolled well above the latest message, as on iPhone, instead of showing when you are just a few lines short of it.
