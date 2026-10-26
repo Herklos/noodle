@@ -4,7 +4,10 @@ import XCTest
 @testable import Noodle
 @testable import NoodleRuntime
 
-@MainActor private final class SetupProviderFixture: HarnessSetupProviding {
+@MainActor private final class SetupProviderFixture: HarnessSetupProviding, HarnessAccountNaming {
+    var onAccount: (@MainActor (String) -> Void)?
+    /// Named by a check that finds the login signed in.
+    var account: String?
     let installationGuide = HarnessInstallationGuide(command: nil, instructions: "Fixture instructions", documentationURL: URL(string: "https://example.invalid/setup")!)
     var statusResult: HarnessAuthenticationStatus = .unauthenticated
     var statusError: Error?
@@ -17,6 +20,7 @@ import XCTest
         statusCalls.append(installation)
         if let gate = statusGate { statusGate = nil; return try await gate.value() }
         if let statusError { throw statusError }
+        if statusResult == .authenticated, let account { onAccount?(account) }
         return statusResult
     }
     func signIn(for installation: HarnessInstallation, onChallenge: @escaping @MainActor (HarnessSignInChallenge) -> Void) async throws -> HarnessAuthenticationStatus {
@@ -242,6 +246,76 @@ import XCTest
         XCTAssertEqual(c.terminalSignIns[.antigravity], "HOME='\(store.loginHome(antigravity).path)' '/fixtures/agy'")
         XCTAssertTrue(try XCTUnwrap(c.terminalSignIns[.openCode]).contains(store.loginHome(openCode).path))
         XCTAssertNotNil(c.installationGuide(for: .antigravity), "Installing still follows the vendor's guide")
+    }
+
+    /// Sign Out removes the app's own Default login for that harness alone, then the bots
+    /// that used it run again and the row reads the login again.
+    func testSignOutRemovesTheDefaultLoginOfThatHarnessOnly() async throws {
+        let f = fixture()
+        var removed: [HarnessProfile] = []
+        let c = HarnessSetupController(providers: [.codex: f.provider, .claudeCode: f.other], defaults: f.defaults,
+                                       signOut: { removed.append($0) })
+        addTeardownBlock { @MainActor in c.cancelAll() }
+        f.provider.statusResult = .authenticated; f.other.statusResult = .authenticated
+        await c.refresh([f.installation, f.claude])
+        f.provider.statusResult = .unauthenticated
+        var restarted = 0
+        c.signOut(f.installation) { restarted += 1 }
+        XCTAssertEqual(c.activity[.codex], "Signing out…")
+        c.signOut(f.installation) { restarted += 1 }
+        try await waitUntil { c.activity[.codex] == nil }
+        XCTAssertEqual(removed, [HarnessProfileStore.defaultRecord(.codex)], "Once, and only Codex's Default login")
+        XCTAssertEqual(restarted, 1)
+        XCTAssertEqual(c.authentication[.codex], .unauthenticated)
+        XCTAssertEqual(c.authentication[.claudeCode], .authenticated)
+        XCTAssertNil(c.errors[.codex])
+
+        // A harness without a login of the app's own has nothing to sign out of.
+        let apple = HarnessSetupController(providers: [.apple: AppleSetupProvider()], defaults: f.defaults, signOut: { removed.append($0) })
+        apple.signOut(HarnessInstallation(provider: .apple, executablePath: "/fixtures/apple"))
+        XCTAssertNil(apple.activity[.apple])
+        XCTAssertEqual(removed.count, 1)
+    }
+
+    func testAFailedSignOutKeepsTheLoginAndSaysWhy() async throws {
+        let f = fixture()
+        let c = HarnessSetupController(providers: [.codex: f.provider], defaults: f.defaults,
+                                       signOut: { _ in throw HarnessSetupError("Fixture refusal") })
+        f.provider.statusResult = .authenticated
+        await c.refresh([f.installation])
+        var restarted = false
+        c.signOut(f.installation) { restarted = true }
+        try await waitUntil { c.activity[.codex] == nil }
+        XCTAssertEqual(c.errors[.codex], "Fixture refusal")
+        XCTAssertEqual(c.authentication[.codex], .authenticated)
+        XCTAssertFalse(restarted, "Bots keep running on a login that is still there")
+    }
+
+    /// Where the Default login is a choice beside profiles, it reads as the account it is signed in to.
+    func testTheDefaultLoginIsNamedByItsAccount() async throws {
+        XCTAssertEqual(HarnessLoginName.defaultLogin(account: "pdp@example.com", status: .authenticated), "pdp@example.com · Default")
+        XCTAssertEqual(HarnessLoginName.defaultLogin(account: nil, status: .authenticated), "Default")
+        XCTAssertEqual(HarnessLoginName.defaultLogin(account: nil, status: .unauthenticated), "Default · not signed in")
+        XCTAssertEqual(HarnessLoginName.defaultLogin(account: nil, status: nil), "Default")
+
+        let f = fixture()
+        let c = HarnessSetupController(providers: [.codex: f.provider], defaults: f.defaults, signOut: { _ in })
+        XCTAssertEqual(c.defaultLoginName(.codex), "Default", "Signed in, but to an account not checked yet")
+        f.provider.statusResult = .authenticated; f.provider.account = "pdp@example.com"
+        await c.refresh([f.installation])
+        XCTAssertEqual(c.defaultLoginName(.codex), "pdp@example.com · Default")
+        XCTAssertFalse(String(decoding: try XCTUnwrap(f.defaults.data(forKey: HarnessPresentationCache.defaultsKey)), as: UTF8.self)
+            .contains("pdp@example.com"), "The account stays out of the presentation cache")
+        f.provider.statusResult = .unauthenticated
+        c.signOut(f.installation)
+        try await waitUntil { c.activity[.codex] == nil }
+        XCTAssertEqual(c.defaultLoginName(.codex), "Default · not signed in")
+        XCTAssertNil(c.accounts[.codex])
+    }
+
+    private func waitUntil(_ predicate: @escaping @MainActor () -> Bool) async throws {
+        for _ in 0..<2_000 where !predicate() { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(predicate())
     }
 
     func testVersionResultCannotAttachToReplacementInstallation() async {

@@ -47,10 +47,17 @@ public final class HarnessSetupController {
     @ObservationIgnored private(set) var operations: [HarnessProvider: Task<Void, Never>] = [:]
     @ObservationIgnored private var signInAttempts: [HarnessProvider: (id: UUID, installation: HarnessInstallation)] = [:]
     @ObservationIgnored private var statusChecks: [HarnessProvider: (id: UUID, installation: HarnessInstallation)] = [:]
+    /// Who each harness's default login is signed in as, when its check could tell. Kept only
+    /// while the app runs, never in the presentation cache.
+    public private(set) var accounts: [HarnessProvider: String] = [:]
+    /// The name the check under way reported, until it returns.
+    @ObservationIgnored private var reportedAccounts: [HarnessProvider: String] = [:]
+    @ObservationIgnored private let signOutLogin: @MainActor (HarnessProfile) async throws -> Void
 
+    /// `signOut` removes a default login; by default the Agent Host does, as it signs in.
     public init(providers: [HarnessProvider: any HarnessSetupProviding]? = nil, defaults: UserDefaults = .standard,
          versionChecker: (any HarnessVersionChecking)? = nil, installer: (any HarnessInstalling)? = nil,
-         profiles: HarnessProfileStore? = nil) {
+         profiles: HarnessProfileStore? = nil, signOut: (@MainActor (HarnessProfile) async throws -> Void)? = nil) {
         self.defaults = defaults
         self.versionChecker = versionChecker
         self.installer = installer
@@ -59,6 +66,15 @@ public final class HarnessSetupController {
         authentication = cached.compactMapValues(\.authentication)
         // Bots without a profile use the app's own login, so that is the one a harness's row checks and signs in.
         self.providers = providers ?? profiles.map(HarnessProfileAccounts.defaultLogins) ?? [:]
+        signOutLogin = signOut ?? { try await HarnessAccountOperation().signOut(profile: $0.id) }
+        for (id, provider) in self.providers {
+            (provider as? any HarnessAccountNaming)?.onAccount = { [weak self] in self?.reportedAccounts[id] = $0 }
+        }
+    }
+
+    /// How the default login is named where it is a choice beside a harness's profiles.
+    public func defaultLoginName(_ id: HarnessProvider) -> String {
+        HarnessLoginName.defaultLogin(account: accounts[id], status: authentication[id])
     }
 
     public var displayedInstallations: [HarnessInstallation] {
@@ -67,6 +83,8 @@ public final class HarnessSetupController {
 
     private func record(_ installation: HarnessInstallation, authentication status: HarnessAuthenticationStatus?) {
         if status != .unauthenticated { terminalSignIns[installation.provider] = nil }
+        let reported = reportedAccounts.removeValue(forKey: installation.provider)
+        accounts[installation.provider] = status == .authenticated ? reported ?? accounts[installation.provider] : nil
         let previous = snapshots[installation.provider]
         let snapshot = HarnessPresentationSnapshot(installation: installation, authentication: status,
             version: previous?.installation == installation ? previous?.version : nil)
@@ -152,6 +170,7 @@ public final class HarnessSetupController {
             let token = UUID()
             statusChecks[id] = (token, installation)
             defer { if statusChecks[id]?.id == token { retireStatusCheck(id) } }
+            reportedAccounts[id] = nil
             do {
                 let status = try await provider.status(for: installation)
                 try Task.checkCancellation()
@@ -174,6 +193,7 @@ public final class HarnessSetupController {
     /// A sign-in check without the Checking state, so a bot waiting on sign-in can ask in the background.
     public func signedIn(_ installation: HarnessInstallation) async -> Bool? {
         let id = installation.provider
+        reportedAccounts[id] = nil
         guard installation.isAvailable, operations[id] == nil, let provider = providers[id],
               let status = try? await provider.status(for: installation),
               operations[id] == nil else { return nil }
@@ -193,6 +213,7 @@ public final class HarnessSetupController {
         let token = UUID()
         signInAttempts[id] = (token, installation)
         activity[id] = "Starting sign-in…"
+        reportedAccounts[id] = nil
         operations[id] = Task { [weak self] in
             defer { self?.finishSignIn(id, token: token) }
             do {
@@ -203,6 +224,39 @@ public final class HarnessSetupController {
                 }
                 try Task.checkCancellation()
                 guard let self, self.signInAttempts[id]?.id == token else { return }
+                self.record(installation, authentication: status)
+                self.errors[id] = nil
+            } catch {
+                guard let self, self.signInAttempts[id]?.id == token else { return }
+                if !(error is CancellationError), !Task.isCancelled { self.errors[id] = error.localizedDescription }
+            }
+        }
+    }
+
+    /// Signs this app's default login for the harness out, leaving the person's own login and
+    /// every profile alone. `then` runs once the login is gone, so the bots that used it can
+    /// stop using their copies.
+    public func signOut(_ installation: HarnessInstallation, then done: @escaping @MainActor () -> Void = {}) {
+        let id = installation.provider
+        guard operations[id] == nil, id.supportsProfiles, let provider = providers[id] else { return }
+        errors[id] = nil
+        terminalSignIns[id] = nil
+        retireStatusCheck(id)
+        // Held like a sign-in, so a refresh under way cannot report the login it removes.
+        let token = UUID(), signOut = signOutLogin
+        signInAttempts[id] = (token, installation)
+        activity[id] = "Signing out…"
+        operations[id] = Task { [weak self] in
+            defer { self?.finishSignIn(id, token: token) }
+            do {
+                try await signOut(HarnessProfileStore.defaultRecord(id))
+                done()
+                guard let self, self.signInAttempts[id]?.id == token else { return }
+                self.subscriptionUsage?.forget(id, profile: nil)
+                // Read again rather than assumed: OpenCode, for one, still runs its free models.
+                self.reportedAccounts[id] = nil
+                let status = (try? await provider.status(for: installation)) ?? .unauthenticated
+                guard self.signInAttempts[id]?.id == token else { return }
                 self.record(installation, authentication: status)
                 self.errors[id] = nil
             } catch {

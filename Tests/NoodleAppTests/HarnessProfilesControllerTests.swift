@@ -34,6 +34,26 @@ import XCTest
         XCTAssertEqual(try store.load().map(\.id), [work.id])
     }
 
+    /// Sign Out keeps the profile to sign in to again, and lets its bots run again once its login is gone.
+    func testSignOutKeepsTheProfileAndRestartsItsBotsOnceTheLoginIsGone() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("harness-profiles-\(UUID())").resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        var removed: [UUID] = []
+        let controller = HarnessProfilesController(store: HarnessProfileStore(root: root), signOut: { removed.append($0.id) })
+        let work = try controller.create(provider: .codex, named: "Work")
+        let home = try controller.create(provider: .codex, named: "Home")
+        var restarted = 0
+        controller.signOut(work) { restarted += 1 }
+        XCTAssertEqual(controller.activity[work.id], "Signing out…")
+        await settle(controller, work)
+        XCTAssertEqual(removed, [work.id])
+        XCTAssertEqual(restarted, 1)
+        XCTAssertEqual(controller.authentication[work.id], .unauthenticated)
+        XCTAssertNil(controller.authentication[home.id])
+        XCTAssertEqual(Set(controller.profiles.map(\.id)), [work.id, home.id], "Signing out is not deleting")
+    }
+
     func testSignInNeedsAnInstalledHarnessThatProfilesSupport() throws {
         let (controller, _) = try controller()
         let codex = try controller.create(provider: .codex, named: "Work")

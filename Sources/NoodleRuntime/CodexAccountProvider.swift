@@ -5,7 +5,7 @@ import NoodleCore
 /// it can execute. A copy Noodle installed sits in the app's container, where
 /// the sandbox refuses the app execute access, so the Agent Host runs it instead.
 @MainActor
-public final class CodexAccountProvider: HarnessSetupProviding {
+public final class CodexAccountProvider: HarnessSetupProviding, HarnessAccountNaming {
     private let direct: CodexSetupProvider
     private let profile: UUID
     /// Makes the login's folder before it is first checked or signed in.
@@ -25,11 +25,16 @@ public final class CodexAccountProvider: HarnessSetupProviding {
         set { direct.onUsage = newValue }
     }
 
+    public var onAccount: (@MainActor (String) -> Void)? {
+        get { direct.onAccount }
+        set { direct.onAccount = newValue }
+    }
+
     public func status(for installation: HarnessInstallation) async throws -> HarnessAuthenticationStatus {
         try prepare()
         guard let path = hostPath(installation) else { return try await direct.status(for: installation) }
         return try await HarnessAccountOperation().run(executablePath: path, signIn: false, provider: .codex, profile: profile,
-                                                       onUsage: direct.onUsage)
+                                                       onUsage: direct.onUsage, onAccount: direct.onAccount)
     }
 
     public func signIn(for installation: HarnessInstallation,
@@ -37,7 +42,7 @@ public final class CodexAccountProvider: HarnessSetupProviding {
         try prepare()
         guard let path = hostPath(installation) else { return try await direct.signIn(for: installation, onChallenge: onChallenge) }
         return try await HarnessAccountOperation().run(executablePath: path, signIn: true, provider: .codex, profile: profile,
-                                                       onChallenge: onChallenge)
+                                                       onChallenge: onChallenge, onAccount: direct.onAccount)
     }
 
     private func hostPath(_ installation: HarnessInstallation) -> String? {

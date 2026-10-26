@@ -612,6 +612,23 @@ public enum RestrictedHarnessStorage {
         }
     }
 
+    /// Deletes the Keychain item Claude Code keeps for one of Noodle's own login folders,
+    /// through the tool the CLI wrote it with. The item of the person's own Claude Code,
+    /// without a folder digest after its name, is never deleted.
+    public static func deleteSecret(service: String, account: String) throws {
+        try deleteSecret(service: service, account: account, tool: securityTool)
+    }
+
+    static func deleteSecret(service: String, account: String,
+                             tool: ([String]) throws -> (status: Int32, output: Data)) throws {
+        guard service.hasPrefix("Claude Code-credentials-") else { throw HarnessSetupError("Unsupported harness login item.") }
+        let result = try tool(["delete-generic-password", "-s", service, "-a", account])
+        // 44: there is no such item, so nobody is signed in there.
+        guard result.status == 0 || result.status == 44 else {
+            throw HarnessSetupError("macOS did not allow Noodle Agent Host to remove the harness login (\(result.status)). Unlock the login keychain, then try again.")
+        }
+    }
+
     private static func securityTool(_ arguments: [String]) throws -> (status: Int32, output: Data) {
         let process = Process(), output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")

@@ -233,7 +233,8 @@ struct HubPlanEditor: View {
     static func harnesses(_ host: HubSettingsHost) -> [Entry] {
         host.runtime.availableInstallations.flatMap { installation in
             let provider = installation.provider
-            return [Entry(harness: HubHarness(provider: provider, profile: nil), title: provider.displayName, login: "Default")]
+            return [Entry(harness: HubHarness(provider: provider, profile: nil), title: provider.displayName,
+                           login: host.setup.defaultLoginName(provider))]
                 + host.harnessProfiles.profiles(for: provider).map {
                     Entry(harness: HubHarness(provider: provider, profile: $0.id),
                           title: "\(provider.displayName) (\($0.displayName))", login: $0.displayName)
@@ -283,6 +284,9 @@ struct HubPlanEditor: View {
         .onAppear {
             name = plan?.name ?? ""
             host.runtime.refreshCapabilities()
+            // The Default logins name their accounts only once their sign-in has been checked.
+            let unnamed = host.runtime.availableInstallations.filter { $0.provider.supportsProfiles && host.setup.accounts[$0.provider] == nil }
+            if !unnamed.isEmpty { Task { await host.setup.refresh(unnamed) } }
         }
         .alert("Delete Plan?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) {
