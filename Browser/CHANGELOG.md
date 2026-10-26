@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A tab that a bot's page opens, such as Apply on a job listing, now belongs to that bot, so the bot is told when it goes unused and can close it. Before, these tabs piled up until the browser reached its 100-tab limit.
+
 ## [0.22.0] - 2026-10-24
 
 ### Added

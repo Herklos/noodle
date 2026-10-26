@@ -322,7 +322,8 @@ import WebKit
         // WebKit requires this exact configuration to preserve window.opener and
         // OAuth popup relationships. The popup remains in the same profile.
         do {
-            let popup = try runtime?.makeTab(browserID: browserID, configuration: configuration)
+            // A tab a bot's page opens, such as Apply on a job listing, is the bot's to close.
+            let popup = try runtime?.makeTab(browserID: browserID, configuration: configuration, openedBy: info.openedBy)
             // A sign-in window that a bot's page opens is the bot's to finish.
             if attended, let popup, let runtime { popup.attend(for: runtime.agentAttention) }
             return popup?.web

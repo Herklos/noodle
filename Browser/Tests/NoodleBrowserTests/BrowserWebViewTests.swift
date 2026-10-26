@@ -163,6 +163,26 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertNil(runtime.failure, "the person was alerted to a bot's tab")
     }
 
+    /// A link or script on a bot's page that opens a tab, such as Apply on a job listing, opens it
+    /// for that bot, so the bot is told about it once it goes unused like any tab it opened.
+    @MainActor func testAPopupFromABotsTabIsThatBotsTab() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let browser = try library.create(name: "Work").id, bot = UUID()
+        var open = BrowserRequest(.open, browserID: browser); open.agentID = bot
+        let byBot = try await runtime.perform(open), byPerson = try await runtime.perform(.init(.open, browserID: browser))
+        let botTab = try XCTUnwrap(byBot.tabID), personTab = try XCTUnwrap(byPerson.tabID)
+        for tabID in [botTab, personTab] {
+            var popup = BrowserRequest(.eval, browserID: browser, tabID: tabID)
+            popup.text = "return window.open('about:blank') !== null;"
+            let response = try await runtime.perform(popup)
+            XCTAssertEqual(response.text, "true")
+        }
+        XCTAssertEqual(try library.profile(browser).tabs.map(\.openedBy), [bot, nil, bot, nil])
+    }
+
     /// A page a bot drives that opens a window past the tab limit tells the bot on its tab, not the person.
     @MainActor func testAPopupPastTheTabLimitInABotsTabTellsTheBot() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
