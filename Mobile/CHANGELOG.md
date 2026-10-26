@@ -2,12 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- On the iPhone Duo's cover screen, your pinned bots and groups are in the bar on the right, under the time, instead of above the list. Tap one to open its chat, or touch and hold it for its menu. A dot marks one with unread replies, and pins that don't fit are in the bar's … menu.
+
 ### Fixed
 
 - On the iPhone Duo's cover screen, the Noodle wordmark on the pairing screen is centred above the Pair button, and short sheets, such as Pair's and the one … opens, are centred under their grabber instead of off to the left of the bar with the time.
 
 ### What to Test
 
+- On an iPhone Duo, folded, pin three bots: check they show in the bar on the right, under the time, and not above the list, with a dot on one with unread replies. Tap one: check its chat opens. Touch and hold one: check its menu shows, with Unpin. Pin ten: check the ones that don't fit are in the bar's … menu. Unfold it, or use another iPhone: check the pins are above the list as before.
 - On an iPhone Duo, folded and not paired: check the wordmark is centred above Pair. Tap Pair: check its buttons are centred in the sheet. Once paired, tap …: check its buttons are centred too. On another iPhone, check the pairing screen and these sheets look as before.
 
 ## [0.46.1] - 2026-10-26

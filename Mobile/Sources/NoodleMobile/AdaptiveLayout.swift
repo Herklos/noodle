@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// How the home screen lays out the bots and conversations in the room it has.
+enum HomeLayout: Equatable {
+    /// One column: the list, with a conversation pushed over it, as on every iPhone.
+    case stack
+    /// One column, with the pinned bots in the system's vertical bar beside it, as on the iPhone Duo's cover screen.
+    case stackBesideBar
+
+    /// The layout given the edge of the system's vertical bar, if there is one.
+    static func choose(verticalBar: HorizontalEdge?) -> HomeLayout {
+        verticalBar == nil ? .stack : .stackBesideBar
+    }
+
+    /// Whether the list shows the pinned bots above the others; beside the vertical bar they are in the bar.
+    var pinsInList: Bool { self != .stackBesideBar }
+}
+
 /// The edge of the system's vertical bar, as on the iPhone Duo's cover screen, from iOS 27.1; nil elsewhere.
 struct VerticalBarReader: ViewModifier {
     @Binding var edge: HorizontalEdge?

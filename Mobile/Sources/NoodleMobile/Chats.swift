@@ -1428,6 +1428,10 @@ struct AgentsView: View {
     @State private var creatingGroup = false
     @State private var search = ""
     @State private var editing: Row?
+    /// Where the system's vertical bar is, as on the iPhone Duo's cover screen; nil without one.
+    @State private var verticalBar: HorizontalEdge?
+
+    private var layout: HomeLayout { HomeLayout.choose(verticalBar: verticalBar) }
 
     private struct Row: Identifiable {
         let chats: HubChats
@@ -1470,7 +1474,7 @@ struct AgentsView: View {
             let unread = order.unread(others, isUnread: isUnread)
             let rest = order.arranged(others.filter { row in !unread.contains { $0.id == row.id } }, isUnread: isUnread)
             List {
-                if !pinned.isEmpty {
+                if !pinned.isEmpty, layout.pinsInList {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
                         ForEach(pinned) { row in
                             // A menu held on each circle: context menus in one list row all lift the row
@@ -1495,6 +1499,7 @@ struct AgentsView: View {
                 }
             }
             .listStyle(.plain)
+            .readingVerticalBar($verticalBar)
             // The saved chats still show while a Hub cannot be reached, so this says so above them.
             .safeAreaInset(edge: .top, spacing: 0) {
                 if !rows.isEmpty {
@@ -1544,6 +1549,25 @@ struct AgentsView: View {
                         .accessibilityLabel("More")
                 }
                 .sharedBackgroundVisibility(.hidden)
+                // Beside the vertical bar, the pinned bots are in it, under the time, as a column of pictures.
+                // What does not fit goes in the bar's own overflow menu, by name.
+                if #available(iOS 27.1, *) {
+                    if !layout.pinsInList, !pinned.isEmpty {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            ForEach(pinned) { row in
+                                Menu { menu(for: row) } label: {
+                                    Label {
+                                        Text(row.thread.name)
+                                    } icon: {
+                                        BarPin(chats: row.chats, thread: row.thread, unread: row.chats.isUnread(row.thread))
+                                    }
+                                } primaryAction: { path = [row.id] }
+                                .menuIndicator(.hidden)
+                            }
+                        }
+                        .axisBehavior(.verticalPreferred)
+                    }
+                }
             }
             .wordmarkRefreshable {
                 for hub in chats {
@@ -1980,6 +2004,29 @@ private struct PinnedAgent: View {
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
+    }
+}
+
+/// A pinned bot or group in the system's vertical bar: its picture alone, as narrow as the bar, with the
+/// unread dot the large circle has. Its name is its label, for VoiceOver and the bar's overflow menu.
+struct BarPin: View {
+    static let size: CGFloat = 40
+    let chats: HubChats
+    let thread: HubThread
+    let unread: Bool
+
+    var body: some View {
+        ThreadAvatar(chats: chats, thread: thread, size: Self.size)
+            .overlay(alignment: .topLeading) {
+                if unread {
+                    Circle().fill(.tint).frame(width: 12, height: 12)
+                        .overlay { Circle().strokeBorder(Color(.systemBackground), lineWidth: 2) }
+                        .offset(x: -2, y: -2)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(thread.name)
+            .accessibilityValue(unread ? "Unread" : "")
     }
 }
 

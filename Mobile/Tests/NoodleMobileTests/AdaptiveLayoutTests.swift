@@ -29,6 +29,16 @@ import Testing
         #expect(SheetCentring.ignoredEdges(verticalBar: .leading) == .horizontal)
     }
 
+    /// Beside the vertical bar the pinned bots move into it, out of the list; without one the list shows
+    /// them, as on any iPhone.
+    @Test func pinnedBotsGoInTheVerticalBar() {
+        #expect(HomeLayout.choose(verticalBar: .trailing) == .stackBesideBar)
+        #expect(HomeLayout.choose(verticalBar: .leading) == .stackBesideBar)
+        #expect(!HomeLayout.stackBesideBar.pinsInList)
+        #expect(HomeLayout.choose(verticalBar: nil) == .stack)
+        #expect(HomeLayout.stack.pinsInList)
+    }
+
     /// Draws a view in a window whose safe area leaves `trailingInset` on the right, as the vertical bar
     /// does, on top of any the screen has, and finds where it put anything darker than the white behind it.
     static func ink(of view: some View, trailingInset: CGFloat) async throws -> (ink: CGRect, bounds: CGRect, safe: UIEdgeInsets) {
