@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-10-26
+
 ### Fixed
 
 - Signing in to Grok Build or Muse Code really no longer opens your browser by itself. Grok Build still found a way around the earlier fix. The sign-in code and Open Sign-In Page show as before.
