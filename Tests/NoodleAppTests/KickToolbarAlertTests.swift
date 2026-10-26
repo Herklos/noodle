@@ -5,7 +5,8 @@ import NoodleCore
 @testable import Noodle
 @testable import NoodleRuntime
 
-/// The Kick alert of a paused bot, pressed from the real window toolbar (#189).
+/// The Kick alert of a paused bot, pressed from the real window toolbar (#189). A bot waiting
+/// for sign-in gets Sign In… there instead, so these use a usage limit, whose alert works the same way.
 @MainActor final class KickToolbarAlertTests: HiddenViewTests {
     private func window<V: View>(_ view: V, width: CGFloat) -> NSWindow {
         _ = NSApplication.shared
@@ -34,7 +35,7 @@ import NoodleCore
     private func alerts() -> [NSWindow] {
         NSApp.windows.filter { window in
             window.isVisible && descendants(window.contentView).contains {
-                ($0 as? NSTextField)?.stringValue.hasPrefix("Sign in to reconnect") == true
+                ($0 as? NSTextField)?.stringValue.hasPrefix("Usage limit reached") == true
             }
         }
     }
@@ -53,7 +54,7 @@ import NoodleCore
     private func assertEveryButtonDismisses(in window: NSWindow, store: NoodleStore,
                                             fixture: StoreFixture, agent: AgentRecord) async throws {
         let frame = try XCTUnwrap(window.contentView?.superview)
-        for title in ["Cancel", "Open Harness Settings", "Retry Now"] {
+        for title in ["Cancel", "Retry Now"] {
             let kick = try await control("Kick", in: frame)
             press(kick)
             try await wait { !self.alerts().isEmpty }
@@ -73,9 +74,9 @@ import NoodleCore
                 settings.close()
             }
             if title == "Retry Now" {
-                // The harness still needs a sign-in: the bot waits again, and nothing presents the alert by itself.
+                // The harness is still out of usage: the bot waits again, and nothing presents the alert by itself.
                 let restarted = try XCTUnwrap(fixture.runtime.factory.processes.last)
-                restarted.transition(.failed, failure: .authenticationRequired)
+                restarted.transition(.failed, failure: .usageLimit)
                 try await Task.sleep(for: .milliseconds(400))
                 XCTAssertTrue(alerts().isEmpty, "The alert returned by itself after a failed retry")
             }
@@ -84,7 +85,7 @@ import NoodleCore
 
     func testMainWindowToolbarKickAlertIsASheetThatEveryButtonDismisses() async throws {
         let f = try fixture()
-        try f.runtime.start(f.a).transition(.failed, failure: .authenticationRequired)
+        try f.runtime.start(f.a).transition(.failed, failure: .usageLimit)
         f.store.selectedConversationID = f.directA.id
         let window = window(RootView().environment(f.store), width: 1160)
         try await assertEveryButtonDismisses(in: window, store: f.store, fixture: f, agent: f.a)
@@ -92,8 +93,18 @@ import NoodleCore
 
     func testConversationWindowToolbarKickAlertIsASheetThatEveryButtonDismisses() async throws {
         let f = try fixture()
-        try f.runtime.start(f.a).transition(.failed, failure: .authenticationRequired)
+        try f.runtime.start(f.a).transition(.failed, failure: .usageLimit)
         let window = window(ConversationWindowView(conversationID: f.directA.id).environment(f.store), width: 760)
         try await assertEveryButtonDismisses(in: window, store: f.store, fixture: f, agent: f.a)
+    }
+
+    /// A bot waiting for sign-in offers Sign In… in the toolbar instead of Kick, which could not help.
+    func testToolbarOffersSignInInsteadOfKickWhileTheBotWaitsForSignIn() async throws {
+        let f = try fixture()
+        try f.runtime.start(f.a).transition(.failed, failure: .authenticationRequired)
+        let window = window(ConversationWindowView(conversationID: f.directA.id).environment(f.store), width: 760)
+        let frame = try XCTUnwrap(window.contentView?.superview)
+        _ = try await control("Sign In…", in: frame)
+        XCTAssertFalse(elements(frame).contains { matches("Kick", node: $0) }, "Kick shows beside Sign In…")
     }
 }
