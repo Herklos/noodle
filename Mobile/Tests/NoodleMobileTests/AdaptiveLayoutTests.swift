@@ -123,6 +123,18 @@ import Testing
         #expect(SplitColumns.layout(width: 744).list == 320)
         #expect(SplitColumns.layout(width: 1000).list == 360)
         #expect(SplitColumns.layout(width: 1366).list == 400)
+        #expect(SplitColumns.layout(width: 1366).gap == 0)
+    }
+
+    /// On the unfolded iPhone Duo the crease divides the two columns, so neither the list nor the conversation
+    /// is drawn on it.
+    @Test func theCreaseDividesTheColumns() {
+        let crease = CGRect(x: 466, y: -24, width: 19, height: 669)
+        #expect(SplitColumns.layout(width: 951, divisions: [crease]) == SplitColumns(list: 466, gap: 19))
+        // A fold across the screen, or a region near its edge, divides nothing between the columns.
+        let across = CGRect(x: 0, y: 300, width: 951, height: 19)
+        let edge = CGRect(x: 900, y: 0, width: 19, height: 669)
+        #expect(SplitColumns.layout(width: 951, divisions: [across, edge]) == SplitColumns.layout(width: 951))
     }
 
     /// Messages keep the usual room beside them on a phone, and stay a readable width in a wide conversation.

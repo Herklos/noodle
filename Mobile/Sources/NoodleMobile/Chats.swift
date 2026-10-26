@@ -1520,11 +1520,16 @@ struct AgentsView: View {
     /// As on the Mac: the list in a column on the left, pinned bots on top, and the open conversation beside it.
     private func split(_ rows: [Row]) -> some View {
         GeometryReader { proxy in
-            let columns = SplitColumns.layout(width: proxy.size.width)
+            let columns = SplitColumns.layout(width: proxy.size.width, divisions: SplitColumns.divisions(in: proxy))
             HStack(spacing: 0) {
                 NavigationStack { list(rows) }
                     .frame(width: columns.list)
-                Divider().ignoresSafeArea()
+                // Across a crease, the screen's own fold divides the columns.
+                if columns.gap > 0 {
+                    Color(.systemBackground).frame(width: columns.gap).ignoresSafeArea()
+                } else {
+                    Divider().ignoresSafeArea()
+                }
                 NavigationStack {
                     if let link = navigation.selection {
                         // Its own, so a draft or a recording stays with the conversation it was started in.

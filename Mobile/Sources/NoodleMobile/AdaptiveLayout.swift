@@ -75,15 +75,28 @@ struct HomeNavigation: Equatable {
     }
 }
 
-/// The width of the list's column on the left of two.
+/// The width of the list's column on the left of two, and of the gap after it, where a crease is.
 struct SplitColumns: Equatable {
     var list: CGFloat
+    var gap: CGFloat = 0
 
     static let narrowest: CGFloat = 320, widest: CGFloat = 400
 
-    /// The list takes about a third, as on the Mac.
-    static func layout(width: CGFloat) -> SplitColumns {
-        SplitColumns(list: min(max(width * 0.36, narrowest), widest))
+    /// The list takes about a third, as on the Mac. A crease down the middle of the screen, as on the unfolded
+    /// iPhone Duo, divides them instead: the list on one side, the conversation on the other, nothing on the crease.
+    /// `divisions` are the screen's regions that divide content, with their margins, across this width.
+    static func layout(width: CGFloat, divisions: [CGRect] = []) -> SplitColumns {
+        let crease = divisions.first { region in
+            region.height > region.width && region.minX > width / 4 && region.maxX < width * 3 / 4
+        }
+        if let crease { return SplitColumns(list: crease.minX, gap: crease.width) }
+        return SplitColumns(list: min(max(width * 0.36, narrowest), widest))
+    }
+
+    /// The regions dividing content in a view, such as a crease, from iOS 27.1.
+    static func divisions(in proxy: GeometryProxy) -> [CGRect] {
+        if #available(iOS 27.1, *) { return proxy.reservedRegions(kind: .division).map(\.frame) }
+        return []
     }
 }
 
