@@ -50,8 +50,7 @@ private final class GrokInspectionWire: @unchecked Sendable {
     init(executable: URL, environment: [String: String], requestTimeout: TimeInterval, terminationGrace: TimeInterval) throws {
         self.requestTimeout = requestTimeout
         self.terminationGrace = terminationGrace
-        process.executableURL = executable
-        process.arguments = ["agent", "--no-leader", "stdio"]
+        BrowserlessLaunch.configure(process, executable: executable, arguments: ["agent", "--no-leader", "stdio"])
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.environment = environment
         process.standardInput = input

@@ -41,8 +41,7 @@ public enum HarnessVersionInspection {
         guard unlink(path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
 
         let child = Process(), finished = DispatchSemaphore(value: 0)
-        child.executableURL = executable
-        child.arguments = arguments
+        BrowserlessLaunch.configure(child, executable: executable, arguments: arguments)
         child.environment = environment.merging(["DISABLE_AUTOUPDATER": "1", "OPENCODE_DISABLE_AUTOUPDATE": "true", "AGY_CLI_DISABLE_AUTO_UPDATE": "true", "NO_COLOR": "1"]) { _, value in value }
         child.currentDirectoryURL = FileManager.default.temporaryDirectory
         child.standardInput = FileHandle.nullDevice

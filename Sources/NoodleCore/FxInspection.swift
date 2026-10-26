@@ -19,8 +19,7 @@ public enum FxInspection {
 
     private static func run(executable: URL, arguments: [String], environment: [String: String]) throws -> Data {
         let process = Process(), output = Pipe(), finished = DispatchSemaphore(value: 0)
-        process.executableURL = executable
-        process.arguments = arguments
+        BrowserlessLaunch.configure(process, executable: executable, arguments: arguments)
         process.environment = environment
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.standardInput = FileHandle.nullDevice

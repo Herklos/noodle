@@ -226,7 +226,7 @@ final class HarnessProfileTests: XCTestCase {
     /// Grok Build and Muse Code open the browser themselves. Noodle shows their
     /// page and code instead, so the person decides when to open it.
     func testDeviceCodeSignInsCannotOpenTheBrowserThemselves() throws {
-        let executable = URL(fileURLWithPath: "/Applications/Harness/bin/harness")
+        let executable = URL(fileURLWithPath: "/usr/bin/true")
         for provider in [HarnessProvider.grokBuild, .muse] {
             let launch = HarnessProfileLogin.launch(provider, executable: executable, arguments: ["login"])
             XCTAssertEqual(launch.executable.path, "/usr/bin/sandbox-exec", provider.rawValue)
@@ -256,6 +256,43 @@ final class HarnessProfileTests: XCTestCase {
         check.waitUntilExit()
         XCTAssertEqual(check.terminationStatus, 0)
         XCTAssertFalse(listed.contains("ASN:"), "Launch Services answered inside the sign-in sandbox")
+    }
+
+    /// Checks, model lists and renewals run without anyone asking for a page, so a
+    /// harness deciding to open one there must not reach the browser either.
+    @MainActor
+    func testBackgroundHarnessRunsCannotOpenTheBrowser() async throws {
+        let harness = root.appendingPathComponent("harness"), ran = root.appendingPathComponent("ran")
+        let reached = root.appendingPathComponent("reached")
+        try Data("""
+            #!/bin/sh
+            /usr/bin/touch "\(ran.path)"
+            /usr/bin/lsappinfo list | /usr/bin/grep -q ASN: && /usr/bin/touch "\(reached.path)"
+            exit 1
+            """.utf8).write(to: harness)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: harness.path)
+        let login = Data(#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}"#.utf8)
+        let runs: [(String, @MainActor () async throws -> Void)] = [
+            ("FX", { _ = try FxInspection.status(executable: harness, environment: [:]) }),
+            ("Antigravity", { _ = try AntigravityInspection.inspect(executable: harness, installationPath: harness.path,
+                                                                    environment: [:], timeout: 5) }),
+            ("Codex models", { _ = try CodexInspection.models(executable: harness, environment: [:], clientVersion: "1", timeout: 3) }),
+            ("Codex account", { _ = try await CodexSetupProvider(codexHome: self.root, environment: [:])
+                .status(for: HarnessInstallation(provider: .codex, executablePath: harness.path)) }),
+            ("Muse", { _ = try MuseInspection.inspect(executable: harness, installationPath: harness.path, home: self.root,
+                                                      environment: [:], requestTimeout: 3) }),
+            ("Grok", { _ = try GrokInspection.inspect(executable: harness, installationPath: harness.path, environment: [:],
+                                                      requestTimeout: 3, terminationGrace: 1) }),
+            ("Version", { _ = try HarnessVersionInspection.inspect(provider: .codex, executable: harness, environment: [:]) }),
+            ("Claude renewal", { _ = try ClaudeLoginRefresh.refresh(login, executable: harness, timeout: 3) }),
+        ]
+        for (name, run) in runs {
+            try? FileManager.default.removeItem(at: ran)
+            try? FileManager.default.removeItem(at: reached)
+            _ = try? await run()
+            XCTAssertTrue(FileManager.default.fileExists(atPath: ran.path), "\(name) never ran the harness")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: reached.path), "\(name) let the harness reach Launch Services")
+        }
     }
 
     func testMuseProfileNeverFallsBackToTheSharedKeychainLogin() throws {

@@ -223,8 +223,7 @@ enum CodexAccountResponse {
                 self.continuation = continuation
                 do {
                     let child = Process(), stdinPipe = Pipe(), stdoutPipe = Pipe()
-                    child.executableURL = executableURL
-                    child.arguments = CodexLaunch.appServerArguments()
+                    BrowserlessLaunch.configure(child, executable: executableURL, arguments: CodexLaunch.appServerArguments())
                     child.currentDirectoryURL = FileManager.default.temporaryDirectory
                     var environment = baseEnvironment ?? ProcessInfo.processInfo.environment
                     // Codex refuses a home that does not exist, as on a Mac that never ran it.

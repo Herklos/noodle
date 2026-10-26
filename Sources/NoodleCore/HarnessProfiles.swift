@@ -302,6 +302,28 @@ public struct HarnessProfileStore: Sendable {
     }
 }
 
+/// Runs a harness where it cannot open pages: in device-code sign-ins and in the
+/// Agent Host's own checks, model lists and renewals, which nobody asked a page of.
+/// Denying lsopen is not enough: Grok Build has CoreServicesUIAgent open the page
+/// for it, so neither service may be reached. A process already in the app sandbox
+/// cannot apply another, so it runs the harness as it is. So does a missing harness,
+/// whose launch must still fail rather than end as sandbox-exec's exit status.
+public enum BrowserlessLaunch {
+    public static func wrap(_ executable: URL, arguments: [String]) -> (executable: URL, arguments: [String]) {
+        guard ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil,
+              FileManager.default.isExecutableFile(atPath: executable.path) else { return (executable, arguments) }
+        let profile = #"(version 1)(allow default)(deny lsopen)"#
+            + #"(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name "com.apple.coreservices.uiagent"))"#
+        return (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile, executable.path] + arguments)
+    }
+
+    public static func configure(_ process: Process, executable: URL, arguments: [String]) {
+        let launch = wrap(executable, arguments: arguments)
+        process.executableURL = launch.executable
+        process.arguments = launch.arguments
+    }
+}
+
 /// Device-code sign-in for a profile, run by the Agent Host with the profile's
 /// environment. Only the vendor's own sign-in page is ever offered to the user.
 public enum HarnessProfileLogin {
@@ -314,17 +336,13 @@ public enum HarnessProfileLogin {
     }
 
     /// Grok Build and Muse Code open the browser by themselves as soon as their
-    /// sign-in starts. Kept away from Launch Services, they only print the page,
+    /// sign-in starts. Kept away from the browser, they only print the page,
     /// which Noodle shows with the code for the person to open when ready.
-    /// Denying lsopen is not enough: Grok Build has CoreServicesUIAgent open the
-    /// page for it, so neither service may be reached.
     /// Claude Code has no code to show, so its sign-in still opens the browser.
     public static func launch(_ provider: HarnessProvider, executable: URL,
                               arguments: [String]) -> (executable: URL, arguments: [String]) {
         guard self.arguments(provider) != nil else { return (executable, arguments) }
-        let profile = #"(version 1)(allow default)(deny lsopen)"#
-            + #"(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name "com.apple.coreservices.uiagent"))"#
-        return (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile, executable.path] + arguments)
+        return BrowserlessLaunch.wrap(executable, arguments: arguments)
     }
 
     /// A streaming read can end midway through a line; only whole lines count.

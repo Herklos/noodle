@@ -712,8 +712,8 @@ public enum ClaudeLoginRefresh {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
 
         let process = Process(), input = Pipe()
-        process.executableURL = executable
-        process.arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+        BrowserlessLaunch.configure(process, executable: executable,
+                                    arguments: ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"])
         process.currentDirectoryURL = home
         process.environment = ["HOME": home.path, "CLAUDE_CONFIG_DIR": account.path, "USER": NSUserName(), "LOGNAME": NSUserName(),
                                "PATH": "/bin:/usr/sbin:/sbin", "TMPDIR": home.path, "DISABLE_AUTOUPDATER": "1"]

@@ -787,8 +787,7 @@ private final class HostSession: NSObject, AgentHostService {
     private func claudeAuthenticationStatus(_ executable: URL, environment: [String: String]? = nil,
                                             onAccount: ((String) -> Void)? = nil) throws -> Bool {
         let process = Process(), output = Pipe()
-        process.executableURL = executable
-        process.arguments = ["auth", "status", "--json"]
+        BrowserlessLaunch.configure(process, executable: executable, arguments: ["auth", "status", "--json"])
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = output

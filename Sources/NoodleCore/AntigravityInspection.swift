@@ -27,8 +27,7 @@ public enum AntigravityInspection {
         // Regular files: a read can never wait on a helper the CLI left holding a pipe.
         let process = Process(), output = try scratchFile(), errors = try scratchFile(), finished = DispatchSemaphore(value: 0)
         defer { try? output.close(); try? errors.close() }
-        process.executableURL = executable
-        process.arguments = ["models"]
+        BrowserlessLaunch.configure(process, executable: executable, arguments: ["models"])
         process.environment = environment.merging(["AGY_CLI_DISABLE_AUTO_UPDATE": "true", "NO_COLOR": "1"]) { _, value in value }
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.standardInput = FileHandle.nullDevice

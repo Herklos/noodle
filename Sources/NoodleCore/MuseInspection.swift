@@ -46,8 +46,7 @@ private final class MuseInspectionWire: @unchecked Sendable {
     init(executable: URL, environment: [String: String], requestTimeout: TimeInterval, terminationGrace: TimeInterval) throws {
         self.requestTimeout = requestTimeout
         self.terminationGrace = terminationGrace
-        process.executableURL = executable
-        process.arguments = ["serve", "--no-session-log"]
+        BrowserlessLaunch.configure(process, executable: executable, arguments: ["serve", "--no-session-log"])
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.environment = environment
         process.standardInput = input

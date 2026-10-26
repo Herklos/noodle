@@ -46,8 +46,7 @@ public enum CodexInspection {
 
         init(executable: URL, environment: [String: String], timeout: TimeInterval) throws {
             self.timeout = timeout
-            process.executableURL = executable
-            process.arguments = CodexLaunch.appServerArguments()
+            BrowserlessLaunch.configure(process, executable: executable, arguments: CodexLaunch.appServerArguments())
             process.currentDirectoryURL = FileManager.default.temporaryDirectory
             process.environment = environment
             process.standardInput = input

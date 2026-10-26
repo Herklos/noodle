@@ -5,6 +5,7 @@
 ### Fixed
 
 - Signing in to Grok Build or Muse Code really no longer opens your browser by itself. Grok Build still found a way around the earlier fix. The sign-in code and Open Sign-In Page show as before.
+- The checks the Hub runs on a harness by itself, such as sign-in status, model lists and login renewals, can no longer open your browser.
 
 ## [0.44.1] - 2026-10-26
 
