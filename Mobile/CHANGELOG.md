@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-26
+
 ### Added
 
 - On iPad and the unfolded iPhone Duo, your bots and groups are in a column on the left, with the pinned ones on top, and the chat you open shows beside them, as on the Mac. On the iPhone Duo the fold runs between the two, with nothing on it. A tapped notification, widget or link opens its chat there too. Folding or unfolding the iPhone Duo keeps the chat you had open.
