@@ -43,8 +43,8 @@ public final class SubscriptionUsageStore {
         record(usage, provider: provider, profile: profile)
     }
 
-    /// A deleted profile's account is gone with it.
-    public func forget(_ provider: HarnessProvider, profile: UUID) {
+    /// A deleted profile's account is gone with it, and a signed-out login's.
+    public func forget(_ provider: HarnessProvider, profile: UUID?) {
         guard accounts.removeValue(forKey: Self.key(provider, profile: profile)) != nil else { return }
         save()
     }

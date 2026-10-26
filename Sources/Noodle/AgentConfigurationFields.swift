@@ -2,6 +2,7 @@ import SwiftUI
 import HubLink
 import NoodleCore
 import NoodleHubClient
+import NoodleRuntime
 import NoodleRuntimeSettings
 
 struct AgentConfigurationFields: View {
@@ -46,6 +47,11 @@ struct AgentConfigurationFields: View {
     private var profiles: [HarnessProfile] {
         guard hubChoice == nil, let selectedProvider, selectedProvider.supportsProfiles else { return [] }
         return store.harnessProfiles.profiles(for: selectedProvider)
+    }
+
+    /// The harness's Default login, named by the account it is signed in to.
+    private var defaultProfileName: String {
+        selectedProvider.map { store.harnessSetup.defaultLoginName($0) } ?? "Default"
     }
 
     private var models: [HarnessModel] {
@@ -113,13 +119,20 @@ struct AgentConfigurationFields: View {
                     Button { choosingProfile = true } label: {
                         RuntimeSelectionRow(
                             title: "Profile",
-                            value: store.harnessProfiles.profile(selectedProfileID)?.displayName ?? "Default",
+                            value: store.harnessProfiles.profile(selectedProfileID)?.displayName ?? defaultProfileName,
                             icon: AnyView(Image(systemName: "person.crop.circle"))
                         )
                     }
                     .buttonStyle(.plain)
                     .popover(isPresented: $choosingProfile, arrowEdge: .leading) {
-                        HarnessProfileChooser(profiles: profiles, selection: $selectedProfileID)
+                        HarnessProfileChooser(profiles: profiles, defaultName: defaultProfileName, selection: $selectedProfileID)
+                    }
+                    .task(id: selectedProvider) {
+                        // The Default login names its account only once its sign-in has been checked.
+                        guard let selectedProvider, store.harnessSetup.accounts[selectedProvider] == nil,
+                              let installation = store.runtime.installations.first(where: { $0.provider == selectedProvider }),
+                              installation.isAvailable else { return }
+                        await store.harnessSetup.refresh([installation])
                     }
                 }
 
@@ -350,6 +363,8 @@ struct HarnessChooser: View {
 
 struct HarnessProfileChooser: View {
     let profiles: [HarnessProfile]
+    /// The Default login's name, by its account.
+    var defaultName = "Default"
     @Binding var selection: UUID?
     @Environment(\.dismiss) private var dismiss
 
@@ -362,7 +377,7 @@ struct HarnessProfileChooser: View {
             Divider()
 
             List {
-                profileButton(id: nil, name: "Default")
+                profileButton(id: nil, name: defaultName)
                 ForEach(profiles) { profileButton(id: $0.id, name: $0.displayName) }
             }
             .listStyle(.inset)

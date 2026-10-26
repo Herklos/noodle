@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- You can sign out of a harness in Settings › Harness: click its sign-in status for Sign In Again and Sign Out, and, for Codex and Claude Code, the account it is signed in to. Signing out removes only the Hub's own sign-in for that harness; Noodle's and the one you use in Terminal are kept. Bots that use it pause until you sign in again. A profile's sign-in status in Profiles works the same way.
+
+### Changed
+
+- In a plan, the Default sign-in of Codex and Claude Code shows the account it is signed in to, such as "you@example.com · Default", or "Default · not signed in".
+
 ## [0.43.1] - 2026-10-26
 
 ### Fixed

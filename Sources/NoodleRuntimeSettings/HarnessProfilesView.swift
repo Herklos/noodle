@@ -11,6 +11,9 @@ public struct HarnessProfilesView: View {
     @State private var naming: NamingRequest?
     @State private var name = ""
     @State private var deleting: HarnessProfile?
+    @State private var signingOut: HarnessProfile?
+    /// The profile whose sign-in popover is open.
+    @State private var showsSignIn: UUID?
     @State private var error: String?
 
     private enum NamingRequest {
@@ -88,6 +91,16 @@ public struct HarnessProfilesView: View {
         } message: { profile in
             Text("“\(profile.displayName)” is signed out of Noodle. Bots using it return to the Default sign-in and restart.")
         }
+        .alert(Text("Sign Out of “\(signingOut?.displayName ?? "")”?"),
+               isPresented: Binding(get: { signingOut != nil }, set: { if !$0 { signingOut = nil } }),
+               presenting: signingOut) { profile in
+            Button("Sign Out", role: .destructive) {
+                controller.signOut(profile) { [store] in store.restartAgents(signedInWith: profile) }
+            }
+            Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
+        } message: { _ in
+            Text("Bots that use this profile pause until you sign in again.")
+        }
     }
 
     private var namingTitle: String {
@@ -144,7 +157,33 @@ public struct HarnessProfilesView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
+    /// A status about signing in opens the profile's sign-in, as a harness's row does.
     @ViewBuilder private func status(_ profile: HarnessProfile, waitingForSignIn: Bool) -> some View {
+        if controller.activity[profile.id] == nil,
+           let menu = HarnessSignInMenu.make(status: controller.authentication[profile.id], waitingForSignIn: waitingForSignIn,
+                                             account: controller.accounts[profile.id], busy: controller.challenges[profile.id] != nil) {
+            Button { showsSignIn = profile.id } label: {
+                statusLabel(profile, waitingForSignIn: waitingForSignIn).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Show sign-in")
+            .popover(isPresented: Binding(get: { showsSignIn == profile.id }, set: { if !$0 { showsSignIn = nil } }),
+                     arrowEdge: .bottom) {
+                HarnessSignInSection(menu: menu, name: profile.displayName, isDefault: false) { action in
+                    showsSignIn = nil
+                    switch action {
+                    case .signIn, .signInAgain: controller.signIn(profile, installation: installation)
+                    case .signOut: signingOut = profile
+                    }
+                }
+                .frame(width: 340, alignment: .leading)
+            }
+        } else {
+            statusLabel(profile, waitingForSignIn: waitingForSignIn)
+        }
+    }
+
+    @ViewBuilder private func statusLabel(_ profile: HarnessProfile, waitingForSignIn: Bool) -> some View {
         if let activity = controller.activity[profile.id] {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
