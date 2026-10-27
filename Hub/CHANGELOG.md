@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-27
+
 ### Added
 
 - Plans can be duplicated in Settings › Plans: choose Duplicate in a plan's … menu to get "<plan> Copy" with the same harnesses, models and limits, opened so you can rename or change it. Nobody moves to the copy until you move them.
