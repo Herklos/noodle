@@ -65,6 +65,84 @@ import XCTest
         XCTAssertEqual(access.plans.map(\.name), ["Default"])
     }
 
+    func testADuplicatedPlanKeepsEverySettingUnderANewIDAndName() throws {
+        let (access, url) = access()
+        let codex = HubHarness(provider: .codex, profile: UUID()), claude = HubHarness(provider: .claudeCode, profile: nil)
+        let family = try access.addPlan(named: "Family")
+        access.set(codex, included: true, in: family)
+        access.set(claude, included: true, in: family)
+        access.setModels(["gpt-5-mini"], for: codex, in: family)
+        access.setComputerLimit(2, in: family)
+        access.setBrowserLimit(3, in: family)
+        access.setTokenLimit(HubTokenLimit(tokens: 1_000_000, length: 7, unit: .days), in: family)
+        let ada = try access.addUser(named: "Ada"), grace = try access.addUser(named: "Grace")
+        access.move(ada, to: family)
+        access.move(grace, to: family)
+        var changes = 0
+        access.onTokenLimitsChange = { changes += 1 }
+
+        let copy = try access.duplicate(family)
+        let original = try XCTUnwrap(access.plans.first { $0.id == family.id })
+        XCTAssertNotEqual(copy.id, family.id)
+        XCTAssertFalse(copy.isDefault)
+        XCTAssertEqual(copy.name, "Family Copy")
+        XCTAssertEqual(copy.harnesses, [codex, claude])
+        XCTAssertEqual(copy.models, [codex: ["gpt-5-mini"]])
+        XCTAssertEqual(copy.computerLimit, 2)
+        XCTAssertEqual(copy.browserLimit, 3)
+        XCTAssertEqual(copy.tokenLimit, HubTokenLimit(tokens: 1_000_000, length: 7, unit: .days))
+        XCTAssertEqual(access.plans.map(\.name), ["Default", "Family", "Family Copy"])
+        XCTAssertEqual(HubAccess(url: url).plans, access.plans)
+        // Nobody moves: everyone stays on the original, whose limits did not change.
+        XCTAssertEqual(access.users.map(\.plan), [family.id, family.id])
+        XCTAssertEqual(changes, 0)
+
+        // Someone moved to the copy may use exactly what they could before.
+        access.move(grace, to: copy)
+        let moved = try XCTUnwrap(access.users.first { $0.id == grace.id })
+        XCTAssertEqual(moved.plan, copy.id)
+        XCTAssertEqual(access.harnesses(for: moved), original.harnesses)
+        XCTAssertTrue(access.lends(codex, model: "gpt-5-mini", to: moved))
+        XCTAssertFalse(access.lends(codex, model: "gpt-5", to: moved))
+        XCTAssertTrue(access.lends(claude, model: "opus", to: moved))
+        XCTAssertEqual(access.models(on: codex, for: moved), ["gpt-5-mini"])
+        XCTAssertNil(access.models(on: claude, for: moved))
+        XCTAssertEqual(access.computerLimit(for: moved), 2)
+        XCTAssertEqual(access.browserLimit(for: moved), 3)
+        XCTAssertEqual(access.tokenLimit(for: moved), access.tokenLimit(for: ada))
+    }
+
+    func testDuplicatingAgainGivesEachCopyItsOwnName() throws {
+        let (access, _) = access()
+        let family = try access.addPlan(named: "Family")
+        XCTAssertEqual(try access.duplicate(family).name, "Family Copy")
+        XCTAssertEqual(try access.duplicate(family).name, "Family Copy 2")
+        XCTAssertEqual(try access.duplicate(family).name, "Family Copy 3")
+        XCTAssertEqual(access.plans.map(\.name), ["Default", "Family", "Family Copy", "Family Copy 2", "Family Copy 3"])
+        // The longest name still leaves room for the word.
+        let long = try access.addPlan(named: String(repeating: "a", count: ConversationName.maximumLength))
+        let copy = try access.duplicate(long)
+        XCTAssertEqual(copy.name.count, ConversationName.maximumLength)
+        XCTAssertTrue(copy.name.hasSuffix(" Copy"))
+    }
+
+    func testTheDefaultPlanCanBeDuplicatedButTheCopyIsNotTheDefault() throws {
+        let (access, _) = access()
+        let codex = HubHarness(provider: .codex, profile: nil)
+        access.set(codex, included: true, in: access.plans[0])
+        let user = try access.addUser(named: "Ada")
+        let copy = try access.duplicate(access.plans[0])
+        XCTAssertFalse(copy.isDefault)
+        XCTAssertEqual(copy.name, "Default Copy")
+        XCTAssertEqual(copy.harnesses, [codex])
+        XCTAssertEqual(access.plans.filter(\.isDefault).count, 1)
+        XCTAssertEqual(access.users.first?.plan, HubPlan.defaultID)
+        XCTAssertEqual(try access.addUser(named: "Grace").plan, HubPlan.defaultID)
+        access.delete(copy)
+        XCTAssertEqual(access.plans.map(\.name), ["Default"])
+        XCTAssertEqual(access.users.first?.id, user.id)
+    }
+
     func testDeletedProfilesLeaveEveryPlan() throws {
         let (access, _) = access()
         let profile = UUID()
