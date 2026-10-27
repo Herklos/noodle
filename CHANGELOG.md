@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Deleting a space in Edit Spaces… asks first, so one click no longer deletes it. Only the space is deleted; its bots and groups stay in All.
+
 ## [0.77.2] - 2026-10-26
 
 ### Fixed

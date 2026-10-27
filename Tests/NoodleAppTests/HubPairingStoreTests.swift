@@ -194,6 +194,32 @@ final class HubHarnessChoiceTests: XCTestCase {
         XCTAssertEqual(Set(again.filteredConversations.map(\.id)), [f.directA.id, f.directB.id])
     }
 
+    /// Edit Spaces' Delete only asks; the space goes once the person confirms, and its bots and groups stay.
+    func testDeletingASpaceAsksFirst() throws {
+        let f = try StoreFixture()
+        defer { f.cleanUp() }
+        UserDefaults.standard.removeObject(forKey: NoodleStore.spaceKey)
+        addTeardownBlock { UserDefaults.standard.removeObject(forKey: NoodleStore.spaceKey) }
+        let store = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
+        let space = try XCTUnwrap(store.addSpace(named: "Work"))
+        store.setMember(true, of: space.id, conversationID: f.directA.id)
+
+        store.askToDeleteSpace(space.id)
+        XCTAssertEqual(store.spaceBeingDeleted?.name, "Work")
+        XCTAssertEqual(store.customSpaces.map(\.id), [space.id])
+
+        // Cancel keeps it.
+        store.spaceBeingDeleted = nil
+        XCTAssertEqual(store.customSpaces.map(\.id), [space.id])
+        XCTAssertEqual(store.shownCustomSpace?.id, space.id)
+
+        store.askToDeleteSpace(space.id)
+        store.confirmSpaceDeletion()
+        XCTAssertNil(store.spaceBeingDeleted)
+        XCTAssertTrue(store.customSpaces.isEmpty)
+        XCTAssertEqual(Set(store.filteredConversations.map(\.id)), [f.directA.id, f.directB.id])
+    }
+
     /// Once this Mac has served its owner's devices, they name its bots by its key, so spaces here do too.
     func testThisMacsBotsAreNamedAsItsDevicesNameThem() throws {
         let f = try StoreFixture()
