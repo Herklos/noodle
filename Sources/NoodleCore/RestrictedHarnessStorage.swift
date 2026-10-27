@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import LocalAuthentication
+import OSLog
 import Security
 
 /// The trusted host copies login material only. Native histories, settings,
@@ -194,6 +195,7 @@ public enum RestrictedHarnessStorage {
             var until = now.addingTimeInterval(min(5 * 60 * pow(2, Double(min(refusals, 16) - 1)), 4 * 60 * 60))
             if let expiry, expiry > now { until = min(until, expiry) }
             try runtime.writeData(RefusedLogin(login: login, until: until, refusals: refusals).data, named: failedStamp(provider, name))
+            HarnessLoginLog.logger.error("login-refused bot=\(HarnessLoginLog.bot(workspace), privacy: .public) harness=\(provider.rawValue, privacy: .public) login=\(HarnessLoginLog.fingerprint(stamp: login), privacy: .public) refusals=\(refusals) expires-in=\(Int((expiry ?? now).timeIntervalSince(now)))s")
         }
     }
 
@@ -466,9 +468,11 @@ public enum RestrictedHarnessStorage {
         /// A login taken from the Keychain, or rewritten on the way, is shared in
         /// Noodle's storage beside a note of the item it came from.
         let copies: WorkspaceMailbox
+        let bot: String
 
         init(provider: HarnessProvider, workspace: URL, loginHome: URL, accountPath: String) throws {
             self.provider = provider
+            bot = HarnessLoginLog.bot(workspace)
             key = Self.key(provider: provider, loginHome: loginHome, accountPath: accountPath)
             source = try? WorkspaceMailbox(workspace: loginHome, path: accountPath)
             let root = AgentStorageLayout(workspace: workspace).package.deletingLastPathComponent().deletingLastPathComponent()
@@ -500,6 +504,7 @@ public enum RestrictedHarnessStorage {
                     if (try? copies.read(name + ".origin", limit: 256)) != tag(login) {
                         try copies.writeData(login, named: name)
                         try copies.writeData(tag(login), named: name + ".origin")
+                        HarnessLoginLog.logger.notice("login-from-item bot=\(bot, privacy: .public) harness=\(provider.rawValue, privacy: .public) login=\(HarnessLoginLog.fingerprint(login), privacy: .public)")
                     }
                     store = copies
                 }
@@ -510,6 +515,7 @@ public enum RestrictedHarnessStorage {
                     // This bot refreshed the login since it last took it.
                     try store.writeData(copy, named: name)
                     try runtime.writeData(tag(copy), named: stamp(name))
+                    HarnessLoginLog.logger.notice("login-taken-back bot=\(bot, privacy: .public) harness=\(provider.rawValue, privacy: .public) login=\(HarnessLoginLog.fingerprint(copy), privacy: .public) replaced=\(HarnessLoginLog.fingerprint(shared), privacy: .public)")
                     if case .item = origin, let written = try? writeBack?(copy) {
                         try copies.writeData(tag(written), named: name + ".origin")
                     }
@@ -517,7 +523,10 @@ public enum RestrictedHarnessStorage {
                     return
                 }
                 guard let shared else { return }
-                if copy != shared { try destination.writeData(shared, named: name) }
+                if copy != shared {
+                    try destination.writeData(shared, named: name)
+                    HarnessLoginLog.logger.notice("login-handed bot=\(bot, privacy: .public) harness=\(provider.rawValue, privacy: .public) login=\(HarnessLoginLog.fingerprint(shared), privacy: .public) replaced=\(copy.map { HarnessLoginLog.fingerprint($0) } ?? "none", privacy: .public)")
+                }
                 if agreed != tag(shared) { try runtime.writeData(tag(shared), named: stamp(name)) }
                 result = true
             }
@@ -677,11 +686,37 @@ public enum RestrictedHarnessStorage {
     }
 }
 
+/// Login renewals, hand-overs and refusals for every harness, told apart by fingerprint
+/// only: never a token, a path or a raw error.
+public enum HarnessLoginLog {
+    public static let logger = Logger(subsystem: RuntimeDiagnostics.subsystem, category: "logins")
+
+    /// The first digits of the login's hash, as the bot's seed stamp records it.
+    public static func fingerprint(_ login: Data) -> String {
+        SHA256.hash(data: login).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The same digits read from a stamp, which already holds the hash.
+    static func fingerprint(stamp: Data) -> String {
+        String(String(decoding: stamp, as: UTF8.self).split(separator: ":").last?.prefix(8) ?? "none")
+    }
+
+    /// The bot's ID, the name of the folder that holds its workspace.
+    public static func bot(_ workspace: URL) -> String { workspace.deletingLastPathComponent().lastPathComponent }
+}
+
 /// Claude Code renews its login only in the last minutes before it expires, and
 /// every bot on the login does so then, though only the first renewal works. The
 /// Agent Host renews it once, earlier, and the bots take the renewal.
 public enum ClaudeLoginRefresh {
     public static let margin: TimeInterval = 30 * 60
+
+    /// Seconds until `login`'s access token expires.
+    public static func expiresIn(_ login: Data, now: Date = Date()) -> Int? {
+        guard let expires = (((try? JSONSerialization.jsonObject(with: login) as? [String: Any])?["claudeAiOauth"] as? [String: Any])?["expiresAt"] as? NSNumber)?.doubleValue
+        else { return nil }
+        return Int(Date(timeIntervalSince1970: expires / 1000).timeIntervalSince(now))
+    }
 
     /// Reads only the expiry, never a token.
     public static func isDue(_ login: Data, now: Date = Date()) -> Bool {
@@ -726,16 +761,21 @@ public enum ClaudeLoginRefresh {
             process.waitUntilExit()
             try? input.fileHandleForWriting.close()
         }
-        let end = Date().addingTimeInterval(timeout)
+        let start = Date(), end = start.addingTimeInterval(timeout)
         while Date() < end {
             if let data = try? Data(contentsOf: file),
                let renewed = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["claudeAiOauth"] as? [String: Any],
                let next = renewed["refreshToken"] as? String, !next.isEmpty, next != token {
+                HarnessLoginLog.logger.notice("refresh-renewed harness=claude-code login=\(HarnessLoginLog.fingerprint(login), privacy: .public) new=\(HarnessLoginLog.fingerprint(data), privacy: .public) took=\(Int(Date().timeIntervalSince(start)))s")
                 return data
             }
-            guard process.isRunning else { return nil }
+            guard process.isRunning else {
+                HarnessLoginLog.logger.error("refresh-exited harness=claude-code login=\(HarnessLoginLog.fingerprint(login), privacy: .public) status=\(process.terminationStatus) took=\(Int(Date().timeIntervalSince(start)))s")
+                return nil
+            }
             Thread.sleep(forTimeInterval: 0.25)
         }
+        HarnessLoginLog.logger.error("refresh-timed-out harness=claude-code login=\(HarnessLoginLog.fingerprint(login), privacy: .public) after=\(Int(timeout))s")
         return nil
     }
 }
