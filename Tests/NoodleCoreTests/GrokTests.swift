@@ -42,7 +42,7 @@ final class GrokTests: XCTestCase {
             "data": ["http_status": 402, "message": "private account information"]
         ]))
         XCTAssertTrue(detail.contains("usage limit"))
-        XCTAssertTrue(detail.contains("Kick"))
+        XCTAssertTrue(detail.contains("resumes by itself"))
         XCTAssertFalse(detail.contains("private"))
         XCTAssertEqual(GrokProtocol.usageLimitDescription([
             "message": "API error (status 402 Payment Required): Grok Build usage balance exhausted"
