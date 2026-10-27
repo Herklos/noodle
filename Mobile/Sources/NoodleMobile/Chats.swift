@@ -2779,7 +2779,7 @@ struct ChatView: View {
             if !shared.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingShared = true } label: {
-                        Image(systemName: "ellipsis")
+                        Image(systemName: "square.stack")
                     }
                     .accessibilityLabel("Shared")
                 }

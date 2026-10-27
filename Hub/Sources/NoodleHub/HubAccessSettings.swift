@@ -182,6 +182,15 @@ struct HubPlansSettingsView: View {
                         Spacer(minLength: 8)
                         Button("Edit…") { editing = Editing(id: plan.id) }
                             .buttonStyle(.link)
+                        Menu {
+                            Button("Duplicate") { duplicate(plan) }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .accessibilityLabel("Plan Actions")
                     }
                 }
             } header: {
@@ -196,6 +205,16 @@ struct HubPlansSettingsView: View {
         } failed: { error = $0 }
         .sheet(item: $editing) { item in
             HubPlanEditor(host: host, planID: item.id)
+        }
+    }
+
+    /// Makes the copy and opens it, to be renamed or changed.
+    private func duplicate(_ plan: HubPlan) {
+        do {
+            editing = Editing(id: try access.duplicate(plan).id)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

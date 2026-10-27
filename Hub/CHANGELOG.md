@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Plans can be duplicated in Settings › Plans: choose Duplicate in a plan's … menu to get "<plan> Copy" with the same harnesses, models and limits, opened so you can rename or change it. Nobody moves to the copy until you move them.
+
 ### Fixed
 
 - A bot paused on a usage limit now resumes by itself once usage is back, when the limit resets or the harness reports usage left again, instead of waiting for Kick. This applies to every harness.

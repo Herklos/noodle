@@ -529,6 +529,22 @@ public struct HubCallPush: Codable, Hashable, Sendable {
         return plan
     }
 
+    /// A new plan that lends what `plan` lends, with its limits, named “Family Copy”, or “Family Copy 2” and on when
+    /// that is taken. Nobody is on it yet; the copy of Default is an ordinary plan.
+    @discardableResult public func duplicate(_ plan: HubPlan) throws -> HubPlan {
+        guard let original = plans.first(where: { $0.id == plan.id }) else { throw LinkError("That plan is no longer on this Hub.") }
+        let taken = Set(plans.map(\.name))
+        let name = (1...).lazy.map { number in
+            let suffix = number == 1 ? " Copy" : " Copy \(number)"
+            return String(original.name.prefix(ConversationName.maximumLength - suffix.count)) + suffix
+        }.first { !taken.contains($0) }!
+        let copy = HubPlan(name: name, harnesses: original.harnesses, models: original.models, computerLimit: original.computerLimit,
+                           browserLimit: original.browserLimit, tokenLimit: original.tokenLimit)
+        plans.append(copy)
+        save()
+        return copy
+    }
+
     public func rename(_ plan: HubPlan, to name: String) throws {
         let name = try ConversationName.validated(name)
         update(plan) { $0.name = name }
