@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Remove from Library** in a noodlet's right-click menu takes it out of the library and leaves its files where they are. What it saved is deleted; opening it again adds it back.
+
+### Changed
+
+- A noodlet a bot makes appears in the library once it opens in a window, not as soon as it is saved. Noodlets bots only test or record without a window, or keep in hidden folders, stay out of the library.
+
+### Fixed
+
+- Noodle Applet no longer looks through your bots' folders for noodlets at all, so busy bots no longer cost it processor time.
+
 ## [0.33.3] - 2026-10-27
 
 ### Fixed

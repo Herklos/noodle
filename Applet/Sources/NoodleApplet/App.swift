@@ -300,6 +300,7 @@ private struct LibraryView: View {
   @State private var selection: LibraryFilter? = .section(.all)
   @State private var columnVisibility = NavigationSplitViewVisibility.all
   @State private var trashing: LibraryEntry?
+  @State private var removing: LibraryEntry?
   @AppStorage("AppletSidebarVisible") private var sidebarVisible = true
   @AppStorage("AppletCategoriesExpanded") private var categoriesExpanded = true
   @AppStorage("AppletPeopleExpanded") private var peopleExpanded = true
@@ -453,6 +454,19 @@ private struct LibraryView: View {
     } message: {
       Text("“\(trashing?.title ?? "")” will be moved to the Trash. Its saved data, secrets and permissions will be deleted.")
     }
+    .confirmationDialog(
+      "Remove from Library?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+      titleVisibility: .visible
+    ) {
+      Button("Remove from Library", role: .destructive) {
+        guard let package = removing?.package else { return }
+        Task {
+          do { try await library.remove(package) } catch { library.error = error.localizedDescription }
+        }
+      }
+    } message: {
+      Text("“\(removing?.title ?? "")” stays where it is. Its saved data, secrets and permissions will be deleted. Opening it again adds it back.")
+    }
   }
   /// SwiftUI places its own sidebar toggle last in the sidebar's toolbar section, so
   /// while the sidebar is open it declares the toggle itself to let Open Noodlet
@@ -604,6 +618,9 @@ private struct LibraryView: View {
       Button(library.pinned.contains(entry.id) ? "Unpin" : "Pin") { library.pin(entry.id) }
       Button(library.hidden.contains(entry.id) ? "Unhide" : "Hide") { library.hide(entry.id) }
       Divider()
+      if library.canRemove(entry.package) {
+        Button("Remove from Library") { removing = entry }.disabled(running)
+      }
       Button("Move to Trash") { trashing = entry }.disabled(running)
     }
   }

@@ -57,7 +57,7 @@ import XCTest
         let hub = AppletBuildIdentity.current.hubID
         let own = try botNoodlet(htmlNoodlet("Board"), named: "Board", owner: "ada", root: root, hub: true)
         let theirs = try botNoodlet(htmlNoodlet("Diary"), named: "Diary", owner: "kai", root: root, hub: true)
-        library.scan()
+        for path in [own, theirs] { try library.know(NoodletPackage(url: URL(fileURLWithPath: path))) }
 
         var list = AppletRequest(.list)
         list.owner = "ada"

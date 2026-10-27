@@ -297,12 +297,15 @@ struct AppletIdleWatch {
         if let session = find(request, owner: owner) { package = session.package }
         else if let path = request.path {
           let url = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
-          library.scan()
-          guard let entry = library.entries.first(where: { $0.package.url == url }),
-                owner == "local" || belongs(entry.package, owner: owner) else {
+          if let entry = library.entries.first(where: { $0.package.url == url }),
+             owner == "local" || belongs(entry.package, owner: owner) {
+            package = entry.package
+          } else if owner != "local", library.owner(of: url) == owner, let own = try? NoodletPackage(url: url) {
+            // A bot's own noodlet it has not opened with a window yet is not listed.
+            package = own
+          } else {
             throw AppletError("Noodlet not registered. Validate the package first.")
           }
-          package = entry.package
         } else { throw AppletError("Provide --id, --path, or --session for info.") }
         var response = try packageInfo(package)
         if let session = find(request, owner: owner) {
@@ -355,19 +358,17 @@ struct AppletIdleWatch {
         return response
       }
       if request.operation == .list {
-        library.scan()
         var response = AppletResponse()
-        response.items = try library.entries.filter {
-          owner == "local" || belongs($0.package, owner: owner)
-        }.map { entry in
+        let packages = owner == "local" ? library.entries.map(\.package) : library.packages(madeBy: owner)
+        response.items = try packages.map { package in
           let session = preferredSession(sessions.values.filter {
-            $0.package.key == entry.id && (owner == "local" || $0.owner == owner)
+            $0.package.key == package.key && (owner == "local" || $0.owner == owner)
           })
           var item = AppletItem(
-            path: entry.package.url.path, title: entry.title,
-            runtime: entry.package.manifest.runtime, sessionID: session?.id,
+            path: package.url.path, title: package.manifest.title,
+            runtime: package.manifest.runtime, sessionID: session?.id,
             state: session?.state)
-          item.noodletID = try library.linkID(for: entry.package)
+          item.noodletID = try library.linkID(for: package)
           item.url = item.noodletID.map(NoodletLink.url)
           return item
         }
@@ -389,9 +390,7 @@ struct AppletIdleWatch {
         }
         let package = try NoodletPackage(url: canonical)
         if fromHub(identity, path: canonical.path) { library.markHub(package.key) }
-        _ = try library.linkID(for: package)
-        // A noodlet opened comes up first; the library takes it in off the main thread.
-        if request.operation == .open { Task { await library.refresh() } } else { library.scan() }
+        try library.know(package)
         if request.operation == .validate {
           var response = try packageInfo(package)
           response.state = "valid"
@@ -742,7 +741,7 @@ struct AppletIdleWatch {
       try await runner.start(in: place)
       session.state = "running"
       session.log.append("lifecycle", "Ready.")
-      library.remember(package)
+      if session.mode == "foreground" { library.remember(package) }
       objectWillChange.send()
       return status(session)
     } catch {
@@ -809,6 +808,7 @@ struct AppletIdleWatch {
     }
     session.web?.show()
     session.mode = "foreground"
+    library.remember(session.package)
   }
   private func status(_ session: AppletSession) -> AppletResponse {
     var response = (try? packageInfo(session.package)) ?? AppletResponse()

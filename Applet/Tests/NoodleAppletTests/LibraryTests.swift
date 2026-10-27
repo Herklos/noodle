@@ -26,21 +26,23 @@ func htmlNoodlet(_ title: String) throws -> [String: Data] {
 }
 
 final class LibraryTests: XCTestCase {
-    /// The watch walks bots' workspaces every two seconds. On the main thread that took a tenth of a
-    /// second each time, and recordings, which capture there, froze for three frames every two seconds.
-    @MainActor func testTheWatchLooksForNoodletsOffTheMainThread() async throws {
+    /// The watch reads every listed package. On the main thread that took a tenth of a second each
+    /// time, and recordings, which capture there, froze for three frames each time.
+    @MainActor func testTheWatchReadsNoodletsOffTheMainThread() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
         let library = botLibrary(root: root, defaults: defaults)
-        _ = try botNoodlet(try htmlNoodlet("Late"), named: "Late", owner: "bot", root: root)
-        let bots = root.appendingPathComponent("Bots")
+        let package = try NoodletPackage(url: URL(fileURLWithPath:
+            try botNoodlet(try htmlNoodlet("Late"), named: "Late", owner: "bot", root: root)))
+        try library.know(package)
         let found = await Task.detached {
             XCTAssertFalse(Thread.isMainThread)
-            return AppletLibrary.discover(in: [], botFolders: [bots], thumbnails: root)
+            return AppletLibrary.discover(in: [], known: [package.url], thumbnails: root)
         }.value
         XCTAssertEqual(found.entries.values.map(\.title), ["Late"])
+        library.remember(package)
         await library.refresh()
         XCTAssertTrue(library.entries.contains { $0.title == "Late" })
     }
@@ -63,14 +65,15 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(count.walks, 0)
     }
 
-    /// A change in a folder the library walks brings what changed in at the next tick.
-    @MainActor func testTheWatchWalksAgainOnceAFolderChanged() async throws {
+    /// A change in a folder the library reads brings what changed in at the next tick.
+    @MainActor func testTheWatchReadsAgainOnceAFolderChanged() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
         let library = botLibrary(root: root, defaults: defaults)
-        _ = try botNoodlet(try htmlNoodlet("Late"), named: "Late", owner: "bot", root: root)
+        _ = try NoodletPackage.install(try htmlNoodlet("Late"), to: library.documents.appendingPathComponent(
+            "Late.\(AppletBuildIdentity.current.fileExtension)"))
 
         library.foldersChanged()
         await library.refreshIfChanged()
@@ -78,76 +81,82 @@ final class LibraryTests: XCTestCase {
         XCTAssertTrue(library.entries.contains { $0.title == "Late" })
     }
 
-    /// Bots write all the time where no noodlet can be: hidden folders such as `.git`, `.build` and
-    /// `.noodle`, deep inside a checkout, and their own runtime files. Walking every workspace on
-    /// each of those writes kept Applet busy for as long as any bot worked.
-    @MainActor func testWritesWhereTheWalkFindsNoNoodletDoNotWalk() async throws {
+    /// Walking every bot's workspace for noodlets kept Applet busy for as long as any bot worked.
+    /// The library lists what was opened with a window instead, and never looks in bots' folders.
+    @MainActor func testBotNoodletsAreListedOnceOpenedWithAWindowAndNotBefore() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
         let library = botLibrary(root: root, defaults: defaults)
-        _ = try botNoodlet(try htmlNoodlet("Counter"), named: "Counter", owner: "kai", root: root)
+        final class Known: @unchecked Sendable { var lists: [[URL]] = [] }
+        let known = Known(), walk = library.walk
+        library.walk = { known.lists.append($1); return walk($0, $1, $2) }
+        let package = try NoodletPackage(url: URL(fileURLWithPath:
+            try botNoodlet(htmlNoodlet("Counter"), named: "Counter", owner: "kai", root: root)))
+
         library.scan()
-        final class Count: @unchecked Sendable { var walks = 0 }
-        let count = Count(), walk = library.walk
-        library.walk = { count.walks += 1; return walk($0, $1, $2) }
-        let bot = root.appendingPathComponent("Bots/kai")
+        XCTAssertTrue(library.entries.isEmpty, "Made but never opened")
 
-        library.foldersChanged([
-            bot.appendingPathComponent("workspace/.build/debug").path,
-            bot.appendingPathComponent("workspace/.noodle/home/.claude").path,
-            bot.appendingPathComponent("workspace/repo/Sources/App/Views/Rows").path,
-            bot.appendingPathComponent("runtime").path,
-        ])
-        await library.refreshIfChanged()
+        try library.know(package)
+        library.scan()
+        XCTAssertTrue(library.entries.isEmpty, "Built, validated or opened without a window")
 
-        XCTAssertEqual(count.walks, 0)
+        library.remember(package)
+        XCTAssertEqual(library.entries.map(\.id), [package.key])
+        library.scan()
+        XCTAssertEqual(library.entries.map(\.id), [package.key])
+        XCTAssertEqual(botLibrary(root: root, defaults: defaults).entries.map(\.id), [package.key], "Kept across launches")
+        XCTAssertFalse(known.lists.flatMap { $0 }.contains { $0.path.hasSuffix("/workspace") }, "No bot folder is read")
     }
 
-    /// A change in one bot's workspace walks only that workspace, and keeps what the others hold.
-    @MainActor func testAChangeInOneBotsWorkspaceWalksOnlyThatWorkspace() async throws {
+    /// A noodlet in a hidden folder, as bots keep throwaway ones in `.tmp`, is never listed.
+    @MainActor func testNoodletsInHiddenFoldersAreNotListedThoughOpened() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
         let library = botLibrary(root: root, defaults: defaults)
-        let gone = try botNoodlet(try htmlNoodlet("Old"), named: "Old", owner: "kai", root: root)
-        let other = try botNoodlet(try htmlNoodlet("Board"), named: "Board", owner: "ada", root: root, hub: true)
+        let package = try NoodletPackage.install(try htmlNoodlet("Sheet"), to: root.appendingPathComponent(
+            "Bots/kai/workspace/.tmp/Sheet.\(AppletBuildIdentity.current.fileExtension)"))
+
+        library.remember(package)
         library.scan()
-        final class Walks: @unchecked Sendable { var places: [[URL]] = []; var botFolders: [[URL]] = [] }
-        let walks = Walks(), walk = library.walk
-        library.walk = { walks.places.append($0); walks.botFolders.append($1); return walk($0, $1, $2) }
-        try FileManager.default.removeItem(atPath: gone)
-        let made = try botNoodlet(try htmlNoodlet("New"), named: "New", owner: "kai", root: root)
-        let workspace = root.appendingPathComponent("Bots/kai/workspace")
 
-        library.foldersChanged([workspace.path])
-        await library.refreshIfChanged()
-
-        XCTAssertEqual(walks.places.map { $0.map(\.standardizedFileURL) }, [[workspace.standardizedFileURL]])
-        XCTAssertEqual(walks.botFolders, [[]])
-        XCTAssertEqual(Set(library.entries.map(\.package.url.path)), [made, other])
+        XCTAssertTrue(library.entries.isEmpty)
     }
 
-    /// A bot added or removed, or a change anywhere else the library looks, still walks everything.
-    @MainActor func testANewBotOrAChangeOutsideBotsWalksEverything() async throws {
+    /// Remove from Library leaves the package where it is and forgets what it saved; opening it
+    /// with a window lists it again. Applet's own folder is the library, so nothing there can leave it.
+    @MainActor func testRemovingFromTheLibraryKeepsThePackageAndForgetsItsData() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
         let library = botLibrary(root: root, defaults: defaults)
+        let package = try NoodletPackage(url: URL(fileURLWithPath:
+            try botNoodlet(htmlNoodlet("Counter"), named: "Counter", owner: "kai", root: root)))
+        library.remember(package)
+        library.pin(package.key)
+        let data = root.appendingPathComponent("Data/\(package.key)")
+        try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+        let secrets = AppletSecrets(storage: MemorySecrets())
+        XCTAssertTrue(library.canRemove(package))
+
+        try await library.remove(package, secrets: secrets)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: package.url.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: data.path))
+        XCTAssertTrue(library.entries.isEmpty)
+        XCTAssertTrue(library.pinned.isEmpty)
         library.scan()
-        final class Walks: @unchecked Sendable { var botFolders: [[URL]] = [] }
-        let walks = Walks(), walk = library.walk
-        library.walk = { walks.botFolders.append($1); return walk($0, $1, $2) }
+        XCTAssertTrue(library.entries.isEmpty)
+        library.remember(package)
+        XCTAssertEqual(library.entries.map(\.id), [package.key])
 
-        library.foldersChanged([root.appendingPathComponent("Bots").path])
-        await library.refreshIfChanged()
-        library.foldersChanged([library.documents.path])
-        await library.refreshIfChanged()
-
-        XCTAssertEqual(walks.botFolders.map(\.count), [2, 2])
+        let own = try NoodletPackage.install(try htmlNoodlet("Mine"), to: library.documents.appendingPathComponent(
+            "Mine.\(AppletBuildIdentity.current.fileExtension)"))
+        XCTAssertFalse(library.canRemove(own))
     }
 
     @MainActor func testNoodletsBotsKeepInTheirFoldersAreFoundWhereTheyAre() throws {
@@ -161,6 +170,7 @@ final class LibraryTests: XCTestCase {
         let library = botLibrary(root: root, defaults: defaults)
         let own = try botNoodlet(htmlNoodlet("Counter"), named: "Counter", owner: "kai", root: root)
         let hubs = try botNoodlet(htmlNoodlet("Board"), named: "Board", owner: "ada", root: root, hub: true)
+        for path in [own, hubs] { library.remember(try NoodletPackage(url: URL(fileURLWithPath: path))) }
         library.scan()
         XCTAssertEqual(Set(library.entries.map(\.package.url.path)), [own, hubs])
         XCTAssertEqual(library.hub, [try NoodletPackage(url: URL(fileURLWithPath: hubs)).key])
@@ -190,6 +200,7 @@ final class LibraryTests: XCTestCase {
         _ = try botNoodlet(htmlNoodlet("Counter"), named: "Counter", owner: "local", root: root)
         try own("alfred", by: ada, named: "Ada")
         try own("jeeves", by: kai, named: "Kai")
+        for package in [board, chess, loose] { library.remember(package) }
         library.scan()
         XCTAssertEqual(library.hubPeople, [HubPerson(id: ada, name: "Ada"), HubPerson(id: kai, name: "Kai")])
         XCTAssertEqual(library.hubOwners[board.key], HubPerson(id: ada, name: "Ada"))
@@ -393,11 +404,11 @@ final class LibraryTests: XCTestCase {
             ["noodlet.json": Data(#"{"version":1,"title":"\#(title)","runtime":"html","entry":"index.html","category":"\#(category)"}"#.utf8),
              "index.html": Data("<title>Test</title>".utf8)]
         }
-        _ = try botNoodlet(noodlet("Chess", "games"), named: "Chess", owner: "local", root: root)
-        library.scan()
+        let chess = try botNoodlet(noodlet("Chess", "games"), named: "Chess", owner: "local", root: root)
+        library.remember(try NoodletPackage(url: URL(fileURLWithPath: chess)))
         XCTAssertFalse(library.hasHub)
-        _ = try botNoodlet(noodlet("Notes", "writing"), named: "Notes", owner: "alfred", root: root, hub: true)
-        library.scan()
+        let notes = try botNoodlet(noodlet("Notes", "writing"), named: "Notes", owner: "alfred", root: root, hub: true)
+        library.remember(try NoodletPackage(url: URL(fileURLWithPath: notes)))
         XCTAssertTrue(library.hasHub)
         XCTAssertEqual(library.categories(in: .personal), ["games"])
         XCTAssertEqual(library.categories(in: .hub), ["writing"])
@@ -493,8 +504,11 @@ final class LibraryTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
         let library = botLibrary(root: root, defaults: defaults)
-        let kept = try NoodletPackage(url: URL(fileURLWithPath:
-            try botNoodlet(htmlNoodlet("Kept"), named: "Kept", owner: "kai", root: root))).key
+        let package = try NoodletPackage(url: URL(fileURLWithPath:
+            try botNoodlet(htmlNoodlet("Kept"), named: "Kept", owner: "kai", root: root)))
+        // Known without being listed, as a noodlet a bot has opened only without a window.
+        try library.know(package)
+        let kept = package.key
         for key in [kept, "busy", "gone"] {
             let folder = root.appendingPathComponent("Data/\(key)")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -510,14 +524,14 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(Set(AppletStorage.stores(defaults: defaults).keys), [kept, "busy"])
     }
 
-    /// A bot folder that cannot be read may hold noodlets, so nothing is deleted.
+    /// A folder of noodlets that cannot be read may hold some, so nothing is deleted.
     @MainActor func testOrphanedDataStaysWhenTheLibraryCannotLookEverywhere() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
-        let hub = root.appendingPathComponent("Hub Bots")
+        let folder = root.appendingPathComponent("Noodlets")
         defer {
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hub.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
             try? FileManager.default.removeItem(at: root)
             defaults.removePersistentDomain(forName: suite)
         }
@@ -525,8 +539,8 @@ final class LibraryTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("Data/hidden"), withIntermediateDirectories: true)
         try Data([1]).write(to: root.appendingPathComponent("Data/hidden/file"))
-        try FileManager.default.createDirectory(at: hub, withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: hub.path)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: folder.path)
 
         await library.removeOrphanedData { [] }
 

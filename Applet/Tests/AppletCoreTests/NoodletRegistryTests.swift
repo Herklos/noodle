@@ -30,6 +30,33 @@ final class NoodletRegistryTests: XCTestCase {
         XCTAssertThrowsError(try NoodletRegistry(file: file))
     }
 
+    /// The library lists what the registry knows: moved packages follow their bookmark, packages
+    /// gone are forgotten, and a package can be forgotten on purpose.
+    func testPackagesFollowMovesAndForgetWhatIsGone() throws {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? manager.removeItem(at: root) }
+        func make(_ name: String) throws -> URL {
+            let url = root.appendingPathComponent("\(name).noodlet")
+            try manager.createDirectory(at: url, withIntermediateDirectories: true)
+            return url.resolvingSymlinksInPath().standardizedFileURL
+        }
+        let (kept, moving, gone, forgotten) = (try make("Kept"), try make("Moving"), try make("Gone"), try make("Forgotten"))
+        let file = root.appendingPathComponent("registry.json")
+        let registry = try NoodletRegistry(file: file)
+        let id = try registry.id(for: moving)
+        for url in [kept, gone, forgotten] { _ = try registry.id(for: url) }
+        let moved = root.appendingPathComponent("Moved.noodlet").resolvingSymlinksInPath().standardizedFileURL
+        try manager.moveItem(at: moving, to: moved)
+        try manager.removeItem(at: gone)
+        try registry.forget(forgotten)
+
+        XCTAssertEqual(Set(registry.packages().map(\.path)), [kept.path, moved.path])
+        let reloaded = try NoodletRegistry(file: file)
+        XCTAssertEqual(Set(reloaded.packages().map(\.path)), [kept.path, moved.path])
+        XCTAssertEqual(try reloaded.id(for: moved), id, "Links already shared still open the moved package")
+    }
+
     func testLinksAreStrictAndCannotCombineIDWithAnotherTarget() throws {
         let id = UUID(), url = NoodletLink.url(for: UUID())
         XCTAssertEqual(NoodletLink.id(in: NoodletLink.url(for: id)), id)

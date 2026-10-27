@@ -36,7 +36,7 @@ struct LibraryEntry: Identifiable, Equatable {
 }
 
 /// Where Noodle or Noodle Hub keeps its bots, each bot's own work in `<bot id>/workspace`.
-/// Applet finds the noodlets bots make there itself and uses them where they are.
+/// Applet uses the noodlets bots make there where they are.
 struct BotFolder: Equatable {
   let url: URL
   /// Noodle Hub's bots, whose noodlets are listed under Hub, apart from this Mac's own.
@@ -55,14 +55,13 @@ struct BotFolder: Equatable {
   }
 }
 
-/// Reports changes anywhere under a set of existing folders, on the main queue: the folders that
-/// changed, or nil when FSEvents lost track and everything must be looked at again.
+/// Reports changes anywhere under a set of existing folders, on the main queue.
 @MainActor private final class FolderWatch {
-  private let changed: ([String]?) -> Void
+  private let changed: () -> Void
   private var stream: FSEventStreamRef?
   private var paths: [String] = []
 
-  init(changed: @escaping ([String]?) -> Void) { self.changed = changed }
+  init(changed: @escaping () -> Void) { self.changed = changed }
 
   /// Watches `paths` instead of what it watched before, and says whether they differ; the same
   /// paths keep the stream running.
@@ -76,16 +75,11 @@ struct BotFolder: Equatable {
     guard
       let stream = FSEventStreamCreate(
         nil,
-        { _, info, count, paths, flags, _ in
+        { _, info, _, _, _, _ in
           guard let info else { return }
-          let folders = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String]
-          let lost = FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged)
-          let rescan = (0..<count).contains { flags[$0] & lost != 0 }
-          MainActor.assumeIsolated {
-            Unmanaged<FolderWatch>.fromOpaque(info).takeUnretainedValue().changed(rescan ? nil : folders)
-          }
+          MainActor.assumeIsolated { Unmanaged<FolderWatch>.fromOpaque(info).takeUnretainedValue().changed() }
         }, &context, paths as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 1,
-        FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes))
+        FSEventStreamCreateFlags(kFSEventStreamCreateFlagNone))
     else { return true }
     FSEventStreamSetDispatchQueue(stream, .main)
     FSEventStreamStart(stream)
@@ -140,11 +134,11 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   private var refreshing = false
   private var watch: FolderWatch?
   private var changed = false
-  /// Bots' workspaces that changed since the last walk, walked on their own unless `changed`.
-  private var changedWorkspaces: Set<URL> = []
   private var walked = Date()
-  /// Finds the noodlets in places and bots' folders. Replaced in tests.
-  var walk: @Sendable (_ places: [URL], _ botFolders: [URL], _ thumbnails: URL) -> Discovery = AppletLibrary.discover
+  /// Reads the noodlets in places and those already known. Replaced in tests.
+  var walk: @Sendable (_ places: [URL], _ known: [URL], _ thumbnails: URL) -> Discovery = AppletLibrary.discover
+  /// Noodlets bots used only without a window: known, so their data is kept, but not listed.
+  private var unlisted: Set<String>
   private var links: NoodletRegistry?
   /// Where noodlets keep their secrets, whichever device their page runs on.
   let secrets: AppletSecrets
@@ -166,6 +160,7 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     pinned = defaults.stringArray(forKey: "pinned") ?? []
     hidden = defaults.stringArray(forKey: "hidden") ?? []
     hub = defaults.stringArray(forKey: "hub") ?? []
+    unlisted = Set(defaults.stringArray(forKey: "unlisted") ?? [])
     do {
       try FileManager.default.createDirectory(
         at: documents, withIntermediateDirectories: true)
@@ -216,9 +211,7 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     persistRegistrations()
     scan()
     if watchChanges {
-      watch = FolderWatch { [weak self] folders in
-        if let folders { self?.foldersChanged(folders) } else { self?.foldersChanged() }
-      }
+      watch = FolderWatch { [weak self] in self?.foldersChanged() }
       watch?.watch(watchedPaths())
       timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
         Task { @MainActor in await self?.refreshIfChanged() }
@@ -268,111 +261,60 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   }
   func scan() {
     changed = false
-    changedWorkspaces = []
     walked = Date()
     let places = forget()
-    apply(walk(places, botFolders.map(\.url), root.appendingPathComponent("Thumbnails", isDirectory: true)).entries)
+    apply(walk(places, listedKnown(), root.appendingPathComponent("Thumbnails", isDirectory: true)).entries)
   }
-  /// What the watch timer runs. Walking bots' workspaces takes a tenth of a second or more, and
-  /// recordings and live views capture on the main thread, so the walk happens off it.
+  /// What the watch timer runs. Reading every package takes a while, and recordings and live
+  /// views capture on the main thread, so it happens off it.
   func refresh() async {
     guard !refreshing else { return }
     refreshing = true
     defer { refreshing = false }
-    // Cleared before the walk: a change while it runs brings another.
+    // Cleared before the read: a change while it runs brings another.
     changed = false
-    changedWorkspaces = []
     walked = Date()
-    let places = forget(), folders = botFolders.map(\.url), walk = walk
+    let places = forget(), known = listedKnown(), walk = walk
     let thumbnails = root.appendingPathComponent("Thumbnails", isDirectory: true)
-    apply(await Task.detached { walk(places, folders, thumbnails) }.value.entries)
+    apply(await Task.detached { walk(places, known, thumbnails) }.value.entries)
   }
-  /// Something changed under a folder the library walks, so the next tick walks again.
+  /// The known noodlets the library lists: those not used only without a window.
+  private func listedKnown() -> [URL] {
+    (links?.packages() ?? []).filter { !unlisted.contains(NoodletPackage.digest(Data($0.path.utf8))) }
+  }
+  /// Something changed under a folder the library reads, so the next tick reads again.
   func foldersChanged() { changed = true }
-  /// `paths` changed, so the next tick walks what they may have changed: nothing for a folder the
-  /// walk never looks in, one bot's workspace for a change inside it, and everything otherwise.
-  func foldersChanged(_ paths: [String]) {
-    for path in paths {
-      switch Self.change(at: path, botFolders: botFolders.map(\.url)) {
-      case .none: continue
-      case .workspace(let workspace): changedWorkspaces.insert(workspace)
-      case .everything: changed = true
-      }
-    }
-  }
-  enum Change: Equatable {
-    case none
-    case workspace(URL)
-    case everything
-  }
-  /// What a change in `path` may have changed for `discover`. Bots write all the time in hidden
-  /// folders, deep in checkouts and in their own runtime files, where it never finds a noodlet.
-  nonisolated static func change(at path: String, botFolders: [URL]) -> Change {
-    let parts = canonical(URL(fileURLWithPath: path)).pathComponents
-    for folder in botFolders {
-      let base = canonical(folder).pathComponents
-      guard parts.count >= base.count, Array(parts.prefix(base.count)) == base else { continue }
-      let rest = Array(parts.dropFirst(base.count))
-      // The folder itself, or a bot added or removed.
-      guard rest.count >= 2 else { return .everything }
-      guard rest[1] == "workspace" else { return .none }
-      let inside = rest.dropFirst(2)
-      let package = "." + AppletBuildIdentity.current.fileExtension
-      // `discover` skips hidden items, and descends no further than four levels outside a package.
-      if inside.contains(where: { $0.hasPrefix(".") }) { return .none }
-      if inside.count > 4, !inside.contains(where: { $0.hasSuffix(package) }) { return .none }
-      return .workspace(folder.appendingPathComponent(rest[0]).appendingPathComponent("workspace", isDirectory: true))
-    }
-    return .everything
-  }
-  /// What the watch timer runs: a walk only once something changed, and now and then anyway in
-  /// case a change went unreported. Walking everything every two seconds cost a quarter of a core.
+  /// What the watch timer runs: a read only once something changed, and now and then anyway, as
+  /// bots change the noodlets they keep, which nothing watches.
   func refreshIfChanged() async {
     if watch?.watch(watchedPaths()) == true { changed = true }
-    if changed || Date().timeIntervalSince(walked) >= 60 {
-      await refresh()
-    } else if !changedWorkspaces.isEmpty {
-      await refresh(workspaces: changedWorkspaces)
-    }
+    guard changed || Date().timeIntervalSince(walked) >= 60 else { return }
+    await refresh()
   }
-  /// Walks only `workspaces` and keeps what the library found everywhere else.
-  private func refresh(workspaces: Set<URL>) async {
-    guard !refreshing else { return }
-    refreshing = true
-    defer { refreshing = false }
-    changedWorkspaces.subtract(workspaces)
-    let places = Array(workspaces), walk = walk
-    let thumbnails = root.appendingPathComponent("Thumbnails", isDirectory: true)
-    let found = await Task.detached { walk(places, [], thumbnails) }.value.entries
-    let walked = workspaces.map { Self.canonical($0).pathComponents }
-    var kept = [String: LibraryEntry]()
-    for entry in entries {
-      let parts = Self.canonical(entry.package.url).pathComponents
-      guard !walked.contains(where: { parts.count > $0.count && Array(parts.prefix($0.count)) == $0 }) else { continue }
-      kept[entry.id] = entry
-    }
-    apply(kept.merging(found) { _, new in new })
-  }
-  /// The folders the walk looks in that exist: FSEvents reports nothing under one made later,
+  /// The folders the library reads that exist: FSEvents reports nothing under one made later,
   /// so the watch starts on it once it appears.
   private func watchedPaths() -> [String] {
     ([documents, root.appendingPathComponent("Thumbnails", isDirectory: true)]
-      + registrations.map(\.url) + botFolders.map(\.url)).map(\.path)
+      + registrations.map(\.url)).map(\.path)
       .filter { FileManager.default.fileExists(atPath: $0) }
   }
-  /// Deletes what noodlets no longer anywhere Applet looks saved, as when one was deleted or moved
-  /// outside Applet. Nothing goes when the walk could not look everywhere, nor for noodlets `inUse`.
+  /// Deletes what noodlets Applet no longer knows saved, as when one was deleted or moved outside
+  /// Applet, or removed from the library. Nothing goes when the library could not read everywhere,
+  /// nor for noodlets `inUse`.
   func removeOrphanedData(keeping inUse: () -> Set<String>) async {
-    let places = forget(), folders = botFolders.map(\.url), walk = walk, root = root
+    guard links != nil else { return }
+    let places = forget(), known = links?.packages() ?? [], walk = walk, root = root
+    let listed = known.filter { !unlisted.contains(NoodletPackage.digest(Data($0.path.utf8))) }
     let thumbnails = root.appendingPathComponent("Thumbnails", isDirectory: true)
-    let found = await Task.detached { walk(places, folders, thumbnails) }.value
+    let found = await Task.detached { walk(places, listed, thumbnails) }.value
     apply(found.entries)
     guard found.complete else { return }
+    let kept = Set(known.map { NoodletPackage.digest(Data($0.path.utf8)) })
     let data = root.appendingPathComponent("Data")
     let saved = await Task.detached { (try? FileManager.default.contentsOfDirectory(atPath: data.path)) ?? [] }.value
     // Checked again before each one: a noodlet opened meanwhile keeps its data.
     for key in Set(saved).union(AppletStorage.stores(defaults: defaults).keys).sorted()
-    where !entries.contains(where: { $0.id == key }) && !inUse().contains(key) {
+    where !entries.contains(where: { $0.id == key }) && !kept.contains(key) && !inUse().contains(key) {
       await AppletStorage.remove(key, root: root, defaults: defaults)
     }
   }
@@ -403,53 +345,28 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     var entries: [String: LibraryEntry] = [:]
     var complete = true
   }
-  /// Every noodlet in `places` and in the workspaces of the bots in `botFolders`.
-  nonisolated static func discover(in places: [URL], botFolders: [URL], thumbnails: URL) -> Discovery {
-    final class Flag: @unchecked Sendable { var complete = true }
-    let flag = Flag()
-    let workspaces = botFolders.flatMap { folder in
-      guard FileManager.default.fileExists(atPath: folder.path) else { return [URL]() }
-      guard let bots = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
-        flag.complete = false
-        return []
-      }
-      return bots.map { $0.appendingPathComponent("workspace", isDirectory: true) }
-        .filter { FileManager.default.fileExists(atPath: $0.path) }
+  /// The noodlets in `places`, each a package or a folder holding packages, without looking in
+  /// subfolders, and the `known` packages outside hidden folders and the Trash.
+  nonisolated static func discover(in places: [URL], known: [URL], thumbnails: URL) -> Discovery {
+    var complete = true
+    var packages: [URL] = []
+    for place in places {
+      if AppletBuildIdentity.document(place) == .current { packages.append(place); continue }
+      guard let items = try? FileManager.default.contentsOfDirectory(
+        at: place, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+      else { complete = false; continue }
+      packages += items.filter { AppletBuildIdentity.document($0) == .current }
+    }
+    packages += known.filter { url in
+      !url.pathComponents.contains { $0.hasPrefix(".") }
     }
     var found: [String: LibraryEntry] = [:]
-    for directory in places + workspaces {
-      if AppletBuildIdentity.document(directory) == .current {
-        if let package = try? NoodletPackage(url: directory) {
-          let entry = LibraryEntry(package: package, thumbnails: thumbnails)
-          found[entry.id] = entry
-        }
-        continue
-      }
-      guard
-        let walker = FileManager.default.enumerator(
-          at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey],
-          options: [.skipsHiddenFiles], errorHandler: { _, _ in flag.complete = false; return true })
-      else { flag.complete = false; continue }
-      var count = 0
-      for case let url as URL in walker {
-        count += 1
-        if count > 10000 { flag.complete = false; break }
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-          walker.skipDescendants()
-          continue
-        }
-        if AppletBuildIdentity.document(url) == .current {
-          walker.skipDescendants()
-          if let package = try? NoodletPackage(url: url) {
-            let entry = LibraryEntry(package: package, thumbnails: thumbnails)
-            found[entry.id] = entry
-          }
-        } else if walker.level > 4 {
-          walker.skipDescendants()
-        }
-      }
+    for url in packages {
+      guard let package = try? NoodletPackage(url: url) else { continue }
+      let entry = LibraryEntry(package: package, thumbnails: thumbnails)
+      found[entry.id] = entry
     }
-    return Discovery(entries: found, complete: flag.complete)
+    return Discovery(entries: found, complete: complete)
   }
   private func apply(_ found: [String: LibraryEntry]) {
     let next = found.values.sorted {
@@ -484,15 +401,49 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     if !entries.contains(where: { $0.package.url == package.url }) { try grant(url) }
     return package
   }
+  /// Lists a noodlet opened with a window, and puts it first among the recent ones.
   func remember(_ package: NoodletPackage) {
+    _ = try? linkID(for: package)
+    if unlisted.remove(package.key) != nil { defaults.set(unlisted.sorted(), forKey: "unlisted") }
     recent.removeAll { $0 == package.key }
     recent.insert(package.key, at: 0)
     recent = Array(recent.prefix(30))
     defaults.set(recent, forKey: "recent")
-    // Only it can be new here, so the workspaces are not walked again on the main thread.
-    guard !entries.contains(where: { $0.id == package.key }) else { return }
     let entry = LibraryEntry(package: package, thumbnails: root.appendingPathComponent("Thumbnails", isDirectory: true))
     apply(Dictionary(entries.map { ($0.id, $0) } + [(entry.id, entry)], uniquingKeysWith: { $1 }))
+  }
+  /// Notes a noodlet a bot builds, validates or opens, so Applet keeps its data. It is listed only
+  /// once it opens with a window.
+  func know(_ package: NoodletPackage) throws {
+    _ = try linkID(for: package)
+    guard !entries.contains(where: { $0.id == package.key }), unlisted.insert(package.key).inserted else { return }
+    defaults.set(unlisted.sorted(), forKey: "unlisted")
+  }
+  /// The noodlets Applet knows that `bot` made, listed or not, outside hidden folders.
+  func packages(madeBy bot: String) -> [NoodletPackage] {
+    (links?.packages() ?? []).filter { url in
+      owner(of: url) == bot && !url.pathComponents.contains { $0.hasPrefix(".") }
+    }.compactMap { try? NoodletPackage(url: $0) }
+  }
+  /// Whether the noodlet can leave the library without being deleted: Applet lists everything in its own folder.
+  func canRemove(_ package: NoodletPackage) -> Bool {
+    Self.canonical(package.url.deletingLastPathComponent()) != Self.canonical(documents)
+  }
+  /// Takes a noodlet out of the library and leaves its package where it is, deleting what it saved,
+  /// its secrets, permissions and thumbnail, as moving it to the Trash does. Opening it with a
+  /// window lists it again.
+  func remove(_ package: NoodletPackage, secrets: AppletSecrets = .shared) async throws {
+    try links?.forget(package.url)
+    if let index = registrations.firstIndex(where: { Self.canonical($0.url) == package.url }) {
+      if registrations[index].scoped { registrations[index].url.stopAccessingSecurityScopedResource() }
+      registrations.remove(at: index)
+      persistRegistrations()
+    }
+    for list in [\AppletLibrary.recent, \.pinned, \.hidden, \.hub] { self[keyPath: list].removeAll { $0 == package.key } }
+    for (name, list) in [("recent", recent), ("pinned", pinned), ("hidden", hidden), ("hub", hub)] { defaults.set(list, forKey: name) }
+    if unlisted.remove(package.key) != nil { defaults.set(unlisted.sorted(), forKey: "unlisted") }
+    apply(Dictionary(entries.filter { $0.id != package.key }.map { ($0.id, $0) }, uniquingKeysWith: { $1 }))
+    await forgetData(of: package, secrets: secrets)
   }
   /// Pinned noodlets for the menu bar, in pin order.
   var menuPinned: [LibraryEntry] {
@@ -539,7 +490,11 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
   ) async throws {
     try moveToTrash(package.url)
+    try? links?.forget(package.url)
     scan()
+    await forgetData(of: package, secrets: secrets)
+  }
+  private func forgetData(of package: NoodletPackage, secrets: AppletSecrets) async {
     await AppletStorage.remove(package.key, root: root, defaults: defaults)
     AppletPermissions.revoke(packageKey: package.key, defaults: defaults)
     for scope in ["user", "test"] { try? secrets.storage.save([:], account: "\(package.key).\(scope)") }

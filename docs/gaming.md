@@ -52,7 +52,7 @@ iPad. If a game has no controls on the phone, ask the bot to add them.
 When a bot shares a game, it appears in the conversation as a card.
 
 A game from a bot on your Mac opens in Noodle Applet when you click its card.
-Every such game also appears in the Applet library, under **Games** in its
+From then on it also appears in the Applet library, under **Games** in its
 **Categories** section.
 
 A game from a bot on a Noodle Hub opens in a panel in Noodle and runs on your

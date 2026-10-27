@@ -42,6 +42,37 @@ public final class NoodletRegistry {
         do { try persist() } catch { entries = previous; throw error }
     }
 
+    /// Every linked package where it is now: its stored path while that exists, else where its
+    /// bookmark leads, in which case the link follows it there. A package found nowhere is forgotten.
+    public func packages() -> [URL] {
+        var found: [URL] = [], changed = false
+        entries = entries.filter { entry in
+            if FileManager.default.fileExists(atPath: entry.path) {
+                found.append(URL(fileURLWithPath: entry.path))
+                return true
+            }
+            changed = true
+            return false
+        } + entries.compactMap { entry -> Entry? in
+            guard !FileManager.default.fileExists(atPath: entry.path), let url = resolved(entry),
+                  let bookmark = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+            else { return nil }
+            found.append(url)
+            return Entry(id: entry.id, path: url.path, bookmark: bookmark)
+        }
+        if changed { try? persist() }
+        return found
+    }
+
+    /// Forgets the link of the package at `package`; links already shared to it stop opening it.
+    public func forget(_ package: URL) throws {
+        let path = package.resolvingSymlinksInPath().standardizedFileURL.path
+        guard entries.contains(where: { $0.path == path }) else { return }
+        let previous = entries
+        entries.removeAll { $0.path == path }
+        do { try persist() } catch { entries = previous; throw error }
+    }
+
     public func resolve(_ id: UUID) -> URL? {
         guard let entry = entries.first(where: { $0.id == id }) else { return nil }
         return resolved(entry)

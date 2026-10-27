@@ -18,8 +18,12 @@ Opening Noodle Applet shows your library of noodlets. The **All**, **Recent**,
 **Pinned** and **Hidden** tabs sort them. When noodlets say what kind they are,
 such as games or productivity, a **Categories** section lists each kind that has
 one. Right-click a noodlet's card to pin it,
-hide it, or reveal its files in Finder. Noodlets your bots make appear in the
-library on their own.
+hide it, or reveal its files in Finder. A noodlet a bot makes appears in the
+library once it opens in a window.
+
+To take a noodlet out of the library, right-click it and choose **Remove from
+Library**: its files stay where they are, and what it saved is deleted. Opening
+it again adds it back. **Move to Trash** deletes the noodlet itself.
 
 To add a noodlet you already have, choose **File → Open Noodlet…** or double-click
 it in Finder. If you delete it later, it leaves the library too. Press Space on a
