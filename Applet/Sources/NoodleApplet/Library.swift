@@ -55,13 +55,14 @@ struct BotFolder: Equatable {
   }
 }
 
-/// Reports changes anywhere under a set of existing folders, on the main queue.
+/// Reports changes anywhere under a set of existing folders, on the main queue: the folders that
+/// changed, or nil when FSEvents lost track and everything must be looked at again.
 @MainActor private final class FolderWatch {
-  private let changed: () -> Void
+  private let changed: ([String]?) -> Void
   private var stream: FSEventStreamRef?
   private var paths: [String] = []
 
-  init(changed: @escaping () -> Void) { self.changed = changed }
+  init(changed: @escaping ([String]?) -> Void) { self.changed = changed }
 
   /// Watches `paths` instead of what it watched before, and says whether they differ; the same
   /// paths keep the stream running.
@@ -75,11 +76,16 @@ struct BotFolder: Equatable {
     guard
       let stream = FSEventStreamCreate(
         nil,
-        { _, info, _, _, _, _ in
+        { _, info, count, paths, flags, _ in
           guard let info else { return }
-          MainActor.assumeIsolated { Unmanaged<FolderWatch>.fromOpaque(info).takeUnretainedValue().changed() }
+          let folders = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String]
+          let lost = FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged)
+          let rescan = (0..<count).contains { flags[$0] & lost != 0 }
+          MainActor.assumeIsolated {
+            Unmanaged<FolderWatch>.fromOpaque(info).takeUnretainedValue().changed(rescan ? nil : folders)
+          }
         }, &context, paths as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 1,
-        FSEventStreamCreateFlags(kFSEventStreamCreateFlagNone))
+        FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes))
     else { return true }
     FSEventStreamSetDispatchQueue(stream, .main)
     FSEventStreamStart(stream)
@@ -134,6 +140,8 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   private var refreshing = false
   private var watch: FolderWatch?
   private var changed = false
+  /// Bots' workspaces that changed since the last walk, walked on their own unless `changed`.
+  private var changedWorkspaces: Set<URL> = []
   private var walked = Date()
   /// Finds the noodlets in places and bots' folders. Replaced in tests.
   var walk: @Sendable (_ places: [URL], _ botFolders: [URL], _ thumbnails: URL) -> Discovery = AppletLibrary.discover
@@ -208,7 +216,9 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     persistRegistrations()
     scan()
     if watchChanges {
-      watch = FolderWatch { [weak self] in self?.foldersChanged() }
+      watch = FolderWatch { [weak self] folders in
+        if let folders { self?.foldersChanged(folders) } else { self?.foldersChanged() }
+      }
       watch?.watch(watchedPaths())
       timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
         Task { @MainActor in await self?.refreshIfChanged() }
@@ -238,7 +248,7 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     }
     return nil
   }
-  private static func canonical(_ url: URL) -> URL {
+  nonisolated private static func canonical(_ url: URL) -> URL {
     url.resolvingSymlinksInPath().standardizedFileURL
   }
   private static func missing(_ url: URL) -> Bool {
@@ -258,6 +268,7 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   }
   func scan() {
     changed = false
+    changedWorkspaces = []
     walked = Date()
     let places = forget()
     apply(walk(places, botFolders.map(\.url), root.appendingPathComponent("Thumbnails", isDirectory: true)).entries)
@@ -270,6 +281,7 @@ struct HubPerson: Hashable, Identifiable, Decodable {
     defer { refreshing = false }
     // Cleared before the walk: a change while it runs brings another.
     changed = false
+    changedWorkspaces = []
     walked = Date()
     let places = forget(), folders = botFolders.map(\.url), walk = walk
     let thumbnails = root.appendingPathComponent("Thumbnails", isDirectory: true)
@@ -277,12 +289,69 @@ struct HubPerson: Hashable, Identifiable, Decodable {
   }
   /// Something changed under a folder the library walks, so the next tick walks again.
   func foldersChanged() { changed = true }
+  /// `paths` changed, so the next tick walks what they may have changed: nothing for a folder the
+  /// walk never looks in, one bot's workspace for a change inside it, and everything otherwise.
+  func foldersChanged(_ paths: [String]) {
+    for path in paths {
+      switch Self.change(at: path, botFolders: botFolders.map(\.url)) {
+      case .none: continue
+      case .workspace(let workspace): changedWorkspaces.insert(workspace)
+      case .everything: changed = true
+      }
+    }
+  }
+  enum Change: Equatable {
+    case none
+    case workspace(URL)
+    case everything
+  }
+  /// What a change in `path` may have changed for `discover`. Bots write all the time in hidden
+  /// folders, deep in checkouts and in their own runtime files, where it never finds a noodlet.
+  nonisolated static func change(at path: String, botFolders: [URL]) -> Change {
+    let parts = canonical(URL(fileURLWithPath: path)).pathComponents
+    for folder in botFolders {
+      let base = canonical(folder).pathComponents
+      guard parts.count >= base.count, Array(parts.prefix(base.count)) == base else { continue }
+      let rest = Array(parts.dropFirst(base.count))
+      // The folder itself, or a bot added or removed.
+      guard rest.count >= 2 else { return .everything }
+      guard rest[1] == "workspace" else { return .none }
+      let inside = rest.dropFirst(2)
+      let package = "." + AppletBuildIdentity.current.fileExtension
+      // `discover` skips hidden items, and descends no further than four levels outside a package.
+      if inside.contains(where: { $0.hasPrefix(".") }) { return .none }
+      if inside.count > 4, !inside.contains(where: { $0.hasSuffix(package) }) { return .none }
+      return .workspace(folder.appendingPathComponent(rest[0]).appendingPathComponent("workspace", isDirectory: true))
+    }
+    return .everything
+  }
   /// What the watch timer runs: a walk only once something changed, and now and then anyway in
   /// case a change went unreported. Walking everything every two seconds cost a quarter of a core.
   func refreshIfChanged() async {
     if watch?.watch(watchedPaths()) == true { changed = true }
-    guard changed || Date().timeIntervalSince(walked) >= 60 else { return }
-    await refresh()
+    if changed || Date().timeIntervalSince(walked) >= 60 {
+      await refresh()
+    } else if !changedWorkspaces.isEmpty {
+      await refresh(workspaces: changedWorkspaces)
+    }
+  }
+  /// Walks only `workspaces` and keeps what the library found everywhere else.
+  private func refresh(workspaces: Set<URL>) async {
+    guard !refreshing else { return }
+    refreshing = true
+    defer { refreshing = false }
+    changedWorkspaces.subtract(workspaces)
+    let places = Array(workspaces), walk = walk
+    let thumbnails = root.appendingPathComponent("Thumbnails", isDirectory: true)
+    let found = await Task.detached { walk(places, [], thumbnails) }.value.entries
+    let walked = workspaces.map { Self.canonical($0).pathComponents }
+    var kept = [String: LibraryEntry]()
+    for entry in entries {
+      let parts = Self.canonical(entry.package.url).pathComponents
+      guard !walked.contains(where: { parts.count > $0.count && Array(parts.prefix($0.count)) == $0 }) else { continue }
+      kept[entry.id] = entry
+    }
+    apply(kept.merging(found) { _, new in new })
   }
   /// The folders the walk looks in that exist: FSEvents reports nothing under one made later,
   /// so the watch starts on it once it appears.

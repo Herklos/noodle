@@ -78,6 +78,78 @@ final class LibraryTests: XCTestCase {
         XCTAssertTrue(library.entries.contains { $0.title == "Late" })
     }
 
+    /// Bots write all the time where no noodlet can be: hidden folders such as `.git`, `.build` and
+    /// `.noodle`, deep inside a checkout, and their own runtime files. Walking every workspace on
+    /// each of those writes kept Applet busy for as long as any bot worked.
+    @MainActor func testWritesWhereTheWalkFindsNoNoodletDoNotWalk() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "AppletLibraryTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let library = botLibrary(root: root, defaults: defaults)
+        _ = try botNoodlet(try htmlNoodlet("Counter"), named: "Counter", owner: "kai", root: root)
+        library.scan()
+        final class Count: @unchecked Sendable { var walks = 0 }
+        let count = Count(), walk = library.walk
+        library.walk = { count.walks += 1; return walk($0, $1, $2) }
+        let bot = root.appendingPathComponent("Bots/kai")
+
+        library.foldersChanged([
+            bot.appendingPathComponent("workspace/.build/debug").path,
+            bot.appendingPathComponent("workspace/.noodle/home/.claude").path,
+            bot.appendingPathComponent("workspace/repo/Sources/App/Views/Rows").path,
+            bot.appendingPathComponent("runtime").path,
+        ])
+        await library.refreshIfChanged()
+
+        XCTAssertEqual(count.walks, 0)
+    }
+
+    /// A change in one bot's workspace walks only that workspace, and keeps what the others hold.
+    @MainActor func testAChangeInOneBotsWorkspaceWalksOnlyThatWorkspace() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "AppletLibraryTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let library = botLibrary(root: root, defaults: defaults)
+        let gone = try botNoodlet(try htmlNoodlet("Old"), named: "Old", owner: "kai", root: root)
+        let other = try botNoodlet(try htmlNoodlet("Board"), named: "Board", owner: "ada", root: root, hub: true)
+        library.scan()
+        final class Walks: @unchecked Sendable { var places: [[URL]] = []; var botFolders: [[URL]] = [] }
+        let walks = Walks(), walk = library.walk
+        library.walk = { walks.places.append($0); walks.botFolders.append($1); return walk($0, $1, $2) }
+        try FileManager.default.removeItem(atPath: gone)
+        let made = try botNoodlet(try htmlNoodlet("New"), named: "New", owner: "kai", root: root)
+        let workspace = root.appendingPathComponent("Bots/kai/workspace")
+
+        library.foldersChanged([workspace.path])
+        await library.refreshIfChanged()
+
+        XCTAssertEqual(walks.places.map { $0.map(\.standardizedFileURL) }, [[workspace.standardizedFileURL]])
+        XCTAssertEqual(walks.botFolders, [[]])
+        XCTAssertEqual(Set(library.entries.map(\.package.url.path)), [made, other])
+    }
+
+    /// A bot added or removed, or a change anywhere else the library looks, still walks everything.
+    @MainActor func testANewBotOrAChangeOutsideBotsWalksEverything() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "AppletLibraryTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let library = botLibrary(root: root, defaults: defaults)
+        library.scan()
+        final class Walks: @unchecked Sendable { var botFolders: [[URL]] = [] }
+        let walks = Walks(), walk = library.walk
+        library.walk = { walks.botFolders.append($1); return walk($0, $1, $2) }
+
+        library.foldersChanged([root.appendingPathComponent("Bots").path])
+        await library.refreshIfChanged()
+        library.foldersChanged([library.documents.path])
+        await library.refreshIfChanged()
+
+        XCTAssertEqual(walks.botFolders.map(\.count), [2, 2])
+    }
+
     @MainActor func testNoodletsBotsKeepInTheirFoldersAreFoundWhereTheyAre() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "AppletLibraryTests." + UUID().uuidString
