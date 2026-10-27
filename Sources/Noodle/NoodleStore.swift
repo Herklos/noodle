@@ -124,6 +124,8 @@ final class NoodleStore {
     var backgroundBeingEdited: BotConversation?
     var spaceNaming: SpaceNaming?
     var editsSpaces = false
+    /// The space Edit Spaces asks about before deleting it.
+    var spaceBeingDeleted: CustomSpace?
     private(set) var backgrounds: [UUID: ConversationBackground] = [:]
     var errorMessage: String?
     /// A link the error alert offers beside OK, while `errorMessage` is still the message it belongs to.
@@ -500,6 +502,17 @@ final class NoodleStore {
 
     func moveSpaces(fromOffsets source: IndexSet, toOffset destination: Int) {
         changeSpaces { try spaceList.move(fromOffsets: source, toOffset: destination) }
+    }
+
+    /// Deleting asks first, so one click can't lose a space.
+    func askToDeleteSpace(_ id: UUID) {
+        spaceBeingDeleted = spaceList.space(id)
+    }
+
+    func confirmSpaceDeletion() {
+        guard let space = spaceBeingDeleted else { return }
+        spaceBeingDeleted = nil
+        deleteSpace(space.id)
     }
 
     /// Only the space goes; its bots and groups stay where they are.

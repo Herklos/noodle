@@ -809,6 +809,14 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(CurrentHub.route(to: WidgetLink(hub: "left", conversationID: atlas.conversationID), in: [chats.pairing]) == nil)
     }
 
+    /// Edit Spaces' delete only asks about the space swiped or tapped; nothing is deleted until the person confirms.
+    @Test func deletingASpaceAsksAboutIt() {
+        let (work, home) = (CustomSpace(name: "Work"), CustomSpace(name: "Home"))
+        #expect(SpaceEditor.asked(IndexSet(integer: 1), in: [work, home]) == home)
+        #expect(SpaceEditor.asked(IndexSet(integer: 2), in: [work, home]) == nil)
+        #expect(SpaceEditor.asked([], in: [work, home]) == nil)
+    }
+
     /// The title menu ticks All once the chosen space is gone: deleted on another device, or its Hub left.
     @Test func aSpaceGoneLeavesAllTicked() {
         let work = CustomSpace(name: "Work")

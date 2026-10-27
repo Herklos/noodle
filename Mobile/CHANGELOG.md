@@ -6,6 +6,10 @@
 
 - Tap a photo or file waiting above the message field to look at it before you send it, and swipe to the others waiting with it.
 
+### Changed
+
+- Deleting a space in Edit Spaces… asks first, so a stray swipe or tap no longer deletes it. Only the space is deleted; its bots and groups stay in All.
+
 ### Fixed
 
 - A conversation no longer goes blank when the keyboard opens. It could scroll past the latest message, leaving empty space above the message field until you scrolled back by hand.
@@ -16,6 +20,7 @@
 - In a long conversation, tap the message field: check the latest messages stay just above the keyboard, with no empty space. Close the keyboard and open it again a few times, also right after opening the conversation: check the same. Send a message with the keyboard open: check it shows above the keyboard.
 - In the list, pull down slowly: check the wordmark is written as you pull. Pull down far and let go: check the word goes up with the list and never sits over the first bot or the pinned bots, during the refresh or after it. With a Hub that can't be reached, pull to refresh: check the word goes once the list is back. Do the same in Hubs. On iPad, check the same in the list on the left.
 - In a chat, add a photo and a file without sending them. Tap the photo: check it opens in a preview, and you can swipe to the file. Close the preview: check both still wait. Tap the x on one: check it is taken out, and the other still opens when tapped.
+- Make a space and add a bot to it. Open the space menu, choose Edit Spaces… and delete the space with its red button, then by swiping its row: check each time it asks "Delete “Name”?" and Cancel keeps it. Choose Delete: check the space is gone and the bot is still in All. On iPad with a keyboard, press Esc at the question: check the space is kept.
 
 ## [0.48.0] - 2026-10-26
 

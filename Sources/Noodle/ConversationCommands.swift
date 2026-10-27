@@ -241,6 +241,14 @@ struct SpaceEditorSheet: View {
         .onChange(of: store.customSpaces.isEmpty) { _, isEmpty in
             if isEmpty, store.hubMirrors.count < 2 { dismiss() }
         }
+        .alert("Delete “\(store.spaceBeingDeleted?.name ?? "")”?",
+               isPresented: Binding(get: { store.spaceBeingDeleted != nil }, set: { if !$0 { store.spaceBeingDeleted = nil } }),
+               presenting: store.spaceBeingDeleted) { _ in
+            Button("Delete", role: .destructive) { store.confirmSpaceDeletion() }
+            Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
+        } message: { _ in
+            Text("Only the space is deleted. Its bots and groups stay in All.")
+        }
     }
 }
 
@@ -257,7 +265,7 @@ private struct SpaceEditorRow: View {
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit(save)
-            Button("Delete", systemImage: "minus.circle.fill") { store.deleteSpace(space.id) }
+            Button("Delete", systemImage: "minus.circle.fill") { store.askToDeleteSpace(space.id) }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
