@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.3] - 2026-10-27
+
 ### Fixed
 
 - Noodle Applet no longer keeps a CPU core busy while your bots work. Their builds, checkouts and other files no longer make it look through every bot's folder again; it looks only in the folder of the bot that changed something where a noodlet can be.

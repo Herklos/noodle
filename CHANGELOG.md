@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.77.4] - 2026-10-27
+
 ### Changed
 
 - Bots are told that a Noodle Browser tab can lose unsent work, for example when only a few pages stay loaded at once, so they keep drafts such as post text and files to attach in their workspace and finish a post before opening other tabs.
