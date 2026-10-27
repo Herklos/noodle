@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-10-27
+
 ### Added
 
 - Tap a photo or file waiting above the message field to look at it before you send it, and swipe to the others waiting with it.
