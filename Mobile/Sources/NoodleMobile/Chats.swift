@@ -2285,12 +2285,13 @@ enum ConversationScroll {
             insets = geometry.contentInsets
         }
 
-        /// Where to scroll for the end: `endOvershoot` past it, and the scroll view stops at the end itself. Aimed
-        /// past it by the insets, against `containerSize`, which leaves them out, it went beyond the end with the
-        /// keyboard up, by more than the room left above it, and the conversation went blank.
+        /// Where to scroll for the end, exactly. `ScrollPosition` measures a point from below the top inset, where
+        /// `contentOffset` measures it from the top of the content: on the iPhone simulator, under an 82-point bar,
+        /// a scroll to the end by `contentOffset` stopped 82 points short. Aimed past the end by the bottom inset,
+        /// the scroll view stopped at the end, until the keyboard took the bottom inset to more than the room left
+        /// above it, and the conversation went blank.
         var end: CGPoint {
-            CGPoint(x: -insets.leading,
-                    y: max(content.height - viewport.height - insets.top + ConversationScroll.endOvershoot, -insets.top))
+            CGPoint(x: -insets.leading, y: max(content.height - viewport.height, 0))
         }
     }
 
@@ -2301,11 +2302,6 @@ enum ConversationScroll {
         if message.author == .you { return .bottom }
         return wasAtBottom ? .top : nil
     }
-
-    /// How far past the end a scroll to it aims. On the iPhone simulator a scroll to a point stopped 27 points short
-    /// of it, so one aimed at the end exactly stopped short of it. Two lines: well short of a third of the room above
-    /// the keyboard, which counts as past the end.
-    static let endOvershoot: CGFloat = 48
 
     /// How far short of the end still counts as at the bottom. SwiftUI's sizes can be a few points out from
     /// the scroll view's: on the iPhone simulator, a conversation resting at its very end measured 6 points
@@ -2415,6 +2411,14 @@ struct ConversationScrolling: ViewModifier {
             }
             .onScrollGeometryChange(for: Bool.self) { ConversationScroll.isFarFromEnd($0) } action: { _, far in
                 following.farFromEnd = far
+            }
+            // Short of the end while following it, as when the last row is measured in the same update as the scroll
+            // to the end before it: the scroll to the new end is dropped, and asking for the same point again does
+            // nothing. Opened under no title, a conversation stopped a row short of its end. By the scroll view's own
+            // bottom edge instead, in the next update. By how far, so each change is heard, not only the first.
+            .onScrollGeometryChange(for: CGFloat.self) { ConversationScroll.distanceFromEnd($0).rounded() } action: { _, distance in
+                guard distance > 0, following.atBottom, !following.scrolling, !settling, !returning else { return }
+                Task { if following.atBottom, !following.scrolling { position.scrollTo(edge: .bottom) } }
             }
             // The edge-based scroll can count the composer's inset twice on iOS 27.1. Use the actual
             // bounds instead, and follow changes in lazy row measurements only while following the end.

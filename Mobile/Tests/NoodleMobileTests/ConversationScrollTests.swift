@@ -109,9 +109,8 @@ import Testing
         #expect(ConversationScroll.distanceFromEnd(geometry(end)) == 0)
         #expect(!ConversationScroll.isFarFromEnd(geometry(end)))
         #expect(!ConversationScroll.isPastEnd(geometry(end)))
-        // Going to the end aims a little past it, so it still reaches the end where a scroll stops short of
-        // where it was aimed, and the scroll view stops at the end itself.
-        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end + ConversationScroll.endOvershoot)
+        // Going to the end aims at it exactly, measured from below the bars, as `ScrollPosition` measures.
+        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end + 116)
         // On the iPhone simulator SwiftUI's sizes put the end 6 points below where the scroll view stops.
         #expect(ConversationScroll.isAtBottom(geometry(end - 6)))
         #expect(!ConversationScroll.isAtBottom(geometry(end - 150)))
@@ -132,13 +131,13 @@ import Testing
                            containerSize: CGSize(width: 393, height: 852 - 116 - 426))
         }
         let realEnd: CGFloat = 3000 + 426 - 852
-        let end = ConversationScroll.Bounds(keyboardUp(0)).end.y
-        #expect(end >= realEnd)
-        #expect(end - realEnd <= ConversationScroll.endOvershoot)
-        #expect(!ConversationScroll.isPastEnd(keyboardUp(end)))
-        #expect(ConversationScroll.isAtBottom(keyboardUp(end)))
+        // `ScrollPosition` measures from below the bars, so the scroll lands 116 points above where it aims.
+        let landing = ConversationScroll.Bounds(keyboardUp(0)).end.y - 116
+        #expect(landing == realEnd)
+        #expect(!ConversationScroll.isPastEnd(keyboardUp(landing)))
+        #expect(ConversationScroll.isAtBottom(keyboardUp(landing)))
         // A conversation shorter than the room above the keyboard ends where it starts, under the bars.
-        #expect(ConversationScroll.Bounds(keyboardUp(0, content: 200)).end.y == -116)
+        #expect(ConversationScroll.Bounds(keyboardUp(0, content: 200)).end.y - 116 == -116)
     }
 
     /// The same on a real scroll view, under a navigation bar and above the composer's room.
@@ -198,8 +197,8 @@ import Testing
     }
 
     /// Opened, a conversation shows its end just above the composer, not past it, and does not sit
-    /// shifted sideways until it is first scrolled.
-    @MainActor @Test func aConversationOpensAtItsEnd() async throws {
+    /// shifted sideways until it is first scrolled. Under a titled bar too, which a scroll to a point measures from.
+    @MainActor @Test(arguments: [false, true]) func aConversationOpensAtItsEnd(titled: Bool) async throws {
         let messages = (0..<40).map { index in
             LinkMessage(id: UUID(), conversationID: UUID(), author: index.isMultiple(of: 2) ? .you : .bot(UUID()),
                         body: String(repeating: "Line of a message. ", count: 1 + index % 5), createdAt: Date(), delivered: true)
@@ -219,6 +218,7 @@ import Testing
             .modifier(ConversationScrolling(latest: messages.last))
             .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in recorded.geometry = geometry }
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 56) }
+            .navigationTitle(titled ? "Conversation" : "")
             .navigationBarTitleDisplayMode(.inline)
         }
         let scene = try #require(UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first)
