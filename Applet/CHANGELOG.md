@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.4] - 2026-10-27
+
 ### Added
 
 - **Remove from Library** in a noodlet's right-click menu takes it out of the library and leaves its files where they are. What it saved is deleted; opening it again adds it back.
