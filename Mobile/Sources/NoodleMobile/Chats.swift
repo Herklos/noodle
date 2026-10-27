@@ -2594,6 +2594,8 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var caret = 0
     @State private var files: [OutgoingFile] = []
+    /// The waiting file open in a preview, with the others waiting to swipe to.
+    @State private var previewingPending: URL?
     @State private var problem: String?
     @State private var editing = false
     @State private var showingShared = false
@@ -2905,6 +2907,8 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, 12).padding(.top, 8)
+        // On the composer, which stays when the last waiting file is taken out.
+        .quickLookPreview($previewingPending, in: PendingFileChip.gallery(of: files))
         // No bar behind the composer: the conversation's background runs to the bottom, as in Messages.
         .onChange(of: VoiceRecorder.keepsAwake(recorder.phase), initial: true) { _, awake in KeepAwake.dictating = awake }
         .onDisappear {
@@ -2935,7 +2939,11 @@ struct ChatView: View {
                             }
                         }
                         ForEach(files) { file in
-                            PendingFileChip(file: file) { files.removeAll { $0.id == file.id } }
+                            PendingFileChip(file: file) {
+                                previewingPending = file.url
+                            } remove: {
+                                files.removeAll { $0.id == file.id }
+                            }
                         }
                     }
                 }
