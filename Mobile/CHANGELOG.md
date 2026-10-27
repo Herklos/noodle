@@ -5,10 +5,12 @@
 ### Fixed
 
 - A conversation no longer goes blank when the keyboard opens. It could scroll past the latest message, leaving empty space above the message field until you scrolled back by hand.
+- After you pull a list down to refresh, the Noodle wordmark goes once the list is back in place, instead of staying at the top when the refresh shows that a Hub can't be reached.
 
 ### What to Test
 
 - In a long conversation, tap the message field: check the latest messages stay just above the keyboard, with no empty space. Close the keyboard and open it again a few times, also right after opening the conversation: check the same. Send a message with the keyboard open: check it shows above the keyboard.
+- In the list, pull down slowly: check the wordmark is written as you pull. Pull down far and let go: check the word goes up with the list and never sits over the first bot or the pinned bots, during the refresh or after it. With a Hub that can't be reached, pull to refresh: check the word goes once the list is back. Do the same in Hubs. On iPad, check the same in the list on the left.
 
 ## [0.48.0] - 2026-10-26
 
