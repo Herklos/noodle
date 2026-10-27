@@ -110,7 +110,10 @@ public struct BotsSettingsView: View {
         let changingAccess = store.runtime.changingAccess.contains(agent.id)
         let archived = agent.archivedAt != nil
         return HStack(spacing: 12) {
+            // Grayed as in a group's member grid, a hint beside the Archived switch.
             store.botProfileButton(agent)
+                .grayscale(archived ? 1 : 0)
+                .accessibilityValue(archived ? "Archived" : "")
             VStack(alignment: .leading, spacing: 3) {
                 Text(agent.displayName).font(.body)
                 HStack(spacing: 4) {
