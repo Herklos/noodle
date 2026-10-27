@@ -682,23 +682,30 @@ struct LinkPreviewCard: View {
     }
 }
 
-/// A file picked for the next message, with a button to take it back out.
+/// A file picked for the next message, which opens in a preview when tapped, with a button to take it back out.
 struct PendingFileChip: View {
     let file: OutgoingFile
+    let preview: () -> Void
     let remove: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            Group {
-                if file.mediaType.hasPrefix("image/"), let image = DecodedImages.downsampled(file.url, to: 96) {
-                    Image(uiImage: image).resizable().scaledToFill()
-                } else {
-                    Image(systemName: AttachmentView.symbol(for: file.mediaType)).foregroundStyle(.secondary)
+            Button(action: preview) {
+                HStack(spacing: 6) {
+                    Group {
+                        if file.mediaType.hasPrefix("image/"), let image = DecodedImages.downsampled(file.url, to: 96) {
+                            Image(uiImage: image).resizable().scaledToFill()
+                        } else {
+                            Image(systemName: AttachmentView.symbol(for: file.mediaType)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 32, height: 32)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text(file.filename).font(.caption).lineLimit(1).frame(maxWidth: 120, alignment: .leading)
                 }
+                .contentShape(Rectangle())
             }
-            .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            Text(file.filename).font(.caption).lineLimit(1).frame(maxWidth: 120, alignment: .leading)
+            .buttonStyle(.plain)
             Button(action: remove) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Remove \(file.filename)")
@@ -706,6 +713,9 @@ struct PendingFileChip: View {
         .padding(6)
         .background(Color(.secondarySystemBackground), in: Capsule())
     }
+
+    /// The files waiting to be sent, to swipe through in the preview of the one tapped, in the order they wait in.
+    static func gallery(of files: [OutgoingFile]) -> [URL] { files.map(\.url) }
 }
 
 /// The camera, returning one photo.

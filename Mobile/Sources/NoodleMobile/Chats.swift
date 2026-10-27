@@ -2285,11 +2285,13 @@ enum ConversationScroll {
             insets = geometry.contentInsets
         }
 
-        /// Where to scroll for the end. Against `containerSize`, which leaves out the insets, it lies past the
-        /// end by their height, and the scroll view stops at the end itself. Aimed at the end exactly, it
-        /// stopped short on iOS whenever SwiftUI's sizes were behind the scroll view's.
+        /// Where to scroll for the end, exactly. `ScrollPosition` measures a point from below the top inset, where
+        /// `contentOffset` measures it from the top of the content: on the iPhone simulator, under an 82-point bar,
+        /// a scroll to the end by `contentOffset` stopped 82 points short. Aimed past the end by the bottom inset,
+        /// the scroll view stopped at the end, until the keyboard took the bottom inset to more than the room left
+        /// above it, and the conversation went blank.
         var end: CGPoint {
-            CGPoint(x: -insets.leading, y: max(content.height + insets.bottom - viewport.height, -insets.top))
+            CGPoint(x: -insets.leading, y: max(content.height - viewport.height, 0))
         }
     }
 
@@ -2409,6 +2411,14 @@ struct ConversationScrolling: ViewModifier {
             }
             .onScrollGeometryChange(for: Bool.self) { ConversationScroll.isFarFromEnd($0) } action: { _, far in
                 following.farFromEnd = far
+            }
+            // Short of the end while following it, as when the last row is measured in the same update as the scroll
+            // to the end before it: the scroll to the new end is dropped, and asking for the same point again does
+            // nothing. Opened under no title, a conversation stopped a row short of its end. By the scroll view's own
+            // bottom edge instead, in the next update. By how far, so each change is heard, not only the first.
+            .onScrollGeometryChange(for: CGFloat.self) { ConversationScroll.distanceFromEnd($0).rounded() } action: { _, distance in
+                guard distance > 0, following.atBottom, !following.scrolling, !settling, !returning else { return }
+                Task { if following.atBottom, !following.scrolling { position.scrollTo(edge: .bottom) } }
             }
             // The edge-based scroll can count the composer's inset twice on iOS 27.1. Use the actual
             // bounds instead, and follow changes in lazy row measurements only while following the end.
@@ -2588,6 +2598,8 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var caret = 0
     @State private var files: [OutgoingFile] = []
+    /// The waiting file open in a preview, with the others waiting to swipe to.
+    @State private var previewingPending: URL?
     @State private var problem: String?
     @State private var editing = false
     @State private var showingShared = false
@@ -2899,6 +2911,8 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, 12).padding(.top, 8)
+        // On the composer, which stays when the last waiting file is taken out.
+        .quickLookPreview($previewingPending, in: PendingFileChip.gallery(of: files))
         // No bar behind the composer: the conversation's background runs to the bottom, as in Messages.
         .onChange(of: VoiceRecorder.keepsAwake(recorder.phase), initial: true) { _, awake in KeepAwake.dictating = awake }
         .onDisappear {
@@ -2929,7 +2943,11 @@ struct ChatView: View {
                             }
                         }
                         ForEach(files) { file in
-                            PendingFileChip(file: file) { files.removeAll { $0.id == file.id } }
+                            PendingFileChip(file: file) {
+                                previewingPending = file.url
+                            } remove: {
+                                files.removeAll { $0.id == file.id }
+                            }
                         }
                     }
                 }
