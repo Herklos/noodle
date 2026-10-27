@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Deleting a space in Edit Spaces… asks first, so a stray swipe or tap no longer deletes it. Only the space is deleted; its bots and groups stay in All.
+
+### What to Test
+
+- Make a space and add a bot to it. Open the space menu, choose Edit Spaces… and delete the space with its red button, then by swiping its row: check each time it asks "Delete “Name”?" and Cancel keeps it. Choose Delete: check the space is gone and the bot is still in All. On iPad with a keyboard, press Esc at the question: check the space is kept.
+
 ## [0.48.0] - 2026-10-26
 
 ### Added

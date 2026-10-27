@@ -4108,7 +4108,7 @@ struct ThreadAvatar: View {
 }
 
 /// The spaces the person made, to put in order, rename and delete.
-private struct SpaceEditor: View {
+struct SpaceEditor: View {
     /// A joined Hub's space, which can only be moved.
     struct Hub: Identifiable {
         let key: String
@@ -4122,6 +4122,8 @@ private struct SpaceEditor: View {
     let moveHubs: (IndexSet, Int) -> Void
     let change: (() throws -> Void) -> Void
     @Environment(\.dismiss) private var dismiss
+    /// The space a swipe or Delete asks about before deleting it.
+    @State private var deleting: CustomSpace?
 
     var body: some View {
         NavigationStack {
@@ -4138,10 +4140,7 @@ private struct SpaceEditor: View {
                         SpaceEditorRow(space: space) { name in change { try list.rename(space.id, to: name) } }
                     }
                     .onMove { source, destination in change { try list.move(fromOffsets: source, toOffset: destination) } }
-                    .onDelete { offsets in
-                        let deleted = offsets.map { list.spaces[$0].id }
-                        change { for id in deleted { try list.delete(id) } }
-                    }
+                    .onDelete { deleting = Self.asked($0, in: list.spaces) }
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -4154,6 +4153,18 @@ private struct SpaceEditor: View {
         .onChange(of: list.spaces.isEmpty) { _, isEmpty in
             if isEmpty, hubs.count < 2 { dismiss() }
         }
+        .alert("Delete “\(deleting?.name ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+               presenting: deleting) { space in
+            Button("Delete", role: .destructive) { change { try list.delete(space.id) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Only the space is deleted. Its bots and groups stay in All.")
+        }
+    }
+
+    /// The one space a swipe or Delete asks about; nothing is deleted until the person confirms.
+    static func asked(_ offsets: IndexSet, in spaces: [CustomSpace]) -> CustomSpace? {
+        offsets.first.flatMap { spaces.indices.contains($0) ? spaces[$0] : nil }
     }
 }
 
