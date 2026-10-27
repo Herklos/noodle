@@ -29,6 +29,14 @@ struct AttachmentGalleryTests {
         #expect(parts.together.map(\.id) == [one.id, two.id])
     }
 
+    /// Tapping a file waiting above the message field opens it, and the others waiting swipe with it, in order.
+    @Test func aWaitingFileOpensWithTheOthersWaiting() {
+        let photo = OutgoingFile(url: URL(fileURLWithPath: "/tmp/Photo.png"), filename: "Photo.png", mediaType: "image/png")
+        let notes = OutgoingFile(url: URL(fileURLWithPath: "/tmp/Notes.pdf"), filename: "Notes.pdf", mediaType: "application/pdf")
+        #expect(PendingFileChip.gallery(of: [photo, notes]) == [photo.url, notes.url])
+        #expect(PendingFileChip.gallery(of: []).isEmpty)
+    }
+
     /// As drawn: in Stack a noodlet sits whole above the pictures, and only the pictures overlap.
     @MainActor @Test func stackLeavesANoodletUncovered() throws {
         let items = [file("Explainer", url: "noodlet://explainer"), file("One.png"), file("Two.png")]

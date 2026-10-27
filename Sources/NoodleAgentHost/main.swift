@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OSLog
 import Security
 import NoodleCore
 import NoodleAgentBridge
@@ -382,6 +383,7 @@ private final class HostSession: NSObject, AgentHostService {
                 // Refused before the child starts, so the bot never shows as ready on a login that cannot work.
                 if restricted, RestrictedHarnessStorage.refusedAgain(provider: provider, workspace: workspace, loginHome: loginHome,
                                                                      secret: HostPaths.loginSecret(profile)) {
+                    HarnessLoginLog.logger.notice("start-refused bot=\(agentID, privacy: .public) harness=\(provider.rawValue, privacy: .public)")
                     throw RestrictedHarnessStorage.refused(provider)
                 }
                 let child = Process()
@@ -890,13 +892,23 @@ private final class SharedLogins: @unchecked Sendable {
         refreshQueue.sync {
             let key = loginHome.appendingPathComponent(".claude", isDirectory: true)
             guard failedRefreshes[key].map({ Date().timeIntervalSince($0) > 300 }) ?? true else { return }
-            var attempted = false
-            let renewed = try? RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: workspace) { login in
-                guard ClaudeLoginRefresh.isDue(login) else { return nil }
-                attempted = true
-                return try ClaudeLoginRefresh.refresh(login, executable: executable)
+            let bot = HarnessLoginLog.bot(workspace)
+            var due: Data?
+            let renewed: Bool
+            do {
+                renewed = try RestrictedHarnessStorage.refreshLogin(provider: .claudeCode, workspace: workspace) { login in
+                    guard ClaudeLoginRefresh.isDue(login) else { return nil }
+                    due = login
+                    HarnessLoginLog.logger.notice("refresh-start bot=\(bot, privacy: .public) harness=claude-code login=\(HarnessLoginLog.fingerprint(login), privacy: .public) expires-in=\(ClaudeLoginRefresh.expiresIn(login) ?? 0)s")
+                    return try ClaudeLoginRefresh.refresh(login, executable: executable)
+                }
+            } catch {
+                renewed = false
+                if due != nil { HarnessLoginLog.logger.error("refresh-failed bot=\(bot, privacy: .public) harness=claude-code error=\(String(describing: type(of: error)), privacy: .public)") }
             }
-            if attempted { failedRefreshes[key] = renewed == true ? nil : Date() }
+            guard let due else { return }
+            failedRefreshes[key] = renewed ? nil : Date()
+            HarnessLoginLog.logger.notice("refresh-end bot=\(bot, privacy: .public) harness=claude-code login=\(HarnessLoginLog.fingerprint(due), privacy: .public) written=\(renewed)")
         }
     }
 
@@ -907,6 +919,7 @@ private final class SharedLogins: @unchecked Sendable {
             guard let files = try? WorkspaceMailbox(workspace: loginHome, path: ".codex"), files.contains("auth.json"),
                   let auth = try? files.read("auth.json", limit: 1_048_576), CodexLoginRefresh.isDue(auth),
                   failedRefreshes[home].map({ Date().timeIntervalSince($0) > 3_600 }) ?? true else { return }
+            HarnessLoginLog.logger.notice("refresh-start harness=codex login=\(HarnessLoginLog.fingerprint(auth), privacy: .public)")
             let done = DispatchSemaphore(value: 0)
             nonisolated(unsafe) var succeeded = false
             Task { @MainActor in
@@ -917,6 +930,8 @@ private final class SharedLogins: @unchecked Sendable {
             }
             if done.wait(timeout: .now() + 30) == .timedOut { succeeded = false }
             failedRefreshes[home] = succeeded ? nil : Date()
+            let renewed = (try? files.read("auth.json", limit: 1_048_576)).map { HarnessLoginLog.fingerprint($0) } ?? "none"
+            HarnessLoginLog.logger.notice("refresh-end harness=codex login=\(HarnessLoginLog.fingerprint(auth), privacy: .public) new=\(renewed, privacy: .public) renewed=\(succeeded)")
         }
     }
 }

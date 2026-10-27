@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Observation
+import OSLog
 import NoodleCore
 
 /// What the Agent Host reports about a harness the sandboxed app cannot inspect itself.
@@ -1489,6 +1490,10 @@ public final class AgentRuntimeCoordinator {
             // A bot that continues on another harness does not pause.
             if snapshot.phase == .failed, previous?.phase != .failed || previous?.failure != snapshot.failure,
                self.fallBack(agent, repository: repository, after: snapshot) { return }
+            if snapshot.phase == .failed, snapshot.failure == .authenticationRequired,
+               previous?.phase != .failed || previous?.failure != .authenticationRequired {
+                HarnessLoginLog.logger.error("sign-in-needed bot=\(agentID.uuidString, privacy: .public) harness=\(self.runningAgent(agent).harnessIdentifier ?? "unknown", privacy: .public) refused-start=\(snapshot.signInRefusedUntil != nil)")
+            }
             if snapshot.failure == .authenticationRequired, self.signInAnnounced.insert(agentID).inserted {
                 self.onSignInRequired?(agentID)
             }

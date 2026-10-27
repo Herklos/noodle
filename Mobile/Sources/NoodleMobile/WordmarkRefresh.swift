@@ -60,22 +60,31 @@ struct PullGap {
     private var restingInset: CGFloat = 0
     private var refreshing = false
     private var held = false
+    /// The most the top inset was while refreshing, with the room the refresh held open.
+    private var heldInset: CGFloat = 0
 
     mutating func scrolled(offset: CGFloat, inset: CGFloat) {
         (self.offset, self.inset) = (offset, inset)
+        if refreshing { heldInset = max(heldInset, inset) }
         release()
         if !held { restingInset = inset }
     }
 
-    mutating func began() { (refreshing, held) = (true, true) }
+    mutating func began() {
+        (refreshing, held) = (true, true)
+        heldInset = inset
+    }
 
     mutating func ended() {
         refreshing = false
         release()
     }
 
+    /// Once the refresh is done, when the list is back where it rested, or rests again after the refresh's room has
+    /// gone: a banner that came above the list meanwhile, as one saying a Hub cannot be reached, moves where it rests.
     private mutating func release() {
-        if held, !refreshing, inset <= restingInset + 0.5 { held = false }
+        guard held, !refreshing else { return }
+        if inset <= restingInset + 0.5 || (inset < heldInset - 0.5 && offset + inset >= -0.5) { held = false }
     }
 
     var height: CGFloat { max(0, -(offset + restingInset)) }
