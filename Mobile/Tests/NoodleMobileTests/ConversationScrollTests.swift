@@ -109,9 +109,9 @@ import Testing
         #expect(ConversationScroll.distanceFromEnd(geometry(end)) == 0)
         #expect(!ConversationScroll.isFarFromEnd(geometry(end)))
         #expect(!ConversationScroll.isPastEnd(geometry(end)))
-        // Going to the end aims past it by the insets, and the scroll view stops at the end, even when
-        // SwiftUI's sizes are behind the scroll view's.
-        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end + 116 + 90)
+        // Going to the end aims a little past it, so it still reaches the end where a scroll stops short of
+        // where it was aimed, and the scroll view stops at the end itself.
+        #expect(ConversationScroll.Bounds(geometry(end)).end.y == end + ConversationScroll.endOvershoot)
         // On the iPhone simulator SwiftUI's sizes put the end 6 points below where the scroll view stops.
         #expect(ConversationScroll.isAtBottom(geometry(end - 6)))
         #expect(!ConversationScroll.isAtBottom(geometry(end - 150)))
@@ -119,6 +119,26 @@ import Testing
         // A conversation shorter than the screen is at its end from the start, below the bars.
         #expect(ConversationScroll.isAtBottom(geometry(-116, content: 300)))
         #expect(ConversationScroll.distanceFromEnd(geometry(-116, content: 300)) == 0)
+    }
+
+    /// With the keyboard up, going to the end aimed past it by the bars, the keyboard and the composer, more
+    /// than the room left above the keyboard: the conversation went blank, and going back to the last message
+    /// only aimed past the end again.
+    @Test func goingToTheEndWithTheKeyboardUpStaysAtTheEnd() {
+        // An 852-point screen with 116 points of bars above and 426 of keyboard and composer below.
+        func keyboardUp(_ offset: CGFloat, content: CGFloat = 3000) -> ScrollGeometry {
+            ScrollGeometry(contentOffset: CGPoint(x: 0, y: offset), contentSize: CGSize(width: 393, height: content),
+                           contentInsets: EdgeInsets(top: 116, leading: 0, bottom: 426, trailing: 0),
+                           containerSize: CGSize(width: 393, height: 852 - 116 - 426))
+        }
+        let realEnd: CGFloat = 3000 + 426 - 852
+        let end = ConversationScroll.Bounds(keyboardUp(0)).end.y
+        #expect(end >= realEnd)
+        #expect(end - realEnd <= ConversationScroll.endOvershoot)
+        #expect(!ConversationScroll.isPastEnd(keyboardUp(end)))
+        #expect(ConversationScroll.isAtBottom(keyboardUp(end)))
+        // A conversation shorter than the room above the keyboard ends where it starts, under the bars.
+        #expect(ConversationScroll.Bounds(keyboardUp(0, content: 200)).end.y == -116)
     }
 
     /// The same on a real scroll view, under a navigation bar and above the composer's room.

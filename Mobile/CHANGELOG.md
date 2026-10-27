@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A conversation no longer goes blank when the keyboard opens. It could scroll past the latest message, leaving empty space above the message field until you scrolled back by hand.
+
+### What to Test
+
+- In a long conversation, tap the message field: check the latest messages stay just above the keyboard, with no empty space. Close the keyboard and open it again a few times, also right after opening the conversation: check the same. Send a message with the keyboard open: check it shows above the keyboard.
+
 ## [0.48.0] - 2026-10-26
 
 ### Added

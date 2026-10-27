@@ -2285,11 +2285,12 @@ enum ConversationScroll {
             insets = geometry.contentInsets
         }
 
-        /// Where to scroll for the end. Against `containerSize`, which leaves out the insets, it lies past the
-        /// end by their height, and the scroll view stops at the end itself. Aimed at the end exactly, it
-        /// stopped short on iOS whenever SwiftUI's sizes were behind the scroll view's.
+        /// Where to scroll for the end: `endOvershoot` past it, and the scroll view stops at the end itself. Aimed
+        /// past it by the insets, against `containerSize`, which leaves them out, it went beyond the end with the
+        /// keyboard up, by more than the room left above it, and the conversation went blank.
         var end: CGPoint {
-            CGPoint(x: -insets.leading, y: max(content.height + insets.bottom - viewport.height, -insets.top))
+            CGPoint(x: -insets.leading,
+                    y: max(content.height - viewport.height - insets.top + ConversationScroll.endOvershoot, -insets.top))
         }
     }
 
@@ -2300,6 +2301,11 @@ enum ConversationScroll {
         if message.author == .you { return .bottom }
         return wasAtBottom ? .top : nil
     }
+
+    /// How far past the end a scroll to it aims. On the iPhone simulator a scroll to a point stopped 27 points short
+    /// of it, so one aimed at the end exactly stopped short of it. Two lines: well short of a third of the room above
+    /// the keyboard, which counts as past the end.
+    static let endOvershoot: CGFloat = 48
 
     /// How far short of the end still counts as at the bottom. SwiftUI's sizes can be a few points out from
     /// the scroll view's: on the iPhone simulator, a conversation resting at its very end measured 6 points
