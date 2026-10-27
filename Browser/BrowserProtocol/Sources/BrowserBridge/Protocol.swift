@@ -108,6 +108,16 @@ public struct BrowserBookmark: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+/// How much each browser holds. Noodle Browser enforces these and the Browser tool tells bots
+/// about them, so both read them here.
+public enum BrowserLimits {
+    /// How many tabs a browser keeps open.
+    public static let tabs = 100
+    /// How many pages run at once in each browser. Every running page costs memory and processor
+    /// time, so the least recently used ones stop, keeping their tab, and load again when used.
+    public static let runningPages = 8
+}
+
 /// The person on Noodle Hub a browser is kept for.
 public struct BrowserOwner: Codable, Hashable, Sendable {
     public var id: UUID

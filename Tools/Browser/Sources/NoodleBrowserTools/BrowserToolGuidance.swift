@@ -9,7 +9,7 @@ enum BrowserToolGuidance {
         case .list: "List only browsers assigned to this bot, with each ID, name and optional description of what it is for."
         case .status: "Read browser state, tabs, downloads, and pointer state and any dialog for --tab."
         case .tabs: "List durable tab IDs, titles, URLs, loading and error state."
-        case .open: "Create a background tab, optionally with --url HTTP[S]_URL."
+        case .open: "Create a background tab, optionally with --url HTTP[S]_URL. Past \(BrowserLimits.runningPages) loaded pages, this unloads the least recently used other tabs, losing their unsent work."
         case .navigate: "Navigate the selected tab to --url HTTP[S]_URL."
         case .back: "Go back in the live tab's history."
         case .forward: "Go forward in the live tab's history."
@@ -41,8 +41,8 @@ enum BrowserToolGuidance {
         }
     }
 
-    /// Judgement the tool descriptions cannot carry: how to hand results back, and how to
-    /// behave inside a person's signed-in accounts.
+    /// Judgement the tool descriptions cannot carry: how to hand results back, how to
+    /// behave inside a person's signed-in accounts, and why a tab never keeps unsent work.
     static var judgement: String {
         """
         ## Returning results to the user
@@ -94,6 +94,21 @@ enum BrowserToolGuidance {
         Check state before retrying an uncertain action to avoid duplicate submissions.
         Downloads and standalone screenshots are workspace artifacts; inspect them
         and attach them through Messenger when those files are the requested result.
+
+        ## Tabs do not keep unsent work
+
+        A tab is not storage. It can be unloaded, reloaded, closed or lost at any
+        time: after a crash or a restart, when the user works in the browser, or at
+        the page limit. Each browser keeps up to \(BrowserLimits.tabs) tabs open but only \(BrowserLimits.runningPages) pages loaded,
+        so opening or using a tab can unload the least recently used others, never
+        the selected one. An unloaded tab loads its URL again when used, and typed
+        text, attached files and other page state are gone.
+
+        - Keep drafts in workspace files: post text, captions, form contents and
+          the files to attach. Fill the page from them right before you submit.
+        - Fill and submit a form or post in one go, before opening or switching
+          to other tabs. Do not leave drafts waiting in background tabs.
+        - Close tabs you no longer need (tabs, close).
         """
     }
 
@@ -102,7 +117,6 @@ enum BrowserToolGuidance {
         """
         Commands return JSON; errors exit 1. list needs no browser ID. Tab operations
         require the ID returned by open or tabs. Keep the browser and tab IDs together.
-        A browser holds at most 100 tabs; close the ones you no longer need (tabs, close).
         Browser metadata may include description, the user's note on what that
         browser is for, and icon, a base64 PNG thumbnail for display only. When
         several browsers are assigned, choose by name and description; ask the

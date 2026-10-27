@@ -45,6 +45,25 @@ import NoodleCore
         try await wait { self.enabled(heartbeat) }
     }
 
+    /// The picture of an archived bot is grayed, as in a group's member grid, and says so.
+    func testAnArchivedBotsPictureIsGrayed() async throws {
+        let f = try fixture()
+        let settings = host(BotsSettingsView(store: f.store).environment(f.store))
+        _ = try await control("Show profile for Grace", in: settings)
+        let value = { (name: String) -> String? in
+            settings.layoutSubtreeIfNeeded()
+            return self.elements(settings).first { self.matches("Show profile for \(name)", node: $0) }
+                .map { self.attribute($0, .value) as? String ?? "" }
+        }
+        XCTAssertEqual(value("Ada"), "")
+        try await flip("Ada, archived", in: settings)
+        try await wait { value("Ada") == "Archived" }
+        XCTAssertEqual(value("Grace"), "")
+
+        try await flip("Ada, archived", in: settings)
+        try await wait { value("Ada") == "" }
+    }
+
     func testGroupsTabArchivesAndRestoresAGroup() async throws {
         let f = try fixture(), group = try f.group()
         let settings = host(GroupsSettingsView().environment(f.store))

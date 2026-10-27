@@ -192,6 +192,18 @@ final class BrowserToolProviderTests: XCTestCase {
         for operation in BrowserOperation.agentCases { XCTAssertFalse(BrowserToolGuidance.tool(operation).isEmpty, operation.rawValue) }
     }
 
+    /// Bots lost prepared posts when their tabs' pages were unloaded, so the skill gives the
+    /// limits Noodle Browser enforces and says to keep drafts in workspace files.
+    func testTheSkillGivesTheBrowsersLimitsAndSaysTabsDoNotKeepUnsentWork() {
+        let instructions = provider.manifest.instructions
+        XCTAssertTrue(instructions.contains("up to \(BrowserLimits.tabs) tabs"))
+        XCTAssertTrue(instructions.contains("only \(BrowserLimits.runningPages) pages loaded"))
+        XCTAssertTrue(instructions.contains("A tab is not storage"))
+        XCTAssertTrue(instructions.contains("Keep drafts in workspace files"))
+        XCTAssertFalse(instructions.contains("at most 100 tabs"), "the numbers come from BrowserLimits")
+        XCTAssertTrue(BrowserToolGuidance.tool(.open).contains("\(BrowserLimits.runningPages) loaded pages"))
+    }
+
     /// Bots attach browsers to conversations; nothing they call brings a browser's window up.
     func testNoToolOpensTheBrowsersWindow() async throws {
         let listed = try await provider.tools(context: .init(agentID: UUID(), workspace: workspace))

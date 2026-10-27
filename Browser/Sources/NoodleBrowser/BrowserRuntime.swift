@@ -15,18 +15,15 @@ import WebKit
     var favicons: [UUID: NSImage] { stopped.compactMapValues(\.favicon).merging(tabs.compactMapValues(\.favicon)) { $1 } }
     /// What a stopped page leaves behind: its icon, and its history until the page loads again.
     private var stopped: [UUID: (favicon: NSImage?, history: Any?)] = [:]
-    /// How many pages run at once in each browser. Every running page costs memory and processor
-    /// time, so the least recently used ones stop, keeping their tab, and load again when used.
-    static let runningPageLimit = 8
     /// How long a tab a bot used keeps drawing out of sight after the bot's last call, long enough
     /// for a bot to think between steps.
     var agentAttention = Duration.seconds(300)
     /// From this many tabs, opening another asks the bot to close the ones it no longer needs,
-    /// well before the 100-tab limit.
+    /// well before `BrowserLimits.tabs`.
     static let manyTabs = 30
-    static let tabLimit = 100
+    static let tabLimitReached = "This browser has reached its \(BrowserLimits.tabs)-tab limit."
     /// What a bot is told at the tab limit, so it can make room itself.
-    static let botTabLimit = "This browser has reached its 100-tab limit. Close tabs you no longer need (tabs, close) and try again."
+    static let botTabLimit = "\(tabLimitReached) Close tabs you no longer need (tabs, close) and try again."
     var willRemoveBrowser: ((UUID) -> Void)?
     private var server: BrowserConnectionServer?
     private var activeDownloads: [ObjectIdentifier: (download: WKDownload?, browserID: UUID, record: BrowserDownloadInfo)] = [:]
@@ -138,7 +135,7 @@ import WebKit
     @discardableResult func makeTab(browserID: UUID, configuration: WKWebViewConfiguration? = nil, restoring: BrowserTabInfo? = nil, openedBy: UUID? = nil) throws -> BrowserTab {
         guard !deleting.contains(browserID) else { throw BrowserError("This browser is being deleted.") }
         var profile = try library.profile(browserID)
-        guard profile.tabs.count < Self.tabLimit || restoring != nil else { throw BrowserError("This browser has reached its 100-tab limit.") }
+        guard profile.tabs.count < BrowserLimits.tabs || restoring != nil else { throw BrowserError(Self.tabLimitReached) }
         let info = restoring ?? BrowserTabInfo(lastUsed: Date(), openedBy: openedBy)
         if let tab = tabs[info.id] { return tab }
         let tab = BrowserTab(browserID: browserID, info: info, runtime: self, configuration: configuration)
@@ -155,7 +152,7 @@ import WebKit
         let selected = try? library.profile(browserID).selectedTabID
         let running = tabs.values.filter { $0.browserID == browserID }
         let idle = running.filter { $0.id != kept && $0.id != selected && !$0.mustKeepRunning }.sorted { $0.lastActive < $1.lastActive }
-        for tab in idle.prefix(max(0, running.count - Self.runningPageLimit)) {
+        for tab in idle.prefix(max(0, running.count - BrowserLimits.runningPages)) {
             tab.info.loading = false; saveTab(tab)
             stopped[tab.id] = (tab.favicon ?? stopped[tab.id]?.favicon, tab.web.interactionState)
             tabs.removeValue(forKey: tab.id)?.stop()
@@ -461,7 +458,7 @@ import WebKit
         default: break
         }
         if request.operation == .open {
-            guard profile.tabs.count < Self.tabLimit else { throw BrowserError(Self.botTabLimit) }
+            guard profile.tabs.count < BrowserLimits.tabs else { throw BrowserError(Self.botTabLimit) }
             let tab = try makeTab(browserID: id, openedBy: request.agentID)
             tab.attend(for: agentAttention)
             if let url = request.url { tab.navigate(try BrowserRequest.navigationURL(url)) }
