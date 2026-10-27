@@ -253,7 +253,7 @@ import XCTest
             }
             try await f.wait { p.snapshot.phase == .failed }
             XCTAssertEqual(p.snapshot.failure, .usageLimit, ending)
-            XCTAssertTrue(p.snapshot.detail.contains("usage limit") && p.snapshot.detail.contains("Kick"), ending)
+            XCTAssertTrue(p.snapshot.detail.contains("usage limit") && p.snapshot.detail.contains("resumes by itself"), ending)
             XCTAssertTrue(p.isAlive); XCTAssertTrue(p.hasInterruptedWork); XCTAssertFalse(p.canReceiveHeartbeat)
             XCTAssertEqual(wire.invalidations, 1, ending)
 

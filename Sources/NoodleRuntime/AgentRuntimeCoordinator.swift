@@ -96,7 +96,7 @@ public struct AgentKickRequest: Identifiable {
         case .missingSession:
             return "The previous session is unavailable. Noodle can start a replacement and help \(agent.displayName) continue using your conversation history.\n\nYour messages, files, and bot settings will be kept. Details remembered only within the previous session may be lost."
         case .usageLimit:
-            return "The harness's usage limit has been reached. Once usage is available again, retry to continue. Restarting cannot restore usage. Your session and unfinished work will be kept."
+            return "The harness's usage limit has been reached. The bot resumes by itself once usage is available again. Retry now only if usage is already back. Your session and unfinished work will be kept."
         case .authenticationRequired:
             return "The harness needs you to sign in again. Open Harness settings for sign-in options, then retry. Your session and unfinished work will be kept."
         case .recoveryFailed:
@@ -241,6 +241,8 @@ public final class AgentRuntimeCoordinator {
     @ObservationIgnored private var nextSignInCheck: [UUID: Date] = [:]
     /// Restarts since the bot was last seen signed out or finished a turn.
     @ObservationIgnored private var signInRetries: [UUID: Int] = [:]
+    /// When each bot paused on a usage limit, for `retryOnceUsageIsBack`.
+    @ObservationIgnored private var usagePausedAt: [UUID: Date] = [:]
     @ObservationIgnored private var usageMeters: [UUID: UsageMeter] = [:]
     private var lifecycleID = UUID()
     private var transitionIDs: [UUID: UUID] = [:]
@@ -1226,10 +1228,11 @@ public final class AgentRuntimeCoordinator {
     public func reconcile(agents: [AgentRecord], repository: WorkspaceRepository, immediately: Bool = false) {
         guard !isStoppingAll else { return }
         for agent in agents where installation(for: runningAgent(agent)) != nil && !neverStarts(agent.id) {
-            // A bot waiting on the person for a reported failure keeps it until Kick;
-            // restarting cannot sign in, restore usage or answer a safety stop.
+            // A bot waiting on the person for a reported failure keeps it until Kick; restarting
+            // cannot answer a safety stop. A sign-in or usage coming back restarts it by itself.
             if let process = processes[agent.id], process.snapshot.phase == .failed, let failure = process.snapshot.failure {
                 if failure == .authenticationRequired { retryOnceSignedIn(agent, repository: repository) }
+                if failure == .usageLimit { retryOnceUsageIsBack(agent, snapshot: process.snapshot, repository: repository) }
                 continue
             }
             if let process = processes[agent.id], process.isAlive {
@@ -1385,6 +1388,29 @@ public final class AgentRuntimeCoordinator {
         }
     }
 
+    /// A bot paused on a usage limit restarts by itself, as Kick would, once its usage is back: the
+    /// reset its harness reported has passed, or an hour when it said none, and no reading says the
+    /// login is still used up; or a reading taken a while after the pause shows usage left, as when
+    /// a limit is reset early. A restart that meets the limit again pauses again, with a new reset.
+    /// A bot on a fallback harness comes back through `checkFallbackReturns` instead.
+    private func retryOnceUsageIsBack(_ agent: AgentRecord, snapshot: AgentRuntimeSnapshot, repository: WorkspaceRepository) {
+        guard harnessFallbacks[agent.id] == nil, let paused = usagePausedAt[agent.id],
+              let provider = HarnessProvider(rawValue: agent.harnessIdentifier ?? "") else { return }
+        let date = now()
+        let key = SubscriptionUsageStore.key(provider, profile: try? repository.loadAgentHarnessProfile(agent))
+        // The harness's own reading at the pause may not show the limit yet, so only a later one counts.
+        let usageLeft = subscriptionUsage.accounts[key].map {
+            $0.updatedAt >= paused.addingTimeInterval(Self.usageReadingDelay)
+                && !$0.current(at: date).contains { ($0.usedPercent ?? 0) >= 100 }
+        } ?? false
+        let reset = snapshot.usageResetsAt ?? paused.addingTimeInterval(Self.unknownUsageReset)
+        guard usageLeft || date >= reset && reportedReset(key, at: date) == nil else { return }
+        usagePausedAt[agent.id] = nil
+        restart(agent: agent, repository: repository, sessionRecovery: sessionRecovery(.retry, for: agent))
+    }
+
+    private static let usageReadingDelay: TimeInterval = 5 * 60
+
     /// When the host lets a start on the login the bot's harness refused through again; nil when
     /// none is noted. Only restricted starts are checked.
     private func refusedLogin(of agent: AgentRecord, repository: WorkspaceRepository) -> Date? {
@@ -1493,6 +1519,10 @@ public final class AgentRuntimeCoordinator {
             if snapshot.phase == .failed, snapshot.failure == .authenticationRequired,
                previous?.phase != .failed || previous?.failure != .authenticationRequired {
                 HarnessLoginLog.logger.error("sign-in-needed bot=\(agentID.uuidString, privacy: .public) harness=\(self.runningAgent(agent).harnessIdentifier ?? "unknown", privacy: .public) refused-start=\(snapshot.signInRefusedUntil != nil)")
+            }
+            if snapshot.phase == .failed, snapshot.failure == .usageLimit,
+               previous?.phase != .failed || previous?.failure != .usageLimit {
+                self.usagePausedAt[agentID] = self.now()
             }
             if snapshot.failure == .authenticationRequired, self.signInAnnounced.insert(agentID).inserted {
                 self.onSignInRequired?(agentID)

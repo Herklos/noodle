@@ -289,6 +289,72 @@ import XCTest
         XCTAssertFalse(f.factory.processes.last!.launch.recoverInterruptedWork, "Nothing was interrupted, so no turn is started")
     }
 
+    func testBotPausedOnUsageComesBackByItselfOnceTheReportedResetPasses() throws {
+        for provider in [HarnessProvider.codex, .claudeCode] {
+            let f = try fixture(), agent = try f.agent(harness: provider), process = try f.start(agent)
+            let url = f.repository.storage(for: agent.id).sessionState(provider: provider, extendedAccess: false)
+            let session = Data("saved session".utf8)
+            try session.write(to: url)
+            let start = f.clock.date
+            process.transition(.failed, failure: .usageLimit, usageResetsAt: start.addingTimeInterval(10 * 60))
+
+            f.clock.date = start.addingTimeInterval(9 * 60)
+            f.runtime.reconcile(agents: [agent], repository: f.repository)
+            XCTAssertEqual(f.factory.processes.count, 1, "\(provider): usage is not back yet")
+
+            f.clock.date = start.addingTimeInterval(11 * 60)
+            f.runtime.reconcile(agents: [agent], repository: f.repository)
+            XCTAssertEqual(f.factory.processes.count, 2, "\(provider): the bot comes back without Kick")
+            XCTAssertEqual(f.factory.processes.last?.launch.provider, provider)
+            XCTAssertEqual(f.runtime.snapshot(for: agent.id).phase, .ready)
+            XCTAssertEqual(try Data(contentsOf: url), session, "The session is resumed, not replaced")
+        }
+    }
+
+    func testBotPausedOnUsageComesBackOnceItsLoginReportsUsageLeft() throws {
+        let f = try fixture(), agent = try f.agent(harness: .codex), process = try f.start(agent)
+        let start = f.clock.date
+        process.transition(.failed, failure: .usageLimit, usageResetsAt: start.addingTimeInterval(5 * 3600))
+        func reading(_ used: Double, at date: Date) {
+            f.runtime.subscriptionUsage.record(SubscriptionUsage(windows: [SubscriptionUsageWindow(id: "weekly", minutes: 10_080,
+                usedPercent: used, resetsAt: start.addingTimeInterval(7 * 86_400))], updatedAt: date), provider: .codex, profile: nil)
+        }
+
+        f.clock.date = start.addingTimeInterval(60)
+        reading(10, at: f.clock.date)
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 1, "A reading right after the pause is not trusted yet")
+
+        f.clock.date = start.addingTimeInterval(10 * 60)
+        reading(100, at: f.clock.date)
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 1, "Still used up")
+
+        f.clock.date = start.addingTimeInterval(20 * 60)
+        reading(26, at: f.clock.date)
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 2, "The limit was reset early, and the bot comes back")
+    }
+
+    func testBotPausedOnUsageWithoutAResetIsTriedAgainAfterAnHour() throws {
+        let f = try fixture(), agent = try f.agent(harness: .claudeCode), process = try f.start(agent)
+        let start = f.clock.date
+        process.transition(.failed, failure: .usageLimit)
+
+        f.clock.date = start.addingTimeInterval(59 * 60)
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 1)
+
+        f.clock.date = start.addingTimeInterval(61 * 60)
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 2)
+
+        // Out again at once: the next try waits for its own reset.
+        f.factory.processes.last!.transition(.failed, failure: .usageLimit)
+        f.runtime.reconcile(agents: [agent], repository: f.repository)
+        XCTAssertEqual(f.factory.processes.count, 2)
+    }
+
     /// Signing in in Settings retries at once the bots waiting on that login, and only those,
     /// even on a login the host noted as refused, instead of leaving them paused for minutes.
     func testSigningInRetriesTheBotsWaitingOnThatLoginAtOnce() throws {

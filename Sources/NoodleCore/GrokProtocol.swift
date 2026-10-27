@@ -45,7 +45,7 @@ public enum GrokProtocol {
         return usageLimitDetail
     }
 
-    private static let usageLimitDetail = "Grok Build's usage limit has been reached. Once usage is available again, right-click the bot and choose Kick to resume. Unfinished work is preserved."
+    private static let usageLimitDetail = "Grok Build's usage limit has been reached. The bot resumes by itself once usage is available again. Unfinished work is preserved."
 
     private static func isUsageLimitMessage(_ message: String?) -> Bool {
         message?.localizedCaseInsensitiveContains("Grok Build usage balance exhausted") == true

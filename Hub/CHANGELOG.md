@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A bot paused on a usage limit now resumes by itself once usage is back, when the limit resets or the harness reports usage left again, instead of waiting for Kick. This applies to every harness.
+
 ## [0.44.2] - 2026-10-26
 
 ### Fixed

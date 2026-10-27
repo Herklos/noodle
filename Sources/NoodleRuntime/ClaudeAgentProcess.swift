@@ -412,7 +412,7 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
             RestrictedHarnessStorage.forgetRefusedLogin(provider: .claudeCode, workspace: workspaceURL)
         }
         if failed, usageRejected || detail.map(ClaudeProtocol.isUsageLimit) == true {
-            // Restarting cannot restore usage. The unfinished turn stays recorded, so Kick or another harness picks it up.
+            // Restarting cannot restore usage. The unfinished turn stays recorded, so the bot picks it up when usage is back, on Kick or on another harness.
             pauseForUsageLimit(resetsAt: detail.flatMap(ClaudeProtocol.usageLimitReset) ?? usageResetsAt)
             return
         }
@@ -483,7 +483,7 @@ public final class ClaudeAgentProcess: AgentRuntimeProcess {
         trace.finish(.turnFailed)
         disconnect()
         paused = true
-        update(.failed, "Claude Code's usage limit has been reached. Once usage is available again, right-click the bot and choose Kick to resume. Unfinished work is preserved.",
+        update(.failed, "Claude Code's usage limit has been reached. The bot resumes by itself once usage is available again. Unfinished work is preserved.",
                failure: .usageLimit, usageResetsAt: resetsAt)
     }
 
