@@ -336,7 +336,7 @@ import WebKit
             if humanInput, let window = web.window, window !== surface, window.isVisible {
                 runtime.failure = error.localizedDescription; return nil
             }
-            let full = (try? runtime.library.profile(browserID).tabs.count >= BrowserRuntime.tabLimit) == true
+            let full = (try? runtime.library.profile(browserID).tabs.count >= BrowserLimits.tabs) == true
             info.error = full ? BrowserRuntime.botTabLimit : error.localizedDescription; runtime.saveTab(self)
             return nil
         }

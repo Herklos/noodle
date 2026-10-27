@@ -211,14 +211,14 @@ final class BrowserRuntimeTests: XCTestCase {
         _ = try runtime.tab(browserID: a.id, tabID: infos[0].id)
         try runtime.tab(browserID: a.id, tabID: infos[1].id).dialog = BrowserDialog(kind: "alert", message: "Hi", origin: "example.com")
         for info in infos[2...] { _ = try runtime.tab(browserID: a.id, tabID: info.id) }
-        XCTAssertEqual(runtime.tabs.count, BrowserRuntime.runningPageLimit)
+        XCTAssertEqual(runtime.tabs.count, BrowserLimits.runningPages)
         XCTAssertNotNil(runtime.tabs[infos[0].id], "the tab on screen stopped")
         XCTAssertNotNil(runtime.tabs[infos[1].id], "a tab waiting on a dialog stopped")
         XCTAssertNil(runtime.tabs[infos[2].id], "the least recently used page kept running")
         XCTAssertEqual(try library.profile(a.id).tabs.map(\.id), infos.map(\.id), "stopping a page closed its tab")
         let reloaded = try runtime.tab(browserID: a.id, tabID: infos[2].id)
         XCTAssertEqual(reloaded.web.url?.absoluteString, "https://example.com/2")
-        XCTAssertEqual(runtime.tabs.count, BrowserRuntime.runningPageLimit)
+        XCTAssertEqual(runtime.tabs.count, BrowserLimits.runningPages)
     }
     /// A page that stopped comes back with its history, so going back still works.
     @MainActor func testAStoppedPageComesBackWithItsHistory() async throws {
@@ -226,7 +226,7 @@ final class BrowserRuntimeTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let library = BrowserLibrary(root: root)
         var a = try library.create(name: "A")
-        let infos = (0...BrowserRuntime.runningPageLimit).map { _ in BrowserTabInfo() }
+        let infos = (0...BrowserLimits.runningPages).map { _ in BrowserTabInfo() }
         a.tabs = infos; a.selectedTabID = infos[0].id; try library.update(a)
         let runtime = BrowserRuntime(library: library)
         defer { runtime.shutdown() }

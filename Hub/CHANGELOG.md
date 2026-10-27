@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Bots are told that a Noodle Browser tab can lose unsent work, for example when only a few pages stay loaded at once, so they keep drafts such as post text and files to attach in their workspace and finish a post before opening other tabs.
+
 ## [0.45.0] - 2026-10-27
 
 ### Added
