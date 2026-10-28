@@ -149,6 +149,7 @@ let project = Project(
                 .package(product: "NoodleWallpaper"),
                 .package(product: "Sparkle"),
                 .target(name: "NoodleAgentHost"),
+                .target(name: "NoodleMCPProgramHost"),
                 .target(name: "messenger"),
                 .target(name: "NoodleAppleAgent"),
             ],
@@ -196,6 +197,31 @@ let project = Project(
             settings: .settings(base: signing.merging([
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(HUB_APP_BUNDLE_ID).agent-host",
                 "PRODUCT_NAME": "NoodleAgentHost",
+            ]) { $1 })
+        ),
+        helper("messenger", sources: ["../Sources/NoodleMessenger/**"], bundleID: "messenger",
+               dependencies: [.package(product: "NoodleCore"), .package(product: "NoodleToolScripting")]),
+.target(
+            name: "NoodleMCPProgramHost",
+            destinations: .macOS,
+            product: .xpc,
+            bundleId: "com.pdparchitect.noodle.hub.mcp-program-host",
+            deploymentTargets: .macOS("26.0"),
+            infoPlist: .extendingDefault(with: [
+                "CFBundleName": "Noodle Agent Host",
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+                "XPCService": ["ServiceType": "Application", "JoinExistingSession": true],
+                "NoodleSigningTeam": "$(DEVELOPMENT_TEAM)",
+                "NoodleApplicationIdentifier": "$(HUB_APP_BUNDLE_ID)",
+                "NoodleMCPProgramHostService": "$(HUB_APP_BUNDLE_ID).mcp-program-host",
+                "NoodleHostServesOtherPeople": true,
+            ]),
+            sources: ["../Sources/NoodleMCPProgramHost/**"],
+            dependencies: [.package(product: "NoodleCore"), .package(product: "NoodleAgentBridge")],
+            settings: .settings(base: signing.merging([
+                "PRODUCT_BUNDLE_IDENTIFIER": "$(HUB_APP_BUNDLE_ID).mcp-program-host",
+                "PRODUCT_NAME": "NoodleMCPProgramHost",
             ]) { $1 })
         ),
         helper("messenger", sources: ["../Sources/NoodleMessenger/**"], bundleID: "messenger",

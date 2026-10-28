@@ -212,6 +212,7 @@ let project = Project(
                 .package(product: "Sparkle"),
                 .package(product: "ComputerBridge"),
                 .target(name: "NoodleAgentHost"),
+                .target(name: "NoodleMCPProgramHost"),
                 .target(name: "NoodleShareExtension"),
                 .target(name: "NoodleWidgetsExtension"),
                 .target(name: "NoodleVisionToolsExtension"),
@@ -265,6 +266,20 @@ let project = Project(
             settings: .settings(base: signing.merging([
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(NOODLE_APP_BUNDLE_ID).agent-host",
                 "PRODUCT_NAME": "NoodleAgentHost",
+            ]) { $1 })
+        ),
+.target(
+            name: "NoodleMCPProgramHost",
+            destinations: .macOS,
+            product: .xpc,
+            bundleId: "com.pdparchitect.noodle.mcp-program-host",
+            deploymentTargets: .macOS("26.0"),
+            infoPlist: .file(path: "Support/MCPProgramHost-Info.plist"),
+            sources: ["Sources/NoodleMCPProgramHost/**"],
+            dependencies: [.package(product: "NoodleCore"), .package(product: "NoodleAgentBridge")],
+            settings: .settings(base: signing.merging([
+                "PRODUCT_BUNDLE_IDENTIFIER": "$(NOODLE_APP_BUNDLE_ID).mcp-program-host",
+                "PRODUCT_NAME": "NoodleMCPProgramHost",
             ]) { $1 })
         ),
         // Send to Noodle, sharing only the app group it hands items over in.
