@@ -1781,6 +1781,34 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(!redrawn)
     }
 
+    /// As on the Mac, an open conversation is drawn again for its own messages and its own bot or group alone.
+    @Test func aChangeInOneConversationDoesNotRedrawAnother() async throws {
+        let hub = FakeHub()
+        let crew = await hub.addGroup(named: "Crew", saying: "Morning")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        await hub.botSays("Anything else?")
+        let redrawn = try await redraws {
+            _ = chats.messages(of: crew)
+            _ = chats.thread(crew.id)
+        } after: {
+            try await chats.apply(.conversationChanged(conversationID: scout.conversationID, count: 3))
+            try await chats.apply(.botPhase(botID: scout.id, phase: .working))
+        }
+        #expect(!redrawn)
+        #expect(chats.messages(of: scout).last?.body == "Anything else?")
+        #expect(chats.agent(scout.id)?.phase == .working)
+
+        // Its own still are.
+        await hub.botSays("Crew, report", in: crew.id)
+        #expect(try await redraws { _ = chats.messages(of: crew) } after: {
+            try await chats.apply(.conversationChanged(conversationID: crew.id, count: 2))
+        })
+    }
+
     /// An admin's Users screen follows the Hub's users, as the Hub pushes that they changed.
     @Test func theHubSayingUsersChangedIsCounted() async throws {
         let hub = FakeHub()

@@ -30,7 +30,7 @@ extension LinkGroup: HubConversation {
 }
 
 /// A row of the list and the conversation it opens.
-enum HubThread: HubConversation {
+enum HubThread: HubConversation, Equatable {
     case bot(LinkBot), group(LinkGroup)
 
     private var conversation: any HubConversation {
@@ -57,12 +57,23 @@ enum HubThread: HubConversation {
     }
 }
 
+/// A change count observed on its own, for state kept per conversation or per bot or group.
+@MainActor @Observable final class ObservedRevision {
+    var value = 0
+}
+
 /// The bots and groups this phone's user keeps on the Hub and their conversations, kept current from the Hub's events.
 @MainActor @Observable final class HubChats {
     let pairing: HubPairing
     @ObservationIgnored let linkPreviews: LinkPreviews
-    private(set) var agents: [LinkBot] = []
-    private(set) var groups: [LinkGroup] = []
+    private(set) var agents: [LinkBot] = [] { didSet { indexThreads() } }
+    private(set) var groups: [LinkGroup] = [] { didSet { indexThreads() } }
+    /// The bots and groups by ID, each observed on its own through `thread(_:)` and `agent(_:)`, so a bot's status
+    /// changing draws its own conversation again and no other, as on the Mac.
+    @ObservationIgnored private var threadsByID: [UUID: HubThread] = [:]
+    /// Each bot's or group's ID by its conversation's.
+    @ObservationIgnored private var threadIDs: [UUID: UUID] = [:]
+    @ObservationIgnored private var threadRevisions: [UUID: ObservedRevision] = [:]
     var error: String?
     /// Whether the list is known: from the last sync saved on this phone, or from the Hub itself.
     private(set) var isLoaded = false
@@ -75,7 +86,10 @@ enum HubThread: HubConversation {
     private var drafts: [UUID: String] = [:]
     /// The small copies of backgrounds this phone fetched, by name.
     private var fetchedBackgrounds: Set<String> = []
-    private var conversations: [UUID: [LinkMessage]] = [:]
+    /// Each conversation's messages, observed one conversation at a time through `messages(of:)`, so a conversation on
+    /// screen is not drawn again when another one changes, as on the Mac. Changed only through `setMessages`.
+    @ObservationIgnored private var conversations: [UUID: [LinkMessage]] = [:]
+    @ObservationIgnored private var conversationRevisions: [UUID: ObservedRevision] = [:]
     /// This user's tool connections, computers and browsers on the Hub, which bots use when assigned.
     var connections: [LinkConnection] = []
     var computers: [LinkComputer] = []
@@ -90,8 +104,9 @@ enum HubThread: HubConversation {
     /// so that message is read again until it shows as delivered.
     @ObservationIgnored private var read: [UUID: Int] = [:]
     /// Where the earliest message this phone has sits in each conversation; earlier ones load as
-    /// the person scrolls back. None means it has them all.
-    private var start: [UUID: Int] = [:]
+    /// the person scrolls back. None means it has them all. Observed with the conversation's messages; changed only
+    /// through `setStart`.
+    @ObservationIgnored private var start: [UUID: Int] = [:]
     /// Shared cards with their pictures, as fetched when they come into view or read back from this
     /// phone. Dropped under memory pressure, a card is read back again.
     @ObservationIgnored let knownCards: NSCache<NSUUID, KnownCard> = {
@@ -162,6 +177,7 @@ enum HubThread: HubConversation {
             start = cache.start ?? [:]
             isLoaded = true
         }
+        indexThreads()
         // Once a launch, after the conversations first show.
         Task { [weak self] in self?.dropOldFiles() }
     }
@@ -211,7 +227,11 @@ enum HubThread: HubConversation {
         keep(kept, for: conversation.conversationID)
     }
 
-    private func thread(of conversationID: UUID) -> HubThread? { threads.first { $0.conversationID == conversationID } }
+    private func thread(of conversationID: UUID) -> HubThread? {
+        // One not listed yet is looked for in, and observed with, the whole list, so it shows once it is.
+        guard let id = threadIDs[conversationID] else { return threads.first { $0.conversationID == conversationID } }
+        return thread(id)
+    }
 
     private func keep(_ background: LinkBackground, for conversationID: UUID) {
         if let index = agents.firstIndex(where: { $0.conversationID == conversationID }) { agents[index].background = background }
@@ -694,7 +714,7 @@ enum HubThread: HubConversation {
     private func forget(_ conversation: some HubConversation) {
         let key = ShareTarget.Key(hub: pairing.directory.lastPathComponent, conversation: conversation.conversationID)
         Task { await ConversationSuggestions.forget([key]) }
-        conversations[conversation.conversationID] = nil
+        setMessages(nil, of: conversation.conversationID)
         read[conversation.conversationID] = nil
         linkPreviews.forget(conversation.conversationID)
         if seen?.removeValue(forKey: conversation.conversationID) != nil { saveSeen() }
@@ -737,9 +757,53 @@ enum HubThread: HubConversation {
         }
     }
 
-    func agent(_ id: UUID) -> LinkBot? { agents.first { $0.id == id } }
+    func agent(_ id: UUID) -> LinkBot? { thread(id)?.bot }
 
-    func thread(_ id: UUID) -> HubThread? { threads.first { $0.id == id } }
+    /// A bot or group, observed on its own: a view that shows one is not drawn again when another changes.
+    func thread(_ id: UUID) -> HubThread? {
+        _ = revision(of: id, in: &threadRevisions).value
+        return threadsByID[id]
+    }
+
+    /// Bots first, as `threads` lists them, so a group never stands in for a bot.
+    private func indexThreads() {
+        let before = threadsByID
+        var index: [UUID: HubThread] = [:], ids: [UUID: UUID] = [:]
+        for thread in threads where index[thread.id] == nil {
+            index[thread.id] = thread
+            ids[thread.conversationID] = ids[thread.conversationID] ?? thread.id
+        }
+        threadsByID = index
+        threadIDs = ids
+        for (id, revision) in threadRevisions where before[id] != index[id] { revision.value &+= 1 }
+    }
+
+    /// The change count observed for one conversation or one bot or group, made the first time it is asked for.
+    private func revision(of id: UUID, in revisions: inout [UUID: ObservedRevision]) -> ObservedRevision {
+        if let revision = revisions[id] { return revision }
+        let revision = ObservedRevision()
+        revisions[id] = revision
+        return revision
+    }
+
+    /// A conversation's messages, observed on their own, with where the earliest of them sits.
+    private func observedMessages(of conversationID: UUID) -> [LinkMessage]? {
+        _ = revision(of: conversationID, in: &conversationRevisions).value
+        return conversations[conversationID]
+    }
+
+    /// Only a conversation whose messages changed is drawn again.
+    private func setMessages(_ messages: [LinkMessage]?, of conversationID: UUID) {
+        guard conversations[conversationID] != messages else { return }
+        conversations[conversationID] = messages
+        conversationRevisions[conversationID]?.value &+= 1
+    }
+
+    private func setStart(_ position: Int, of conversationID: UUID) {
+        guard start[conversationID] != position else { return }
+        start[conversationID] = position
+        conversationRevisions[conversationID]?.value &+= 1
+    }
 
     /// The group's bots this phone knows, in the group's order.
     func members(of group: LinkGroup) -> [LinkBot] { group.draft.botIDs.compactMap(agent) }
@@ -747,7 +811,7 @@ enum HubThread: HubConversation {
     /// The members a group's picture shows: archived bots leave it.
     func activeMembers(of group: LinkGroup) -> [LinkBot] { members(of: group).filter { $0.archivedAt == nil } }
 
-    func messages(of conversation: some HubConversation) -> [LinkMessage] { conversations[conversation.conversationID] ?? [] }
+    func messages(of conversation: some HubConversation) -> [LinkMessage] { observedMessages(of: conversation.conversationID) ?? [] }
 
     /// Who wrote a message, as its preview and a comment on it say.
     func authorName(of message: LinkMessage, in thread: HubThread) -> String {
@@ -1041,7 +1105,10 @@ enum HubThread: HubConversation {
         let hub = pairing.directory.lastPathComponent
         let gone = conversations.keys.filter { !kept.contains($0) }.map { ShareTarget.Key(hub: hub, conversation: $0) }
         if !gone.isEmpty { Task { await ConversationSuggestions.forget(gone) } }
-        if conversations.keys.contains(where: { !kept.contains($0) }) { conversations = conversations.filter { kept.contains($0.key) } }
+        for gone in conversations.keys.filter({ !kept.contains($0) }) {
+            setMessages(nil, of: gone)
+            conversationRevisions[gone] = nil
+        }
         linkPreviews.keep(only: kept)
         try? patchReviews.retainConversations(kept)
         annotationDrafts.retain(kept)
@@ -1081,7 +1148,7 @@ enum HubThread: HubConversation {
     /// Only while nothing newer has come: out of its place, a message may no longer make sense.
     func canTryAgain(_ message: LinkMessage) -> Bool { hasFailed(message) && isNewest(message) }
 
-    private func isNewest(_ message: LinkMessage) -> Bool { conversations[message.conversationID]?.last?.id == message.id }
+    private func isNewest(_ message: LinkMessage) -> Bool { observedMessages(of: message.conversationID)?.last?.id == message.id }
 
     func send(_ body: String, files: [OutgoingFile] = [], to conversation: some HubConversation) async throws {
         let id = try queue(body, files: files, to: conversation)
@@ -1187,7 +1254,7 @@ enum HubThread: HubConversation {
     func delete(_ message: LinkMessage, in conversation: some HubConversation) {
         guard hasFailed(message), let kept = unsent.removeValue(forKey: message.id) else { return }
         for attachment in kept.attachments { try? FileManager.default.removeItem(at: fileURL(for: attachment).deletingLastPathComponent()) }
-        conversations[conversation.conversationID]?.removeAll { $0.id == message.id }
+        setMessages(conversations[conversation.conversationID]?.filter { $0.id != message.id }, of: conversation.conversationID)
         saveUnsent()
         saveCache()
     }
@@ -1352,7 +1419,7 @@ enum HubThread: HubConversation {
             settle(page.messages)
             merge(page.messages, into: conversationID)
             let first = page.start ?? 0
-            if start[conversationID] != first { start[conversationID] = first }
+            setStart(first, of: conversationID)
             let pending = page.messages.firstIndex { $0.author == .you && !$0.delivered }
             read[conversationID] = pending.map { first + $0 } ?? page.count
             return
@@ -1372,7 +1439,10 @@ enum HubThread: HubConversation {
     }
 
     /// Whether earlier messages wait on the Hub, to load as the person scrolls back.
-    func hasEarlier(_ conversation: some HubConversation) -> Bool { (start[conversation.conversationID] ?? 0) > 0 }
+    func hasEarlier(_ conversation: some HubConversation) -> Bool {
+        _ = observedMessages(of: conversation.conversationID)
+        return (start[conversation.conversationID] ?? 0) > 0
+    }
 
     func loadEarlier(_ conversation: some HubConversation) async throws {
         let id = conversation.conversationID
@@ -1380,14 +1450,14 @@ enum HubThread: HubConversation {
         let page = try await self.page(LinkMessagePage(conversationID: id, before: first, limit: Self.pageSize))
         settle(page.messages)
         let known = Set((conversations[id] ?? []).map(\.id))
-        conversations[id] = page.messages.filter { !known.contains($0.id) } + (conversations[id] ?? [])
-        start[id] = page.start ?? 0
+        setMessages(page.messages.filter { !known.contains($0.id) } + (conversations[id] ?? []), of: id)
+        setStart(page.start ?? 0, of: id)
         saveCache()
     }
 
     /// Where the earliest message this phone has sits in a conversation; nil until it first loads.
     func loadedStart(of conversation: some HubConversation) -> Int? {
-        conversations[conversation.conversationID] == nil ? nil : start[conversation.conversationID] ?? 0
+        observedMessages(of: conversation.conversationID) == nil ? nil : start[conversation.conversationID] ?? 0
     }
 
     /// A page of messages before position `before`, leaving what the conversation shows alone.
@@ -1415,7 +1485,7 @@ enum HubThread: HubConversation {
             .sorted { ($0.element.createdAt, $0.offset) < ($1.element.createdAt, $1.offset) }
             .map(\.element)
         guard merged != before else { return }
-        conversations[conversationID] = merged
+        setMessages(merged, of: conversationID)
     }
 }
 
@@ -1427,6 +1497,9 @@ struct AgentsView: View {
     @Environment(\.scenePhase) private var phase
     /// The conversation open, over the list or beside it.
     @State private var navigation = HomeNavigation()
+    /// Handed to the conversation open, which opens others with it. The same one throughout, so the conversation is
+    /// not drawn again each time the list is.
+    @State private var opener = ThreadOpener()
     /// The room the screen has, which decides between one column and two.
     @State private var size = CGSize.zero
     /// Kept per Hub, so what each Hub loaded stays while others join or leave.
@@ -1573,11 +1646,12 @@ struct AgentsView: View {
     @ViewBuilder
     private func conversation(_ link: ChatLink) -> some View {
         if let hub = chats.first(where: { CurrentHub.name(of: $0.pairing) == link.hub }) {
+            let _ = (opener.open = { hub, thread in
+                navigation.openFromConversation(ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread), in: layout)
+            })
             ChatView(chats: hub, threadID: link.thread)
                 .environment(\.joinedHubs, chats)
-                .environment(\.openThread) { hub, thread in
-                    navigation.openFromConversation(ChatLink(hub: CurrentHub.name(of: hub.pairing), thread: thread), in: layout)
-                }
+                .environment(\.openThread, opener)
         }
     }
 
@@ -2067,9 +2141,14 @@ struct ChatLink: Hashable {
     }
 }
 
+/// Opens another of a Hub's conversations by its thread, from one on screen.
+@MainActor final class ThreadOpener {
+    var open: (HubChats, UUID) -> Void = { _, _ in }
+}
+
 extension EnvironmentValues {
     /// Opens another of a Hub's conversations by its thread; nil where no conversation list is there to open it.
-    @Entry var openThread: (@MainActor (HubChats, UUID) -> Void)? = nil
+    @Entry var openThread: ThreadOpener? = nil
     /// Shows a bot's profile, from its picture beside its messages in a group.
     @Entry var showAgent: @MainActor (LinkBot) -> Void = { _ in }
 }
@@ -2897,11 +2976,11 @@ struct ChatView: View {
         profileChoice = nil
         switch action {
         case .reply: draft = AgentProfile.replying(to: bot.draft.name, draft: draft)
-        case .message: openThread?(chats, bot.id)
+        case .message: openThread?.open(chats, bot.id)
         case .call:
             chats.calls.start(threadID: bot.id, conversationID: bot.conversationID, name: bot.draft.name)
             // The call's bar is in its conversation, so show it, as on the Mac.
-            openThread?(chats, bot.id)
+            openThread?.open(chats, bot.id)
         case .edit: editingBot = bot
         }
     }
