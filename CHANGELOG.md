@@ -14,6 +14,7 @@ All notable changes to Noodle are documented here, following
 
 ### Fixed
 
+- Clicking a conversation in the sidebar starts typing in its message field again, in View › As List as in As Columns. Tab from the sidebar now reaches the focused column's message field too.
 - In View › As Columns, clicking into another column starts typing in its message field.
 
 - In View › As Columns, Noodle no longer quits when columns close while others further along are on screen, for example on switching to a space with fewer of them.

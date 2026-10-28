@@ -114,9 +114,7 @@ struct ConversationColumns: View {
         .onChange(of: store.selectedConversationID, initial: true) { _, id in
             guard let id else { return }
             model.show(id, in: store.space)
-            let clicked = NSApp.currentEventIsClick || store.selectionIsFromClick
-            store.selectionIsFromClick = false
-            if clicked { model.focusComposer(of: id) }
+            if NSApp.currentEventIsClick { model.focusComposer(of: id) }
         }
         .onChange(of: store.space) { _, space in
             store.selectedConversationID = model.enter(space, selected: store.selectedConversationID, holds: store.spaceHolds)

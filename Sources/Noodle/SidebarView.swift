@@ -74,10 +74,11 @@ private struct SidebarList: View {
 
         let sections = store.sidebarSections(ConversationOrder(rawValue: conversationOrder) ?? .standard)
         List(selection: Binding(get: { store.selectedConversationID }, set: { id in
-            guard id != store.selectedConversationID else { return }
-            // Columns learn of the selection after the click has been handled, so it is noted here.
-            store.selectionIsFromClick = NSApp.currentEventIsClick
-            store.selectedConversationID = id
+            // A conversation clicked starts in its input; one reached with the arrow keys leaves the list focused.
+            // Asked here, since the views showing it learn of the selection only after the click.
+            let clicked = NSApp.currentEventIsClick
+            if id != store.selectedConversationID { store.selectedConversationID = id }
+            if clicked, id != nil { DispatchQueue.main.async(execute: focusComposer) }
         })) {
             section("Pinned", sections.pinned)
             section("Unread", sections.unread)

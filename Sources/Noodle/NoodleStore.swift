@@ -128,8 +128,6 @@ final class NoodleStore {
         didSet { updateDockBadge() }
     }
     var selectedConversationID: UUID?
-    /// Whether the sidebar's last selection came from a click, for views that see it only afterwards.
-    @ObservationIgnored var selectionIsFromClick = false
     var searchText = ""
     private var drafts = ConversationDrafts()
     var draft: String {

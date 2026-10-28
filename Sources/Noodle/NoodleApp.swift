@@ -424,11 +424,17 @@ struct RootView: View {
         }
     }
 
+    /// The selected conversation's input takes the keyboard, in its column or in the list's detail.
+    private func focusSelectedComposer() {
+        if showsColumns, let id = store.selectedConversationID { columns.focusComposer(of: id) }
+        else { composerFocusRequest = UUID() }
+    }
+
     private func content() -> some View {
         @Bindable var store = store
 
         return NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(focusComposer: { composerFocusRequest = UUID() }, focusRequest: sidebarFocusRequest)
+            SidebarView(focusComposer: focusSelectedComposer, focusRequest: sidebarFocusRequest)
                 .toolbar(removing: sidebarOwnsToolbar ? .sidebarToggle : nil)
                 .toolbar { sidebarToolbar }
                 // Last: a toolbar(removing:) applied after it swallows the column width, even one removing nothing.
@@ -704,11 +710,6 @@ private struct SelectedConversationDetail: View {
                     composerFocusRequest: focusRequest, focusSidebar: focusSidebar)
             }
             .onChange(of: composerFocusRequest) { _, request in focusRequest = request }
-            // A conversation clicked in the sidebar starts in its input; one reached with the arrow keys leaves the list focused.
-            .onChange(of: store.selectedConversationID) {
-                guard NSApp.currentEventIsClick else { return }
-                DispatchQueue.main.async { focusRequest = UUID() }
-            }
         } else {
             ZStack {
                 Color(nsColor: .textBackgroundColor).opacity(0.28)
