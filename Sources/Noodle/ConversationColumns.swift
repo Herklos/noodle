@@ -5,6 +5,11 @@ import NoodleWallpaper
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension EnvironmentValues {
+    /// False in a column other than the focused one; true wherever a conversation is shown alone.
+    @Entry var isFocusedColumn = true
+}
+
 /// View > As List shows one conversation beside the sidebar; As Columns shows several side by side.
 enum MainWindowLayout: String {
     case list, columns
@@ -99,7 +104,9 @@ struct ConversationColumns: View {
         .onChange(of: store.selectedConversationID, initial: true) { _, id in
             guard let id else { return }
             model.show(id, in: store.space)
-            if NSApp.currentEventIsClick { model.focusComposer(of: id) }
+            let clicked = NSApp.currentEventIsClick || store.selectionIsFromClick
+            store.selectionIsFromClick = false
+            if clicked { model.focusComposer(of: id) }
         }
         .onChange(of: store.space) { _, space in
             store.selectedConversationID = model.enter(space, selected: store.selectedConversationID, holds: store.spaceHolds)
@@ -347,21 +354,25 @@ private struct ConversationColumn: View {
 
     private var isFocused: Bool { model.focusedID == conversation.id }
 
+    private func select() {
+        model.focusedID = conversation.id
+        if store.selectedConversationID != conversation.id { store.selectedConversationID = conversation.id }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            ColumnHeader(conversation: conversation, isFocused: isFocused, kickRequest: $kickRequest) {
+            ColumnHeader(conversation: conversation, isFocused: isFocused, kickRequest: $kickRequest,
+                select: { select(); model.focusComposer(of: conversation.id) },
+                reorder: .init(targeted: { isReorderTargeted = $0 }, drop: { id in
+                    withAnimation(.smooth) { model.move(id, before: conversation.id, in: store.space) }
+                })) {
                 store.selectedConversationID = model.close(conversation.id, in: store.space)
             }
-            .draggable(conversation.id.uuidString)
-            .dropDestination(for: String.self) { items, _ in
-                guard let id = items.first.flatMap(UUID.init(uuidString:)) else { return false }
-                withAnimation(.smooth) { model.move(id, before: conversation.id, in: store.space) }
-                return true
-            } isTargeted: { isReorderTargeted = $0 }
 
             if isLoaded {
                 AttachmentPreviewScope(conversationID: conversation.id) { preview in
                     ChatView(conversation: conversation, attachmentPreview: preview, composerFocusRequest: composerFocusRequest)
+                        .environment(\.isFocusedColumn, isFocused)
                 }
             } else {
                 ColumnCard(conversation: conversation)
@@ -388,10 +399,7 @@ private struct ConversationColumn: View {
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
         }
-        .simultaneousGesture(TapGesture().onEnded {
-            model.focusedID = conversation.id
-            if store.selectedConversationID != conversation.id { store.selectedConversationID = conversation.id }
-        })
+        .simultaneousGesture(TapGesture().onEnded(select))
         .onDrop(of: AttachmentTransfer.dropContentTypes, isTargeted: $isDropTargeted) { providers in
             guard !providers.isEmpty else { return false }
             store.markConversationRead(conversation.id)
@@ -430,22 +438,27 @@ private struct ColumnHeader: View {
     let conversation: BotConversation
     let isFocused: Bool
     @Binding var kickRequest: AgentKickRequest?
+    let select: () -> Void
+    let reorder: ColumnDragHandle.Reorder
     let close: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
-            ConversationStatusAvatar(conversation: conversation, size: 26, dotSize: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(store.title(for: conversation))
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(store.preview(for: conversation))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            HStack(spacing: 8) {
+                ConversationStatusAvatar(conversation: conversation, size: 26, dotSize: 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(store.title(for: conversation))
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(store.preview(for: conversation))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
             }
-            Spacer(minLength: 4)
+            .overlay { ColumnDragHandle(id: conversation.id, select: select, reorder: reorder) }
             ConversationPauseControl(conversation: conversation, kickRequest: $kickRequest)
             Group {
                 VoiceCallToolbarControl(conversation: conversation)
@@ -554,6 +567,89 @@ struct ColumnSwitcher: View {
                 }
             }
             .padding(.horizontal, 6)
+        }
+    }
+}
+
+/// Pressing a column's header selects it, and dragging moves it, from the first press: SwiftUI's
+/// draggable lost the press to the focus change when another column had the keyboard.
+private struct ColumnDragHandle: NSViewRepresentable {
+    /// Only Noodle's own type, so a column dropped on a transcript or a message field is not taken as text.
+    static let type = NSPasteboard.PasteboardType("com.pdparchitect.noodle.column")
+    let id: UUID
+    let select: () -> Void
+    let reorder: Reorder
+
+    /// Another column dropped here goes before this one.
+    struct Reorder {
+        let targeted: (Bool) -> Void
+        let drop: (UUID) -> Void
+    }
+
+    func makeNSView(context: Context) -> HandleView {
+        let view = HandleView()
+        view.registerForDraggedTypes([Self.type])
+        return view
+    }
+
+    func updateNSView(_ view: HandleView, context: Context) {
+        view.id = id
+        view.select = select
+        view.reorder = reorder
+    }
+
+    final class HandleView: NSView, NSDraggingSource {
+        var id: UUID?
+        var select: (() -> Void)?
+        var reorder: Reorder?
+        private var press: NSEvent?
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            reorder?.targeted(true)
+            return .move
+        }
+
+        override func draggingExited(_ sender: NSDraggingInfo?) { reorder?.targeted(false) }
+
+        override func draggingEnded(_ sender: NSDraggingInfo) { reorder?.targeted(false) }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            reorder?.targeted(false)
+            guard let id = sender.draggingPasteboard.string(forType: ColumnDragHandle.type).flatMap(UUID.init(uuidString:)) else { return false }
+            reorder?.drop(id)
+            return true
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) { press = event }
+
+        override func mouseUp(with event: NSEvent) {
+            guard press != nil else { return }
+            press = nil
+            select?()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let press, let id, let window, let content = window.contentView else { return }
+            self.press = nil
+            let item = NSPasteboardItem()
+            item.setString(id.uuidString, forType: ColumnDragHandle.type)
+            let dragging = NSDraggingItem(pasteboardWriter: item)
+            // The header as it looks, taken from the window, since this view draws nothing itself.
+            let rect = content.convert(bounds, from: self)
+            let image = NSImage(size: bounds.size)
+            if let rep = content.bitmapImageRepForCachingDisplay(in: rect) {
+                content.cacheDisplay(in: rect, to: rep)
+                image.addRepresentation(rep)
+            }
+            dragging.setDraggingFrame(bounds, contents: image)
+            beginDraggingSession(with: [dragging], event: press, source: self)
+        }
+
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+            context == .withinApplication ? .move : []
         }
     }
 }

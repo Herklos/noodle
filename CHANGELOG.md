@@ -9,6 +9,11 @@ All notable changes to Noodle are documented here, following
 ### Fixed
 
 - In View › As Columns, switching spaces no longer carries over a column for a conversation the new space doesn't hold. A space with none of its conversations open shows no columns, and its empty state now fits on one line.
+- In View › As Columns:
+  - Record Voice Message records in the focused column.
+  - Choosing a conversation in the sidebar starts typing in its column again.
+  - A column's header can be dragged to reorder the columns on the first press, even while another column has focus.
+  - A header dropped on a conversation is no longer added to it as an attachment.
 
 ## [0.78.1] - 2026-10-28
 

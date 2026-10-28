@@ -73,7 +73,12 @@ private struct SidebarList: View {
         @Bindable var store = store
 
         let sections = store.sidebarSections(ConversationOrder(rawValue: conversationOrder) ?? .standard)
-        List(selection: $store.selectedConversationID) {
+        List(selection: Binding(get: { store.selectedConversationID }, set: { id in
+            guard id != store.selectedConversationID else { return }
+            // Columns learn of the selection after the click has been handled, so it is noted here.
+            store.selectionIsFromClick = NSApp.currentEventIsClick
+            store.selectedConversationID = id
+        })) {
             section("Pinned", sections.pinned)
             section("Unread", sections.unread)
             section("Bots", sections.bots)

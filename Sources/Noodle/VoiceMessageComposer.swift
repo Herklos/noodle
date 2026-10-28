@@ -10,6 +10,7 @@ struct VoiceMessageComposer<Content: View>: View {
     private var sending: Bool { recorder.isSending }
     @FocusState private var focused: Bool
     @Environment(\.floatingPanelCommands) private var panelCommands
+    @Environment(\.isFocusedColumn) private var isFocusedColumn
     private var recordingCommand: VoiceRecordingCommand {
         VoiceRecordingCommand(phase: { recorder.phase }, isSending: { sending }, toggle: toggleRecording)
     }
@@ -94,7 +95,8 @@ struct VoiceMessageComposer<Content: View>: View {
                 .id(ObjectIdentifier(recorder))
             }
         }
-        .focusedSceneValue(\.voiceRecordingCommand, recordingCommand)
+        // Of several columns in a window, only the focused one answers the menu.
+        .focusedSceneValue(\.voiceRecordingCommand, isFocusedColumn ? recordingCommand : nil)
         .onAppear { mountRecorder(); panelCommands?.voiceRecording = recordingCommand }
         .onChange(of: ObjectIdentifier(recorder)) { _, _ in mountRecorder(); panelCommands?.voiceRecording = recordingCommand }
         .onDisappear {
