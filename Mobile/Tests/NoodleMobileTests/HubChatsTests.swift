@@ -992,6 +992,44 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(relaunched.latestMessage(of: scout)?.body == "Hello")
     }
 
+    /// The phone keeps each conversation's latest messages for the next launch, not all it ever loaded; earlier ones
+    /// load again as the person scrolls back.
+    @Test func aRelaunchKeepsTheLatestMessagesOfALongConversation() async throws {
+        let hub = FakeHub()
+        for index in 1..<260 { await hub.botSays("Message \(index)") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: directory)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        while chats.hasEarlier(scout) { try await chats.loadEarlier(scout) }
+        #expect(chats.messages(of: scout).count == 260)
+
+        let relaunched = HubChats(pairing: HubPairing(directory: directory, deviceName: "iPhone"))
+        #expect(relaunched.messages(of: scout).count == 200)
+        #expect(relaunched.messages(of: scout).first?.body == "Message 60")
+        #expect(relaunched.latestMessage(of: scout)?.body == "Message 259")
+        #expect(relaunched.hasEarlier(scout))
+        try await relaunched.loadEarlier(scout)
+        #expect(relaunched.messages(of: scout).first?.body == "Message 10")
+    }
+
+    /// A burst of changes, as when the app comes back, is written once, a moment later and off the main thread; reading
+    /// the file never misses the latest.
+    @Test func theLastSyncIsWrittenOnceForABurstOfChanges() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let file = ChatsCacheFile.at(url)
+        for name in ["Scout", "Atlas", "Nova"] {
+            let bot = LinkBot(id: UUID(), conversationID: UUID(), draft: LinkBotDraft(name: name, provider: "claude"), createdAt: Date())
+            file.save(ChatsCache(agents: [bot], conversations: [:], read: [:]))
+        }
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(ChatsCacheFile.at(url) === file)
+        #expect(file.load()?.agents.map(\.draft.name) == ["Nova"])
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test func noAgentsIsOnlyKnownOnceTheHubHasAnswered() {
         let chats = HubChats(pairing: HubPairing(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString), deviceName: "iPhone"))

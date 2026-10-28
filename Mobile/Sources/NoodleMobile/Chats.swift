@@ -62,6 +62,116 @@ enum HubThread: HubConversation, Equatable {
     var value = 0
 }
 
+/// A Hub's last sync, kept on the phone so its chats show at once on the next launch while the Hub is asked again.
+struct ChatsCache: Codable, Sendable {
+    var agents: [LinkBot]
+    var groups: [LinkGroup]?
+    var conversations: [UUID: [LinkMessage]]
+    var read: [UUID: Int]
+    var start: [UUID: Int]?
+
+    /// The messages kept of each conversation; earlier ones load again as the person scrolls back.
+    static let keptMessages = 200
+
+    /// Each conversation's latest messages alone, starting that much later.
+    func trimmed(to limit: Int = keptMessages) -> ChatsCache {
+        var trimmed = self
+        var start = self.start ?? [:]
+        for (id, messages) in conversations where messages.count > limit {
+            trimmed.conversations[id] = Array(messages.suffix(limit))
+            start[id] = (start[id] ?? 0) + messages.count - limit
+        }
+        trimmed.start = start
+        return trimmed
+    }
+}
+
+/// Reads and writes a Hub's `chats.json` off the main thread. A save keeps only the newest copy and writes it once a
+/// moment later, so a burst of changes, as when the app comes back, costs one write; reading first writes a copy still
+/// waiting, so it never misses the latest.
+final class ChatsCacheFile: @unchecked Sendable {
+    /// How long a save waits for more changes before writing.
+    static let delay: TimeInterval = 2
+    let url: URL
+    private let queue = DispatchQueue(label: "Noodle chats cache", qos: .utility)
+    /// Guards the three below, which the main thread sets and the queue takes.
+    private let lock = NSLock()
+    private var waiting: ChatsCache?
+    private var scheduled = false
+    /// What `preload` read, until taken; nil when not read.
+    private var preloaded: ChatsCache??
+
+    private init(url: URL) { self.url = url }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var files: [URL: ChatsCacheFile] = [:]
+
+    /// One for each file, so whatever reads it sees what was saved there, however recently.
+    static func at(_ url: URL) -> ChatsCacheFile {
+        lock.withLock {
+            if let file = files[url] { return file }
+            let file = ChatsCacheFile(url: url)
+            files[url] = file
+            return file
+        }
+    }
+
+    /// Starts reading at once, off the main thread, so the chats are ready by the time the list asks for them.
+    func preload() {
+        queue.async { [self] in
+            guard lock.withLock({ preloaded == nil && waiting == nil }) else { return }
+            let read = Self.read(url)
+            lock.withLock { if preloaded == nil && waiting == nil { preloaded = .some(read) } }
+        }
+    }
+
+    /// What was last saved: as `preload` read it, or read now.
+    func load() -> ChatsCache? {
+        queue.sync {
+            writeWaiting()
+            let taken = lock.withLock { () -> ChatsCache?? in
+                defer { preloaded = nil }
+                return preloaded
+            }
+            if let taken { return taken }
+            return Self.read(url)
+        }
+    }
+
+    func save(_ chats: ChatsCache) {
+        let schedules = lock.withLock { () -> Bool in
+            waiting = chats
+            preloaded = nil
+            defer { scheduled = true }
+            return !scheduled
+        }
+        if schedules { queue.asyncAfter(deadline: .now() + Self.delay) { [self] in writeWaiting() } }
+    }
+
+    /// Writes a copy still waiting now, as when the app goes to the background.
+    func flush() {
+        queue.async { [self] in writeWaiting() }
+    }
+
+    /// On the queue.
+    private func writeWaiting() {
+        let chats = lock.withLock { () -> ChatsCache? in
+            defer {
+                waiting = nil
+                scheduled = false
+            }
+            return waiting
+        }
+        guard let chats else { return }
+        try? JSONEncoder().encode(chats.trimmed()).write(to: url, options: .atomic)
+        lock.withLock { preloaded = nil }
+    }
+
+    private static func read(_ url: URL) -> ChatsCache? {
+        try? JSONDecoder().decode(ChatsCache.self, from: Data(contentsOf: url))
+    }
+}
+
 /// The bots and groups this phone's user keeps on the Hub and their conversations, kept current from the Hub's events.
 @MainActor @Observable final class HubChats {
     let pairing: HubPairing
@@ -122,13 +232,7 @@ enum HubThread: HubConversation, Equatable {
     private static let pageSize = 50
 
     /// The last sync, shown at launch while the Hub is asked again.
-    private struct Cache: Codable {
-        var agents: [LinkBot]
-        var groups: [LinkGroup]?
-        var conversations: [UUID: [LinkMessage]]
-        var read: [UUID: Int]
-        var start: [UUID: Int]?
-    }
+    @ObservationIgnored private let cacheFile: ChatsCacheFile
 
     /// Voice calls with this Hub's bots, which the Hub runs.
     @ObservationIgnored private(set) lazy var calls = PhoneCalls(open: { [pairing] start in
@@ -165,13 +269,14 @@ enum HubThread: HubConversation, Equatable {
         self.networkChanges = networkChanges
         self.pause = pause
         self.backoff = backoff
+        cacheFile = ChatsCacheFile.at(pairing.directory.appendingPathComponent("chats.json"))
         linkPreviews = LinkPreviews(folder: pairing.directory.appendingPathComponent("Link Previews", isDirectory: true))
         pinned = Set((try? JSONDecoder().decode([UUID].self, from: Data(contentsOf: pairing.directory.appendingPathComponent("pins.json")))) ?? [])
         seen = try? JSONDecoder().decode([UUID: Date].self, from: Data(contentsOf: seenURL))
         drafts = (try? JSONDecoder().decode([UUID: String].self, from: Data(contentsOf: draftsURL))) ?? [:]
         unsent = (try? JSONDecoder().decode([UUID: UnsentMessage].self, from: Data(contentsOf: unsentURL))) ?? [:]
         fetchedBackgrounds = Set((try? FileManager.default.contentsOfDirectory(atPath: backgroundsFolder.path)) ?? [])
-        if let cache = try? JSONDecoder().decode(Cache.self, from: Data(contentsOf: cacheURL)) {
+        if let cache = cacheFile.load() {
             agents = cache.agents
             groups = cache.groups ?? []
             conversations = cache.conversations
@@ -180,11 +285,14 @@ enum HubThread: HubConversation, Equatable {
             isLoaded = true
         }
         indexThreads()
-        // Once a launch, after the conversations first show.
-        Task { [weak self] in self?.dropOldFiles() }
+        // Once a launch, after the conversations first show, off the main thread: it walks every file kept.
+        let files = filesFolder, unsentFiles = unsentFileIDs, limit = Self.keptFilesLimit
+        Task.detached(priority: .utility) { [weak self] in
+            let dropped = Self.dropOldFiles(in: files, keeping: unsentFiles, over: limit)
+            await self?.forgetCards(of: dropped)
+        }
     }
 
-    private var cacheURL: URL { pairing.directory.appendingPathComponent("chats.json") }
     private var seenURL: URL { pairing.directory.appendingPathComponent("read.json") }
     private var draftsURL: URL { pairing.directory.appendingPathComponent("drafts.json") }
     private var unsentURL: URL { pairing.directory.appendingPathComponent("unsent.json") }
@@ -455,9 +563,17 @@ enum HubThread: HubConversation, Equatable {
         try? JSONEncoder().encode(seen).write(to: seenURL, options: .atomic)
     }
 
+    /// Starts reading a Hub's last sync off the main thread as the app launches, before its chats are made.
+    static func preload(_ pairing: HubPairing) {
+        ChatsCacheFile.at(pairing.directory.appendingPathComponent("chats.json")).preload()
+    }
+
+    /// Writes the last sync now rather than a moment later, as the app goes to the background.
+    func flushCache() { cacheFile.flush() }
+
+    /// Cheap enough for every change: the file is written a moment later, once for a burst, off the main thread.
     private func saveCache() {
-        try? JSONEncoder().encode(Cache(agents: agents, groups: groups, conversations: conversations, read: read, start: start))
-            .write(to: cacheURL, options: .atomic)
+        cacheFile.save(ChatsCache(agents: agents, groups: groups, conversations: conversations, read: read, start: start))
         let targets = shareTargets
         guard targets != savedShareTargets else { return }
         ShareTargets.save(targets, in: pairing.directory)
@@ -1307,7 +1423,14 @@ enum HubThread: HubConversation, Equatable {
     /// again if shown. Files of messages not yet sent are the only copies: they stay, and stay in the
     /// phone's backups, which every other file is left out of, including those kept by earlier versions.
     func dropOldFiles(over limit: Int = HubChats.keptFilesLimit) {
-        let unsentIDs = Set(unsent.values.flatMap { $0.attachments.map(\.id.uuidString) })
+        forgetCards(of: Self.dropOldFiles(in: filesFolder, keeping: unsentFileIDs, over: limit))
+    }
+
+    /// The folders of the files of messages not yet sent.
+    private var unsentFileIDs: Set<String> { Set(unsent.values.flatMap { $0.attachments.map(\.id.uuidString) }) }
+
+    /// Touches nothing of the chats, so it runs off the main thread. The IDs of the files dropped.
+    nonisolated private static func dropOldFiles(in filesFolder: URL, keeping unsentIDs: Set<String>, over limit: Int) -> [UUID] {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         var folders = ((try? FileManager.default.contentsOfDirectory(at: filesFolder, includingPropertiesForKeys: keys)) ?? []).map { folder in
             let size = (FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys)?.allObjects as? [URL] ?? [])
@@ -1318,11 +1441,17 @@ enum HubThread: HubConversation, Equatable {
         for entry in folders where !unsentIDs.contains(entry.folder.lastPathComponent) { leaveOutOfBackups(entry.folder) }
         var total = folders.reduce(0) { $0 + $1.size }
         folders.sort { $0.used < $1.used }
+        var dropped: [UUID] = []
         for entry in folders where total > limit && !unsentIDs.contains(entry.folder.lastPathComponent) {
             try? FileManager.default.removeItem(at: entry.folder)
-            if let id = UUID(uuidString: entry.folder.lastPathComponent) { knownCards.removeObject(forKey: id as NSUUID) }
+            if let id = UUID(uuidString: entry.folder.lastPathComponent) { dropped.append(id) }
             total -= entry.size
         }
+        return dropped
+    }
+
+    private func forgetCards(of attachments: [UUID]) {
+        for id in attachments { knownCards.removeObject(forKey: id as NSUUID) }
     }
 
     /// Pixels on the long side of the Hub's previews, enough for a picture's bubble.
@@ -1400,7 +1529,9 @@ enum HubThread: HubConversation, Equatable {
     }
 
     /// A copy the Hub has stays out of the phone's backups; restored, it downloads again when shown.
-    private func leaveOutOfBackups(_ folder: URL) {
+    private func leaveOutOfBackups(_ folder: URL) { Self.leaveOutOfBackups(folder) }
+
+    nonisolated private static func leaveOutOfBackups(_ folder: URL) {
         var folder = folder
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
@@ -1695,6 +1826,8 @@ struct AgentsView: View {
         .onChange(of: chats.map(\.badgedConversations), initial: true) { AppBadge.publish(chats) }
         // Back in front, as after switching airplane mode off in Control Center, a Hub not connected is tried at once.
         .onChange(of: phase) {
+            // Going away, what was last synced is written now rather than a moment later, which may not come.
+            if phase == .background { for hub in chats { hub.flushCache() } }
             guard phase == .active else { return }
             for hub in chats { hub.resume() }
         }

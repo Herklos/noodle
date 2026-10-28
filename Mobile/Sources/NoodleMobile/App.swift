@@ -14,7 +14,10 @@ struct NoodleMobileApp: App {
 
     init() {
         let shared = AppGroup.hubs ?? URL.applicationSupportDirectory.appendingPathComponent("Hubs", isDirectory: true)
-        _hubs = State(initialValue: HubMemberships(directory: shared, deviceName: UIDevice.current.name))
+        let memberships = HubMemberships(directory: shared, deviceName: UIDevice.current.name)
+        _hubs = State(initialValue: memberships)
+        // What each Hub last synced is read off the main thread from now, so it is ready by the time the list shows.
+        for pairing in memberships.hubs { HubChats.preload(pairing) }
         // Pulling to refresh writes the wordmark instead of turning the spinner.
         UIRefreshControl.appearance().tintColor = .clear
     }
