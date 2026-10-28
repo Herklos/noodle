@@ -10,8 +10,6 @@ struct SidebarView: View {
     var focusRequest: UUID? = nil
     @Environment(NoodleStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openWindow) private var openWindow
-    @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
     @FocusState private var searchIsFocused: Bool
     @State private var kickRequest: AgentKickRequest?
     @State private var newSessionAgent: AgentRecord?
@@ -19,40 +17,18 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var store = store
 
-        let sections = store.sidebarSections(ConversationOrder(rawValue: conversationOrder) ?? .standard)
-        List(selection: $store.selectedConversationID) {
-            section("Pinned", sections.pinned)
-            section("Unread", sections.unread)
-            section("Bots", sections.bots)
-            section("Groups", sections.groups)
-        }
-        .listStyle(.sidebar)
+        // The rows are read in a view of their own: this one carries the search field, a toolbar item
+        // that AppKit lays out again whenever this body runs.
+        SidebarList(kickRequest: $kickRequest, newSessionAgent: $newSessionAgent, searchIsFocused: searchIsFocused,
+            focusComposer: focusComposer, focusRequest: focusRequest)
         .modifier(AgentKickConfirmation(store: store, request: $kickRequest))
         .modifier(NewSessionConfirmation(store: store, agent: $newSessionAgent))
         .scrollContentBackground(.hidden)
-        .modifier(ConversationListKeyboardNavigation(
-            hasSelection: store.selectedConversationID != nil,
-            searchIsFocused: searchIsFocused,
-            focusComposer: focusComposer,
-            focusRequest: focusRequest
-        ))
         .background(Color.black.opacity(colorScheme == .dark ? 0.24 : 0.04).ignoresSafeArea())
         .searchable(text: $store.searchText, placement: .sidebar, prompt: "Search")
         .controlSize(.large)
         .searchFocused($searchIsFocused)
-        .overlay {
-            if !store.conversations.isEmpty && store.filteredConversations.isEmpty {
-                if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    // A space with nothing in it yet.
-                    ContentUnavailableView("No Bots", systemImage: "square.stack")
-                } else {
-                    ContentUnavailableView.search(text: store.searchText)
-                }
-            }
-        }
-        .onChange(of: store.selectedConversationID) { _, conversationID in
-            store.markConversationRead(conversationID)
-        }
+        .overlay { SidebarEmptyState() }
         .onAppear {
             store.markSelectedConversationReadIfVisible()
         }
@@ -65,12 +41,69 @@ struct SidebarView: View {
         }
     }
 
+}
+
+private struct SidebarEmptyState: View {
+    @Environment(NoodleStore.self) private var store
+
+    var body: some View {
+        if !store.conversations.isEmpty && store.filteredConversations.isEmpty {
+            if store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // A space with nothing in it yet.
+                ContentUnavailableView("No Bots", systemImage: "square.stack")
+            } else {
+                ContentUnavailableView.search(text: store.searchText)
+            }
+        }
+    }
+}
+
+private struct SidebarList: View {
+    @Environment(NoodleStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage(ConversationOrder.key) private var conversationOrder = ConversationOrder.standard.rawValue
+    @AppStorage(SidebarRowDetail.key) private var rowDetail = SidebarRowDetail.standard.rawValue
+    @Binding var kickRequest: AgentKickRequest?
+    @Binding var newSessionAgent: AgentRecord?
+    let searchIsFocused: Bool
+    let focusComposer: () -> Void
+    let focusRequest: UUID?
+
+    var body: some View {
+        @Bindable var store = store
+
+        let sections = store.sidebarSections(ConversationOrder(rawValue: conversationOrder) ?? .standard)
+        List(selection: $store.selectedConversationID) {
+            section("Pinned", sections.pinned)
+            section("Unread", sections.unread)
+            section("Bots", sections.bots)
+            section("Groups", sections.groups)
+        }
+        .listStyle(.sidebar)
+        .modifier(ConversationListKeyboardNavigation(
+            hasSelection: store.selectedConversationID != nil,
+            searchIsFocused: searchIsFocused,
+            focusComposer: focusComposer,
+            focusRequest: focusRequest
+        ))
+        .onChange(of: store.selectedConversationID) { _, conversationID in
+            store.markConversationRead(conversationID)
+        }
+    }
+
     @ViewBuilder
     private func section(_ title: String, _ conversations: [BotConversation]) -> some View {
         if !conversations.isEmpty {
             Section(title) {
                 ForEach(conversations) { conversation in
-                    ConversationRow(conversation: conversation)
+                    ConversationRow(conversationID: conversation.id, isGroup: conversation.kind == .group,
+                        isSelected: store.selectedConversationID == conversation.id,
+                        content: ConversationRowContent(conversation, store: store, detail: SidebarRowDetail(rawValue: rowDetail) ?? .standard))
+                        .equatable()
+                        // Outside the equatable row, where the list can see them.
+                        .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 10))
+                        .listRowSeparator(.visible, edges: .bottom)
+                        .listRowSeparatorTint(Color.primary.opacity(0.12))
                         .tag(conversation.id)
                         .contextMenu { menu(for: conversation) }
                 }
@@ -164,18 +197,50 @@ struct SidebarView: View {
     }
 }
 
-private struct ConversationRow: View {
+/// What a sidebar row shows. The list works it out, so a message or a status change redraws only the rows it changes.
+private struct ConversationRowContent: Equatable {
+    var participants: [AgentRecord]
+    var title: String
+    var timestamp: String
+    var pause: String?
+    var detail: String
+    var runtimeColor: Color
+    var runtimeHelp: String
+    var isUnread: Bool
+    var isMuted: Bool
+
+    @MainActor init(_ conversation: BotConversation, store: NoodleStore, detail: SidebarRowDetail) {
+        participants = store.shownParticipants(for: conversation)
+        title = store.title(for: conversation)
+        timestamp = SidebarTimestamp.text(for: conversation.updatedAt)
+        pause = store.pauseSummary(for: conversation)
+        self.detail = store.sidebarDetail(for: conversation, showing: detail)
+        runtimeColor = store.runtimeStatus(for: conversation).color
+        runtimeHelp = store.runtimeHelp(for: conversation)
+        isUnread = store.hasUnreadMessages(in: conversation)
+        isMuted = store.isMuted(conversation.id)
+    }
+}
+
+private struct ConversationRow: View, Equatable {
     @Environment(NoodleStore.self) private var store
-    @AppStorage(SidebarRowDetail.key) private var rowDetail = SidebarRowDetail.standard.rawValue
     @State private var isDropTargeted = false
-    let conversation: BotConversation
+    let conversationID: UUID
+    let isGroup: Bool
+    /// Not drawn by the row, but the list's selection look reaches it only when the row is updated.
+    let isSelected: Bool
+    let content: ConversationRowContent
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.conversationID == b.conversationID && a.isGroup == b.isGroup && a.isSelected == b.isSelected && a.content == b.content
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             ZStack(alignment: .bottomTrailing) {
                 ConversationAvatar(
-                    participants: store.shownParticipants(for: conversation),
-                    isGroup: conversation.kind == .group,
+                    participants: content.participants,
+                    isGroup: isGroup,
                     size: 42
                 )
                 Circle()
@@ -187,7 +252,7 @@ private struct ConversationRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(store.title(for: conversation))
+                    Text(content.title)
                         .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
 
@@ -224,13 +289,13 @@ private struct ConversationRow: View {
             }
         }
         .onDrop(of: AttachmentTransfer.dropContentTypes, isTargeted: $isDropTargeted) { providers in
-            store.drop(providers, onConversation: conversation.id)
+            store.drop(providers, onConversation: conversationID)
         }
         .overlay(alignment: .leading) {
-            if store.hasUnreadMessages(in: conversation) {
+            if content.isUnread {
                 // A muted group's dot is dimmed: new replies show, but do not ask for attention.
                 Circle()
-                    .fill(store.isMuted(conversation.id) ? Color.secondary.opacity(0.5) : Color.blue)
+                    .fill(content.isMuted ? Color.secondary.opacity(0.5) : Color.blue)
                     .frame(width: 8, height: 8)
                     // Keep the dot in the leading inset, 5 points before the avatar.
                     .offset(x: -13)
@@ -239,31 +304,22 @@ private struct ConversationRow: View {
             }
         }
         .contentShape(Rectangle())
-        .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 10))
-        .listRowSeparator(.visible, edges: .bottom)
-        .listRowSeparatorTint(Color.primary.opacity(0.12))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(runtimeHelp)
     }
 
-    private var timestamp: String { SidebarTimestamp.text(for: conversation.updatedAt) }
-
-    private var runtimeColor: Color { store.runtimeStatus(for: conversation).color }
-
-    private var runtimeHelp: String { store.runtimeHelp(for: conversation) }
-
-    private var pause: String? { store.pauseSummary(for: conversation) }
-
-    private var detail: String {
-        store.sidebarDetail(for: conversation, showing: SidebarRowDetail(rawValue: rowDetail) ?? .standard)
-    }
+    private var timestamp: String { content.timestamp }
+    private var runtimeColor: Color { content.runtimeColor }
+    private var runtimeHelp: String { content.runtimeHelp }
+    private var pause: String? { content.pause }
+    private var detail: String { content.detail }
 
     private var accessibilityLabel: String {
-        let unread = store.hasUnreadMessages(in: conversation) ? "Unread, " : ""
-        let muted = store.isMuted(conversation.id) ? "Muted, " : ""
+        let unread = content.isUnread ? "Unread, " : ""
+        let muted = content.isMuted ? "Muted, " : ""
         let paused = pause.map { "\($0), " } ?? ""
-        return "\(unread)\(muted)\(store.title(for: conversation)), \(paused)\(detail)"
+        return "\(unread)\(muted)\(content.title), \(paused)\(detail)"
     }
 }
 

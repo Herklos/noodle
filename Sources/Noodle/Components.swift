@@ -282,6 +282,7 @@ struct ConversationStatusAvatar: View {
 struct MessageBubble: View {
     @Environment(NoodleStore.self) private var store
     @Environment(\.forwardAttachment) private var forwardAttachment
+    @Environment(\.isNarrowTranscript) private var isNarrowTranscript
     @AppStorage(ChatAttachmentLayout.defaultsKey) private var attachmentLayout = ChatAttachmentLayout.defaultValue.rawValue
     @AppStorage(MessageTextLayout.defaultsKey) private var textLayout = MessageTextLayout.defaultValue.rawValue
     @State private var inspectedReaction: String?
@@ -334,6 +335,9 @@ struct MessageBubble: View {
         return .move(edge: .bottom).combined(with: .opacity)
     }
 
+    /// The room kept on the far side of a bubble. A narrow transcript keeps little, or its text would wrap at half its width.
+    private var sideGap: CGFloat { isNarrowTranscript ? 32 : 120 }
+
     @ViewBuilder private var row: some View {
         let attachments = store.attachments(for: message)
         if let call = message.call {
@@ -342,7 +346,7 @@ struct MessageBubble: View {
             HStack {
                 Spacer(minLength: 80)
                 // Groups announce member changes; a bot's own conversation, only a change of harness.
-                Label(message.body, systemImage: store.conversations.first(where: { $0.id == message.conversationID })?.kind == .direct
+                Label(message.body, systemImage: store.conversation(withID: message.conversationID)?.kind == .direct
                       ? "arrow.left.arrow.right" : "person.2.fill")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -354,7 +358,7 @@ struct MessageBubble: View {
             }
         } else {
         HStack(alignment: .bottom, spacing: 8) {
-            if isUser { Spacer(minLength: 120) }
+            if isUser { Spacer(minLength: sideGap) }
 
             if !isUser, case .agent(let id) = message.author,
                let agent = store.agents.first(where: { $0.id == id }) {
@@ -416,7 +420,7 @@ struct MessageBubble: View {
                 }
             }
 
-            if !isUser { Spacer(minLength: 120) }
+            if !isUser { Spacer(minLength: sideGap) }
         }
         // A fixed-width card can make the row wider than a narrow window. Keep the avatar side
         // in place and let the overflow eat into the spacer's side, rather than centring.

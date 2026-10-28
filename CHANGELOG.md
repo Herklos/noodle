@@ -6,6 +6,12 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- The main window stays smooth while bots reply and change status. The sidebar and the open conversation no longer redraw for messages in other conversations, and switching conversations no longer rebuilds the toolbar.
+- Clicking an empty part of a conversation, between or beside its messages, starts typing in its message field.
+- In a narrow conversation window, messages use nearly its full width.
+
 ## [0.77.4] - 2026-10-27
 
 ### Changed

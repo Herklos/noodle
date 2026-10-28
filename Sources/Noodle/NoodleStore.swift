@@ -49,10 +49,48 @@ final class NoodleStore {
     }
 
     private(set) var agents: [AgentRecord] = []
-    private(set) var conversations: [BotConversation] = []
-    private(set) var messagesByConversation: [UUID: [ChatMessage]] = [:] {
-        didSet { transcriptGeneration &+= 1 }
+    private(set) var conversations: [BotConversation] = [] {
+        didSet {
+            let old = conversationsByID
+            conversationsByID = Dictionary(conversations.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for id in Set(old.keys).union(conversationsByID.keys) where old[id] != conversationsByID[id] {
+                conversationRevisions[id]?.value &+= 1
+            }
+        }
     }
+    @ObservationIgnored private var conversationsByID: [UUID: BotConversation] = [:]
+    @ObservationIgnored private var conversationRevisions: [UUID: ObservedRevision] = [:]
+
+    /// One conversation, observed on its own: every message changes the list, but not most of its conversations.
+    func conversation(withID id: UUID) -> BotConversation? {
+        let revision = conversationRevisions[id] ?? {
+            let revision = ObservedRevision()
+            conversationRevisions[id] = revision
+            return revision
+        }()
+        _ = revision.value
+        return conversationsByID[id]
+    }
+    /// Every conversation's messages. Reading the whole of it is observed as one value; `messages(for:)`
+    /// observes only its own conversation, so a transcript is not redrawn when another conversation changes.
+    private(set) var messagesByConversation: [UUID: [ChatMessage]] {
+        get {
+            _ = allMessagesRevision
+            return messageStorage
+        }
+        set {
+            let old = messageStorage
+            messageStorage = newValue
+            transcriptGeneration &+= 1
+            for id in Set(old.keys).union(newValue.keys) where !Self.same(old[id], newValue[id]) {
+                messageRevisions[id]?.value &+= 1
+            }
+            allMessagesRevision &+= 1
+        }
+    }
+    @ObservationIgnored private var messageStorage: [UUID: [ChatMessage]] = [:]
+    @ObservationIgnored private var messageRevisions: [UUID: ObservedRevision] = [:]
+    private var allMessagesRevision = 0
     private(set) var attachmentsByConversation: [UUID: [ConversationAttachment]] = [:] {
         didSet {
             transcriptGeneration &+= 1
@@ -150,6 +188,8 @@ final class NoodleStore {
     let conversationWindows: ConversationWindowRegistry
     let activityWindows = AgentActivityWindows()
     @ObservationIgnored private var voiceRecorders: [UUID: AnyObject] = [:]
+    /// Each conversation's last preview. Parsing Markdown is slow, and every sidebar row asks again whenever any message changes.
+    @ObservationIgnored private var previewTexts: [UUID: (messageID: UUID, body: String, text: String)] = [:]
 
     func voiceRecorder(for conversationID: UUID) -> VoiceRecorder {
         if let recorder = voiceRecorders[conversationID] as? VoiceRecorder { return recorder }
@@ -401,7 +441,7 @@ final class NoodleStore {
     }
 
     var selectedConversation: BotConversation? {
-        conversations.first(where: { $0.id == selectedConversationID })
+        selectedConversationID.flatMap(conversation(withID:))
     }
 
     var canCreateBot: Bool {
@@ -635,7 +675,7 @@ final class NoodleStore {
 
     /// When anything was last said, by anyone; renaming or editing does not count.
     private func lastMessageDate(of conversation: BotConversation) -> Date {
-        messagesByConversation[conversation.id]?.last?.createdAt ?? conversation.createdAt
+        messages(in: conversation.id).last?.createdAt ?? conversation.createdAt
     }
 
     var pinnedConversations: [BotConversation] { sidebarSections(.standard).pinned }
@@ -963,7 +1003,7 @@ final class NoodleStore {
     }
 
     private func current(_ conversation: BotConversation) -> BotConversation {
-        conversations.first { $0.id == conversation.id } ?? conversation
+        self.conversation(withID: conversation.id) ?? conversation
     }
 
     /// Archiving keeps the bot's workspace, memory and conversations; it only stops it running.
@@ -1779,7 +1819,7 @@ final class NoodleStore {
     /// connects, so until then it is the newest call there still going.
     func liveCallCardID(in conversationID: UUID) -> UUID? {
         guard let call = voiceCalls.call, call.conversationID == conversationID else { return nil }
-        return call.messageID ?? messagesByConversation[conversationID]?.last { $0.call != nil && $0.call?.endedAt == nil }?.id
+        return call.messageID ?? messages(in: conversationID).last { $0.call != nil && $0.call?.endedAt == nil }?.id
     }
 
     /// Calls are one-to-one with a bot whose harness has voices: on this Mac, or on a Hub, which
@@ -1934,8 +1974,28 @@ final class NoodleStore {
         return message
     }
 
-    func messages(for conversation: BotConversation) -> [ChatMessage] {
-        messagesByConversation[conversation.id, default: []]
+    func messages(for conversation: BotConversation) -> [ChatMessage] { messages(in: conversation.id) }
+
+    private func messages(in conversationID: UUID) -> [ChatMessage] {
+        let revision = messageRevisions[conversationID] ?? {
+            let revision = ObservedRevision()
+            messageRevisions[conversationID] = revision
+            return revision
+        }()
+        _ = revision.value
+        return messageStorage[conversationID, default: []]
+    }
+
+    /// Unchanged arrays share their storage, which spares comparing their messages one by one.
+    private static func same(_ a: [ChatMessage]?, _ b: [ChatMessage]?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (a?, b?):
+            guard a.count == b.count else { return false }
+            let shared = a.withUnsafeBufferPointer { a in b.withUnsafeBufferPointer { a.baseAddress == $0.baseAddress } }
+            return shared || a == b
+        default: return false
+        }
     }
 
     func transcriptViewport(for conversation: BotConversation) -> TranscriptViewport {
@@ -1959,7 +2019,11 @@ final class NoodleStore {
     }
 
     func hasUnreadMessages(in conversation: BotConversation) -> Bool {
-        unreadConversationIDs.contains(conversation.id)
+        hasUnreadMessages(inConversation: conversation.id)
+    }
+
+    func hasUnreadMessages(inConversation id: UUID) -> Bool {
+        unreadConversationIDs.contains(id)
     }
 
     /// The unread conversations the Dock counts: muted groups are left out, and a group in Mentions only counts once
@@ -2221,7 +2285,7 @@ final class NoodleStore {
     }
 
     func canEditAnnotation(_ attachment: ConversationAttachment) -> Bool {
-        drafts.canEditAnnotation(attachment, messages: messagesByConversation[attachment.conversationID, default: []])
+        drafts.canEditAnnotation(attachment, messages: messages(in: attachment.conversationID))
     }
 
     func reviseAnnotationComment(_ attachment: ConversationAttachment, comment: String) throws -> ConversationAttachment {
@@ -2705,8 +2769,11 @@ final class NoodleStore {
     }
 
     func preview(for conversation: BotConversation) -> String {
-        guard let body = messages(for: conversation).last?.body else { return "No messages yet" }
-        return MarkdownPlainText.convert(MessageSegment.previewText(body))
+        guard let message = messages(for: conversation).last else { return "No messages yet" }
+        if let cached = previewTexts[conversation.id], cached.messageID == message.id, cached.body == message.body { return cached.text }
+        let text = MarkdownPlainText.convert(MessageSegment.previewText(message.body))
+        previewTexts[conversation.id] = (message.id, message.body, text)
+        return text
     }
 
     /// The line under a sidebar row's name. A bot or group with no description keeps its latest message.
@@ -2807,4 +2874,9 @@ struct ErrorLink: Equatable {
     let message: String
     let title: String
     let url: URL
+}
+
+/// A change count observed on its own, for state kept per conversation.
+@MainActor @Observable final class ObservedRevision {
+    var value = 0
 }

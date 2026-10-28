@@ -30,6 +30,12 @@ private final class TranscriptViewportRecorder {
 enum TranscriptMetrics {
     /// The gap between transcript rows.
     static let rowSpacing: CGFloat = 10
+    /// Below this width, as in a column, bubbles may take nearly all of it.
+    static let narrowWidth: CGFloat = 560
+}
+
+extension EnvironmentValues {
+    @Entry var isNarrowTranscript = false
 }
 
 /// The native transcript scroll container, also exercised by the resize fixture.
@@ -44,6 +50,8 @@ struct TranscriptScrollView<Content: View>: View {
     let onInteraction: () -> Void
     /// Whether a message this view could be asked to reveal is one of its rows.
     let containsMessage: (UUID) -> Bool
+    /// A click that lands on no message, which starts typing.
+    let onBackgroundTap: () -> Void
     private let content: Content
     @State private var position: ScrollPosition
     @State private var viewportRecorder: TranscriptViewportRecorder
@@ -54,11 +62,12 @@ struct TranscriptScrollView<Content: View>: View {
     /// Whether the reader is more than `TranscriptScrollMetrics.scrollToLatestDistance` above the end.
     /// Changes only when that distance is crossed, not for every scrolled pixel.
     @State private var farFromEnd: Bool
+    @State private var isNarrow = false
 
     init(initialViewport: TranscriptViewport, lastMessageID: UUID?, lastMessageIsFromUser: Bool,
          bottomOverlayHeight: CGFloat, saveViewport: @escaping (TranscriptViewport) -> Void,
          onInteraction: @escaping () -> Void = {}, containsMessage: @escaping (UUID) -> Bool = { _ in false },
-         @ViewBuilder content: () -> Content) {
+         onBackgroundTap: @escaping () -> Void = {}, @ViewBuilder content: () -> Content) {
         self.initialViewport = initialViewport
         self.lastMessageID = lastMessageID
         self.lastMessageIsFromUser = lastMessageIsFromUser
@@ -66,6 +75,7 @@ struct TranscriptScrollView<Content: View>: View {
         self.saveViewport = saveViewport
         self.onInteraction = onInteraction
         self.containsMessage = containsMessage
+        self.onBackgroundTap = onBackgroundTap
         self.content = content()
         let target = initialViewport.isAtBottom ? TranscriptScrollTarget.bottom
             : initialViewport.messageID.map(TranscriptScrollTarget.message) ?? .start
@@ -87,7 +97,13 @@ struct TranscriptScrollView<Content: View>: View {
             .scrollTargetLayout()
             .padding(.horizontal, 15)
             .padding(.top, 30)
+            .environment(\.isNarrowTranscript, isNarrow)
+            // Behind the rows, so only clicks between and beside messages reach it.
+            .background { Color.clear.contentShape(Rectangle()).onTapGesture(perform: onBackgroundTap) }
         }
+        // The space below a short transcript.
+        .background { Color.clear.contentShape(Rectangle()).onTapGesture(perform: onBackgroundTap) }
+        .onGeometryChange(for: Bool.self) { $0.size.width < TranscriptMetrics.narrowWidth } action: { isNarrow = $0 }
         .scrollIndicators(.automatic, axes: .vertical)
         .contentMargins(.bottom, bottomOverlayHeight + 8, for: .scrollIndicators)
         .scrollPosition($position, anchor: .top)

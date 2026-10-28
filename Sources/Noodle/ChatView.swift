@@ -6,6 +6,21 @@ import NoodleCore
 import UniformTypeIdentifiers
 import NoodleWallpaper
 
+/// Marks a reply read as it arrives while its window is key.
+private struct MarkReadOnArrival: View {
+    @Environment(NoodleStore.self) private var store
+    @Environment(\.controlActiveState) private var activeState
+    let conversationID: UUID
+
+    var body: some View {
+        Color.clear
+            .accessibilityHidden(true)
+            .onChange(of: store.hasUnreadMessages(inConversation: conversationID)) { _, unread in
+                if unread, activeState == .key { store.markConversationRead(conversationID) }
+            }
+    }
+}
+
 struct ChatView: View {
     @Environment(NoodleStore.self) private var store
     @Environment(\.controlActiveState) private var activeState
@@ -47,9 +62,8 @@ struct ChatView: View {
             .onChange(of: activeState, initial: true) { _, state in
                 if state == .key { store.markConversationRead(conversation.id) }
             }
-            .onChange(of: store.hasUnreadMessages(in: conversation)) { _, unread in
-                if unread, activeState == .key { store.markConversationRead(conversation.id) }
-            }
+            // In a view of its own: the unread set changes with every message in every conversation.
+            .background(MarkReadOnArrival(conversationID: conversation.id))
             .onChange(of: composerFocused) { _, focused in
                 if focused { store.markConversationRead(conversation.id) }
             }
@@ -206,7 +220,8 @@ struct ChatView: View {
             bottomOverlayHeight: bottomOverlayHeight,
             showAgentProfile: { profileAgent = $0 },
             showGroupProfile: { profileGroup = conversation },
-            saveViewport: { store.saveTranscriptViewport($0, for: id) }
+            saveViewport: { store.saveTranscriptViewport($0, for: id) },
+            focusComposer: { composerFocused = true }
         )
         .id(id)
         .transaction { transaction in
@@ -516,6 +531,7 @@ private struct ConversationTranscript: View {
     let showAgentProfile: (AgentRecord) -> Void
     let showGroupProfile: () -> Void
     let saveViewport: (TranscriptViewport) -> Void
+    let focusComposer: () -> Void
     /// The oldest message shown. Until set, the newest page and the opening reading position show.
     @State private var firstShownID: UUID?
 
@@ -544,7 +560,8 @@ private struct ConversationTranscript: View {
             bottomOverlayHeight: bottomOverlayHeight,
             saveViewport: saveViewport,
             onInteraction: { store.markConversationRead(conversation.id) },
-            containsMessage: { id in all.contains { $0.id == id } }
+            containsMessage: { id in all.contains { $0.id == id } },
+            onBackgroundTap: focusComposer
         ) {
             if first == 0 {
                 ConversationStartView(conversation: conversation, showAgentProfile: showAgentProfile,

@@ -29,6 +29,8 @@ struct NoodleApp: App {
         #if NOODLE_DEV_HOOKS
         // Development builds only. Each hook runs an isolated fixture in place of the app and exits.
         Logger(subsystem: "com.pdparchitect.noodle", category: "DevelopmentHooks").notice("noodle.development-hooks.enabled")
+        // The View menu carries its own Full Screen item, after the layouts and a divider.
+        UserDefaults.standard.register(defaults: ["NSFullScreenMenuItemEverywhere": false])
         let checks = LaunchChecks.current
         if checks.contains(DevelopmentHook.browserIntegration) || checks.contains(DevelopmentHook.browserDiscovery) || checks.contains(DevelopmentHook.browserPicker) {
             NSApplication.shared.setActivationPolicy(.accessory)
@@ -123,6 +125,12 @@ struct NoodleApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            #if NOODLE_DEV_HOOKS
+            CommandGroup(before: .toolbar) {
+                MainWindowLayoutCommands()
+                FullScreenCommand()
+            }
+            #endif
             CommandGroup(replacing: .help) {
                 Button("\(NoodleAppIdentity.name) Help") {
                     NSWorkspace.shared.open(URL(string: "https://github.com/pdparchitect/noodle")!)
@@ -347,6 +355,14 @@ struct RootView: View {
     @State private var sidebarFocusRequest = UUID()
     /// The Kick alert of the selected conversation's paused bot, asked for from the toolbar.
     @State private var kickRequest: AgentKickRequest?
+    @State private var toolbarState = MainToolbarState()
+    #if NOODLE_DEV_HOOKS
+    @AppStorage(MainWindowLayout.key) private var layout = MainWindowLayout.list
+    @State private var columns = ColumnsModel()
+    private var showsColumns: Bool { layout == .columns }
+    #else
+    private let showsColumns = false
+    #endif
 
     var body: some View {
         Group {
@@ -355,9 +371,7 @@ struct RootView: View {
             } else if store.showsConnect {
                 ConnectView()
             } else {
-                AttachmentPreviewScope(conversationID: store.selectedConversationID) { attachmentPreview in
-                    content(attachmentPreview: attachmentPreview)
-                }
+                content()
             }
         }
         .task(id: store.storageReady) {
@@ -416,7 +430,7 @@ struct RootView: View {
         }
     }
 
-    private func content(attachmentPreview: AttachmentPreviewController) -> some View {
+    private func content() -> some View {
         @Bindable var store = store
 
         return NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -426,33 +440,16 @@ struct RootView: View {
                 // Last: a toolbar(removing:) applied after it swallows the column width, even one removing nothing.
                 .navigationSplitViewColumnWidth(min: 280, ideal: 326, max: 380)
         } detail: {
-            if let conversation = store.selectedConversation {
-                ChatView(conversation: conversation, attachmentPreview: attachmentPreview, composerFocusRequest: composerFocusRequest, focusSidebar: {
-                    columnVisibility = .all
-                    sidebarFocusRequest = UUID()
-                })
-            } else {
-                ZStack {
-                    Color(nsColor: .textBackgroundColor).opacity(0.28)
-                        .accessibilityHidden(true)
-                    if store.agents.isEmpty {
-                        FirstBotPrompt { store.showWelcome() }
-                    }
-                }
-            }
+            #if NOODLE_DEV_HOOKS
+            if showsColumns { ConversationColumns(model: columns) } else { listDetail }
+            #else
+            listDetail
+            #endif
         }
         .navigationSplitViewStyle(.balanced)
-        .background(ConversationWindowHost(registry: store.conversationWindows,
-            conversationID: store.selectedConversationID, isMainWindow: true,
-            markRead: store.markConversationRead))
-        .background {
-            let conversation = store.selectedConversation
-            let background = store.background(for: conversation)
-            ConversationWallpaper(background: background, imageURL: conversation.flatMap {
-                store.repository.backgroundImageURL(background, conversationID: $0.id)
-            })
-            .ignoresSafeArea()
-        }
+        .background(SelectedConversationWindowHost())
+        .background(MainToolbarStateUpdater(state: toolbarState, hidden: showsColumns))
+        .background { SelectedConversationWallpaper().ignoresSafeArea() }
         .onDrop(
             of: AttachmentTransfer.dropContentTypes,
             isTargeted: $isFileDropTargeted
@@ -463,12 +460,14 @@ struct RootView: View {
             return true
         }
         .overlay {
-            if isFileDropTargeted, store.selectedConversation != nil {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(Color.accentColor, lineWidth: 2)
-                    .padding(5)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+            if isFileDropTargeted {
+                WithSelectedConversation { _ in
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .stroke(Color.accentColor, lineWidth: 2)
+                        .padding(5)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
         }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
@@ -477,39 +476,18 @@ struct RootView: View {
                 ToolbarItem(placement: .navigation) { createMenu }
             }
 
-            ToolbarItem(placement: .primaryAction) {
-                if let conversation = store.selectedConversation {
-                    if conversation.kind == .direct,
-                       let agent = store.participants(for: conversation).first, !store.isShared(agent.id) {
-                        Button {
-                            store.agentBeingEdited = agent
-                        } label: {
-                            Label("Edit Bot", systemImage: "ellipsis")
-                        }
-                        .help("Edit Bot")
-                    } else if conversation.kind == .group {
-                        Button {
-                            store.groupBeingEdited = conversation
-                        } label: {
-                            Label("Group Info", systemImage: "ellipsis")
-                        }
-                        .help("Group Info")
-                    }
-                }
-            }
+            #if NOODLE_DEV_HOOKS
+            if showsColumns { ToolbarItem(placement: .principal) { ColumnSwitcher(model: columns) } }
+            #endif
+
+            // Each item reads only what it shows from toolbarState. Any change inside an item makes AppKit
+            // measure it and retile the whole toolbar, so a switch that shows the same controls changes nothing.
+            ToolbarItem(placement: .primaryAction) { MainToolbarInfoButton(state: toolbarState) }
 
             ToolbarSpacer(.flexible)
-            ToolbarItem {
-                if let conversation = store.selectedConversation {
-                    ConversationPauseControl(conversation: conversation, kickRequest: $kickRequest)
-                }
-            }
-            ToolbarItem {
-                if let conversation = store.selectedConversation { VoiceCallToolbarControl(conversation: conversation) }
-            }
-            ToolbarItem {
-                if let conversation = store.selectedConversation { ConversationCompanionsMenu(conversation: conversation) }
-            }
+            ToolbarItem { MainToolbarPauseControl(state: toolbarState, kickRequest: $kickRequest) }
+            ToolbarItem { MainToolbarCallControl(state: toolbarState) }
+            ToolbarItem { MainToolbarCompanionsMenu(state: toolbarState) }
 
         }
         .sheet(item: $store.creationSheet) { sheet in
@@ -555,6 +533,202 @@ struct RootView: View {
             }
         }
     }
+
+    private var listDetail: some View {
+        SelectedConversationDetail(composerFocusRequest: composerFocusRequest) {
+            columnVisibility = .all
+            sidebarFocusRequest = UUID()
+        }
+    }
+}
+
+/// Reads the selected conversation in a body of its own. The window around it, its toolbar included,
+/// is then not rebuilt each time a message changes that conversation.
+private struct WithSelectedConversation<Content: View>: View {
+    @Environment(NoodleStore.self) private var store
+    @ViewBuilder let content: (BotConversation) -> Content
+
+    var body: some View {
+        if let conversation = store.selectedConversation { content(conversation) }
+    }
+}
+
+/// What the main window's toolbar shows for the selected conversation, kept apart from the conversation itself.
+@MainActor @Observable private final class MainToolbarState {
+    enum Info: Equatable { case none, editBot, groupInfo }
+    enum Call: Equatable { case none, available(String), ongoing(UUID) }
+
+    struct Shown: Equatable {
+        var info = Info.none
+        var pausedConversationID: UUID?
+        var call = Call.none
+        var companionsConversationID: UUID?
+    }
+
+    /// Set only when it differs: observers are told of every assignment, even of the same value.
+    private(set) var shown = Shown()
+    func show(_ new: Shown) { if new != shown { shown = new } }
+}
+
+/// Works out the toolbar's content outside the toolbar, which then only hears of what changes.
+private struct MainToolbarStateUpdater: View {
+    @Environment(NoodleStore.self) private var store
+    let state: MainToolbarState
+    let hidden: Bool
+
+    var body: some View {
+        let shown = hidden ? MainToolbarState.Shown() : store.selectedConversation.map(shown(for:)) ?? .init()
+        Color.clear
+            .accessibilityHidden(true)
+            .onChange(of: shown, initial: true) { _, shown in state.show(shown) }
+    }
+
+    private func shown(for conversation: BotConversation) -> MainToolbarState.Shown {
+        var shown = MainToolbarState.Shown()
+        if conversation.kind == .direct, let agent = store.participants(for: conversation).first, !store.isShared(agent.id) {
+            shown.info = .editBot
+        } else if conversation.kind == .group {
+            shown.info = .groupInfo
+        }
+        if store.pauseSummary(for: conversation) != nil { shown.pausedConversationID = conversation.id }
+        if let call = store.voiceCalls.call, call.conversationID == conversation.id {
+            shown.call = .ongoing(conversation.id)
+        } else if let agent = store.voiceCallTarget(for: conversation) {
+            shown.call = .available(agent.displayName)
+        }
+        if !store.companions(in: conversation).isEmpty { shown.companionsConversationID = conversation.id }
+        return shown
+    }
+}
+
+private struct MainToolbarInfoButton: View {
+    @Environment(NoodleStore.self) private var store
+    let state: MainToolbarState
+
+    var body: some View {
+        switch state.shown.info {
+        case .editBot:
+            Button {
+                if let conversation = store.selectedConversation { store.agentBeingEdited = store.participants(for: conversation).first }
+            } label: {
+                Label("Edit Bot", systemImage: "ellipsis")
+            }
+            .help("Edit Bot")
+        case .groupInfo:
+            Button {
+                store.groupBeingEdited = store.selectedConversation
+            } label: {
+                Label("Group Info", systemImage: "ellipsis")
+            }
+            .help("Group Info")
+        case .none:
+            EmptyView()
+        }
+    }
+}
+
+private struct MainToolbarPauseControl: View {
+    @Environment(NoodleStore.self) private var store
+    let state: MainToolbarState
+    @Binding var kickRequest: AgentKickRequest?
+
+    var body: some View {
+        if let id = state.shown.pausedConversationID, let conversation = store.conversation(withID: id) {
+            ConversationPauseControl(conversation: conversation, kickRequest: $kickRequest)
+        }
+    }
+}
+
+private struct MainToolbarCallControl: View {
+    @Environment(NoodleStore.self) private var store
+    let state: MainToolbarState
+
+    var body: some View {
+        switch state.shown.call {
+        case .available(let name):
+            Button {
+                if let conversation = store.selectedConversation { store.startVoiceCall(in: conversation) }
+            } label: {
+                Label("Call", systemImage: "phone")
+            }
+            .help("Call \(name)")
+        case .ongoing(let id):
+            if let conversation = store.conversation(withID: id) { VoiceCallToolbarControl(conversation: conversation) }
+        case .none:
+            EmptyView()
+        }
+    }
+}
+
+private struct MainToolbarCompanionsMenu: View {
+    @Environment(NoodleStore.self) private var store
+    let state: MainToolbarState
+
+    var body: some View {
+        if let id = state.shown.companionsConversationID, let conversation = store.conversation(withID: id) {
+            ConversationCompanionsMenu(conversation: conversation)
+        }
+    }
+}
+
+private struct SelectedConversationWallpaper: View {
+    @Environment(NoodleStore.self) private var store
+
+    var body: some View {
+        let conversation = store.selectedConversation
+        let background = store.background(for: conversation)
+        ConversationWallpaper(background: background, imageURL: conversation.flatMap {
+            store.repository.backgroundImageURL(background, conversationID: $0.id)
+        })
+    }
+}
+
+extension NSApplication {
+    /// Whether the event being handled is a click, as opposed to a key press.
+    var currentEventIsClick: Bool {
+        [.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown].contains(currentEvent?.type)
+    }
+}
+
+/// Tells the window registry which conversation the main window shows.
+private struct SelectedConversationWindowHost: View {
+    @Environment(NoodleStore.self) private var store
+
+    var body: some View {
+        ConversationWindowHost(registry: store.conversationWindows,
+            conversationID: store.selectedConversationID, isMainWindow: true,
+            markRead: store.markConversationRead)
+    }
+}
+
+private struct SelectedConversationDetail: View {
+    @Environment(NoodleStore.self) private var store
+    let composerFocusRequest: UUID
+    let focusSidebar: () -> Void
+    @State private var focusRequest: UUID?
+
+    var body: some View {
+        if let conversation = store.selectedConversation {
+            AttachmentPreviewScope(conversationID: conversation.id) { attachmentPreview in
+                ChatView(conversation: conversation, attachmentPreview: attachmentPreview,
+                    composerFocusRequest: focusRequest, focusSidebar: focusSidebar)
+            }
+            .onChange(of: composerFocusRequest) { _, request in focusRequest = request }
+            // A conversation clicked in the sidebar starts in its input; one reached with the arrow keys leaves the list focused.
+            .onChange(of: store.selectedConversationID) {
+                guard NSApp.currentEventIsClick else { return }
+                DispatchQueue.main.async { focusRequest = UUID() }
+            }
+        } else {
+            ZStack {
+                Color(nsColor: .textBackgroundColor).opacity(0.28)
+                    .accessibilityHidden(true)
+                if store.agents.isEmpty {
+                    FirstBotPrompt { store.showWelcome() }
+                }
+            }
+        }
+    }
 }
 
 #if NOODLE_DEV_HOOKS
@@ -577,6 +751,7 @@ enum DevelopmentHook {
     static let scenarioShots = "f3e02727157d7ee04aee89ffe9c56c9f6790cd3294e3a21443d0962f2ed639ff"  // --scenario-shots
     static let scenarioPicker = "41998b9aaaa37cb4b3f6a1fc5666714235669efe3190d47bf71511e4f57cc517"  // --scenario-picker
     static let scenarioSize = "3ab6e0e84b864576e7107a1f8502d0fa37e639c8ed3c973b201b159604655a6f"  // --scenario-size
+    static let scenarioBenchmark = "63e110b50ffcb837f92c5221b04721f6022226032a1a8042b644c0ba78c23cad"  // --scenario-benchmark
     static let rehearse = "b7fc62f920a65a10598dc42ced62403ec5a4ddaea3b2f75aaee52d07b713629a"  // --rehearse
 }
 #endif

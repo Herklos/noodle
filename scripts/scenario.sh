@@ -20,12 +20,13 @@ usage() {
     print -u2 '  --size WxH  open the main window at that size instead of the scenario'"'"'s own'
     print -u2 '  --silent    leave the sound off the recording'
     print -u2 '  --shadow    keep the window shadow in those shots'
+    print -u2 '  --benchmark[=PHASES]  run fixed phases instead of the timeline, print missed frames and quit'
     print -u2 '  --all       every scenario in turn'
     print -u2 '  --no-build  derive the bundle from the Noodle Dev.app already in .build'
     exit 1
 }
 
-build=true shots=false record=false shadow=false all=false silent=false
+build=true shots=false record=false shadow=false all=false silent=false benchmark=
 selections=() ratios=() expect_ratio=false size= expect_size=false
 for argument in "$@"; do
     if [[ "$expect_ratio" == true ]]; then
@@ -44,6 +45,8 @@ for argument in "$@"; do
         --size) expect_size=true ;;
         --size=*) size="${argument#--size=}" ;;
         --shadow) shadow=true ;;
+        --benchmark) benchmark=all ;;
+        --benchmark=*) benchmark="${argument#--benchmark=}" ;;
         --all) all=true ;;
         -*) usage ;;
         *) selections+=("$argument") ;;
@@ -195,6 +198,10 @@ if [[ ${#folders} == 0 ]]; then
 fi
 
 for folder in "${folders[@]}"; do
+    if [[ -n "$benchmark" ]]; then
+        "$executable" --scenario "$folder" "${launch_arguments[@]}" --scenario-benchmark "$benchmark" | grep '^BENCH'
+        continue
+    fi
     if [[ "$shots" == false && "$record" == false ]]; then
         "$executable" --scenario "$folder" "${launch_arguments[@]}"
         continue

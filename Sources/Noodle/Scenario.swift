@@ -1306,7 +1306,7 @@ extension Scenario {
         store.backgroundBeingEdited = sheet.background.flatMap { seeded.conversations[$0] }
     }
 
-    private var mainWindow: NSWindow? {
+    var mainWindow: NSWindow? {
         NSApp?.windows.first { $0.title == NoodleAppIdentity.name && $0.contentViewController != nil && !($0 is NSPanel) }
     }
 
@@ -1487,6 +1487,12 @@ extension ScenarioSession {
                 Task { @MainActor in
                     await session.arrangeWindows(session.scenario.present ?? .init(), initial: true)
                     await session.announceReady()
+                    if let phases = checks.value(after: DevelopmentHook.scenarioBenchmark) ?? (checks.contains(DevelopmentHook.scenarioBenchmark) ? "all" : nil),
+                       let window = session.mainWindow {
+                        await ScenarioBenchmark(session: session, phases: phases, window: window).run()
+                        NSApp.terminate(nil)
+                        return
+                    }
                     do { try await session.play() } catch { fail(error.localizedDescription) }
                     if session.takesShots {
                         await session.announceDone()

@@ -426,6 +426,7 @@ import XCTest
         XCTAssertEqual(LaunchChecks.digest("--scenario-shots"), DevelopmentHook.scenarioShots)
         XCTAssertEqual(LaunchChecks.digest("--scenario-picker"), DevelopmentHook.scenarioPicker)
         XCTAssertEqual(LaunchChecks.digest("--scenario-size"), DevelopmentHook.scenarioSize)
+        XCTAssertEqual(LaunchChecks.digest("--scenario-benchmark"), DevelopmentHook.scenarioBenchmark)
     }
 
     func testALaunchSizeReplacesTheWindowSizeOnly() throws {

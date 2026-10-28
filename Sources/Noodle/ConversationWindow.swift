@@ -28,7 +28,7 @@ struct ConversationWindowView: View {
     }
 
     private var conversation: BotConversation? {
-        store.conversations.first { $0.id == conversationID }
+        store.conversation(withID: conversationID)
     }
 
     var body: some View {
@@ -408,10 +408,13 @@ struct ConversationWindowHost: NSViewRepresentable {
         deinit { if let interactionMonitor { NSEvent.removeMonitor(interactionMonitor) } }
         func updateWindow() {
             guard !isClosed else { return }
-            window?.title = title
-            window?.titlebarAppearsTransparent = true
-            // A floating window is see-through; FloatingWindowLevel owns its background.
-            if window?.level != .floating { window?.backgroundColor = .windowBackgroundColor }
+            // Each runs on every update, and setting even the same value makes AppKit redo the titlebar and its toolbar.
+            if let window {
+                if window.title != title { window.title = title }
+                if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+                // A floating window is see-through; FloatingWindowLevel owns its background.
+                if window.level != .floating, window.backgroundColor != .windowBackgroundColor { window.backgroundColor = .windowBackgroundColor }
+            }
             checkpoint()
             markVisibleRead()
         }
