@@ -248,7 +248,7 @@ import WebKit
         }
     }
     /// How long a page goes unused before its media is suspended.
-    static let mediaRest: TimeInterval = 1800
+    static let mediaRest: TimeInterval = 600
     /// Suspends media in pages nobody used for `age`, and resumes it in pages in use again. A page
     /// being watched live or shown in a browser window counts as used however long it goes untouched.
     func restMedia(unusedFor age: TimeInterval, now: Date = Date()) {
