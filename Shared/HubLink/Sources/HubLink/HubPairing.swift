@@ -384,7 +384,7 @@ import Observation
             subscription.cancel()
             throw error
         }
-        endpoint = subscription.endpoint
+        if endpoint != subscription.endpoint { endpoint = subscription.endpoint }
         return AsyncThrowingStream { continuation in
             let reader = Task {
                 do {
@@ -416,7 +416,8 @@ import Observation
                       endpoints: [LinkEndpoint]) async throws -> LinkResponse {
         let (data, endpoint) = try await LinkClient.exchange(try LinkProtocol.encode(request), identity: identity,
                                                              hubKey: key, endpoints: endpoints)
-        self.endpoint = endpoint
+        // Set only when it changed: every bot's dot and every open conversation reads it.
+        if self.endpoint != endpoint { self.endpoint = endpoint }
         let response = try LinkProtocol.decodeResponse(data)
         if case .failure(let message) = response { throw LinkError(message) }
         return response

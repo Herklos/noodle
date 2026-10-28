@@ -245,7 +245,7 @@ enum HubThread: HubConversation {
         for name in (try? FileManager.default.contentsOfDirectory(atPath: backgroundsFolder.path)) ?? [] where !wanted.contains(name) {
             try? FileManager.default.removeItem(at: backgroundsFolder.appendingPathComponent(name))
         }
-        fetchedBackgrounds.formIntersection(wanted)
+        if !fetchedBackgrounds.isSubset(of: wanted) { fetchedBackgrounds.formIntersection(wanted) }
     }
 
     private var backgroundsFolder: URL { pairing.directory.appendingPathComponent("Backgrounds", isDirectory: true) }
@@ -879,7 +879,8 @@ enum HubThread: HubConversation {
             do {
                 try await reload()
                 // Effects sent while this phone was away were heard of by nobody here.
-                waitingEffects.formUnion(agents.map(\.conversationID) + groups.map(\.id))
+                let all = Set(agents.map(\.conversationID) + groups.map(\.id))
+                if !all.isSubset(of: waitingEffects) { waitingEffects.formUnion(all) }
                 return
             } catch let error where !Task.isCancelled {
                 self.error = error.localizedDescription
@@ -918,8 +919,10 @@ enum HubThread: HubConversation {
             settle([message])
             merge([message], into: message.conversationID)
         case .botPhase(let id, let phase):
-            guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
+            // Live state, which the next sync brings again, so it is not saved on its own.
+            guard let index = agents.firstIndex(where: { $0.id == id }), agents[index].phase != phase else { return }
             agents[index].phase = phase
+            return
         case .connectionsChanged:
             try await loadConnections()
         case .computersChanged:
@@ -981,7 +984,7 @@ enum HubThread: HubConversation {
     /// not load is left as it was, to load next time, and says why in `error`; the rest still load.
     func reload() async throws {
         guard case .bots(let bots) = try await pairing.request(.bots) else { throw LinkError("The Hub sent an unexpected answer.") }
-        agents = pairing.keptPictures(bots)
+        setAgents(pairing.keptPictures(bots))
         var failure: Error?
         for bot in bots {
             do { try await load(bot.conversationID) } catch { failure = failure ?? error }
@@ -997,8 +1000,8 @@ enum HubThread: HubConversation {
         for thread in threads { if let upTo = thread.readUpTo { noteRead(thread.conversationID, upTo: upTo) } }
         // Chats work even when the Hub cannot list tools.
         try? await loadTools()
-        isLoaded = true
-        error = failure?.localizedDescription
+        if !isLoaded { isLoaded = true }
+        if error != failure?.localizedDescription { error = failure?.localizedDescription }
         saveCache()
         // The Hub answers again: a message that did not go through goes now, if nothing newer has come.
         for id in unsent.keys { await deliver(id, pauses: [.zero]) }
@@ -1006,14 +1009,20 @@ enum HubThread: HubConversation {
         await fetchBackgrounds()
         await pairing.fetchPictures(bots)
         guard agents.map(\.id) == bots.map(\.id) else { return }
-        agents = pairing.keptPictures(agents)
-        saveCache()
+        if setAgents(pairing.keptPictures(agents)) { saveCache() }
+    }
+
+    /// Only a list that changed is set, so a sync that brings nothing new draws nothing again.
+    @discardableResult private func setAgents(_ list: [LinkBot]) -> Bool {
+        guard list != agents else { return false }
+        agents = list
+        return true
     }
 
     /// Throws if the groups cannot be listed; returns why the first conversation that did not load failed.
     private func loadGroups() async throws -> Error? {
         guard case .groups(let listed) = try await pairing.request(.groups) else { throw LinkError("The Hub sent an unexpected answer.") }
-        groups = listed
+        if groups != listed { groups = listed }
         var failure: Error?
         for group in listed {
             do { try await load(group.id) } catch { failure = failure ?? error }
@@ -1032,7 +1041,7 @@ enum HubThread: HubConversation {
         let hub = pairing.directory.lastPathComponent
         let gone = conversations.keys.filter { !kept.contains($0) }.map { ShareTarget.Key(hub: hub, conversation: $0) }
         if !gone.isEmpty { Task { await ConversationSuggestions.forget(gone) } }
-        conversations = conversations.filter { kept.contains($0.key) }
+        if conversations.keys.contains(where: { !kept.contains($0) }) { conversations = conversations.filter { kept.contains($0.key) } }
         linkPreviews.keep(only: kept)
         try? patchReviews.retainConversations(kept)
         annotationDrafts.retain(kept)
@@ -1343,7 +1352,7 @@ enum HubThread: HubConversation {
             settle(page.messages)
             merge(page.messages, into: conversationID)
             let first = page.start ?? 0
-            start[conversationID] = first
+            if start[conversationID] != first { start[conversationID] = first }
             let pending = page.messages.firstIndex { $0.author == .you && !$0.delivered }
             read[conversationID] = pending.map { first + $0 } ?? page.count
             return
@@ -1394,15 +1403,19 @@ enum HubThread: HubConversation {
     }
 
     /// Messages arriving in any order, such as a page landing after one sent from here, keep the
-    /// conversation's order.
+    /// conversation's order. Nothing new changes nothing, so the conversation is not drawn again for it.
     private func merge(_ messages: [LinkMessage], into conversationID: UUID) {
-        var list = conversations[conversationID] ?? []
+        let before = conversations[conversationID]
+        guard !messages.isEmpty || before == nil else { return }
+        var list = before ?? []
         for message in messages {
             if let index = list.firstIndex(where: { $0.id == message.id }) { list[index] = message } else { list.append(message) }
         }
-        conversations[conversationID] = list.enumerated()
+        let merged = list.enumerated()
             .sorted { ($0.element.createdAt, $0.offset) < ($1.element.createdAt, $1.offset) }
             .map(\.element)
+        guard merged != before else { return }
+        conversations[conversationID] = merged
     }
 }
 

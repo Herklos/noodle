@@ -3,6 +3,7 @@ import CloudKit
 import Foundation
 import HubLink
 import NoodleWallpaperCore
+import Observation
 import UIKit
 @testable import NoodleMobile
 import SwiftUI
@@ -334,6 +335,21 @@ private final class Door: Sendable {
     private let open = Mutex(true)
     var isOpen: Bool { open.withLock { $0 } }
     func set(open: Bool) { self.open.withLock { $0 = open } }
+}
+
+/// Whether something happened, set from any thread.
+private final class Flag: Sendable {
+    private let raised = Mutex(false)
+    var isRaised: Bool { raised.withLock { $0 } }
+    func raise() { raised.withLock { $0 = true } }
+}
+
+/// Whether a view that read what `read` reads would be drawn again after `change`.
+@MainActor private func redraws(_ read: () -> Void, after change: () async throws -> Void) async rethrows -> Bool {
+    let changed = Flag()
+    withObservationTracking(read) { changed.raise() }
+    try await change()
+    return changed.isRaised
 }
 
 /// The pauses `follow` took before trying again.
@@ -1742,6 +1758,27 @@ private actor RecordedSubscriptions: PushSubscriptions {
 
         #expect(chats.messages(of: scout).first?.reactions == hello.reactions)
         #expect(chats.agent(scout.id)?.phase == .working)
+    }
+
+    /// Coming back to the app syncs everything again; when nothing changed on the Hub, nothing on screen is drawn again.
+    @Test func aSyncThatBringsNothingNewRedrawsNothing() async throws {
+        let hub = FakeHub()
+        let crew = await hub.addGroup(named: "Crew", saying: "Morning")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let redrawn = try await redraws {
+            _ = chats.messages(of: scout)
+            _ = chats.messages(of: crew)
+            _ = chats.listedThreads
+            _ = chats.hasEarlier(scout)
+            _ = chats.phase(of: scout)
+        } after: {
+            try await chats.reload()
+        }
+        #expect(!redrawn)
     }
 
     /// An admin's Users screen follows the Hub's users, as the Hub pushes that they changed.
