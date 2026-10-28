@@ -129,6 +129,17 @@ import SwiftUI
                 _ = try await tab.evaluate("return await new Promise((resolve,reject)=>{const r=indexedDB.open('noodle-fixture',1);r.onupgradeneeded=()=>r.result.createObjectStore('values');r.onerror=()=>reject(r.error);r.onsuccess=()=>{const db=r.result,tx=db.transaction('values','readwrite');tx.objectStore('values').put('saved','state');tx.oncomplete=()=>{db.close();resolve(true)};tx.onerror=()=>reject(tx.error)}});")
                 print("PASS DOM inspection, iframe, fill, native click, authenticated request, profile isolation, IndexedDB write")
                 _ = try await tab.evaluate("window.cacheTrimMarker={value:'kept'};document.querySelector('#username').value='unsaved edit';return true;")
+                tab.endAttention()
+                try require(tab.web.window == nil && tab.surface.contentView == nil, "An idle tab retained its rendering window")
+                var resume = BrowserRequest(.eval, browserID: profile.id, tabID: tab.id)
+                resume.text = "await new Promise(requestAnimationFrame);return cacheTrimMarker.value==='kept' && document.querySelector('#username').value==='unsaved edit' && document.visibilityState==='visible';"
+                try require(try await runtime.perform(resume).text == "true", "Resuming an idle tab lost its document, unsaved input or drawing")
+                try require(tab.web.window === tab.surface && tab.frames[frame] != nil, "Resuming an idle tab lost its rendering window or frame identity")
+                _ = try await tab.evaluate("window.idleClick=new Promise(resolve=>document.querySelector('#sign-in').addEventListener('click',()=>resolve(true),{once:true}));return true;")
+                var resumedClick = BrowserRequest(.click, browserID: profile.id, tabID: tab.id); resumedClick.target = "#sign-in"
+                _ = try await runtime.perform(resumedClick)
+                try require(try await tab.evaluate("return await idleClick;") as? Bool == true, "Native clicks failed after resuming an idle tab")
+                print("PASS idle detachment and agent resumption preserve live JavaScript, unsaved input, frame identity, animation frames and native clicks")
                 let removeCachedData = runtime.removeWebsiteData
                 var remainingStores = Set(runtime.tabs.values.map(\.browserID)).count
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in

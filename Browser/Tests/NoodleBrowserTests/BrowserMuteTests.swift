@@ -15,6 +15,8 @@ final class BrowserMuteTests: XCTestCase {
         let browser = try library.create(name: "Work")
         XCTAssertTrue(browser.muted, "new browsers start muted")
         let tab = try runtime.makeTab(browserID: browser.id)
+        // An agent decoding an upload's video keeps the tab active while it works.
+        tab.attend(for: .seconds(300))
         let page = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Fixtures/muted-video.html")
         tab.web.loadHTMLString(try String(contentsOf: page, encoding: .utf8), baseURL: nil)

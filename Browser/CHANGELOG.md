@@ -8,6 +8,7 @@
 
 ### Improved
 
+- A tab unused by agents for five minutes now releases its hidden rendering window while keeping the page and unsaved edits alive. It resumes when an agent uses it or you watch it live; pages in the browser window and those busy with an operation, dialog or upload stay attached.
 - Browser frees cached page resources when the Mac is short of memory, keeping current pages, sign-ins and unsaved edits open. Going Back may reload a page whose cached copy was freed.
 
 ## [0.22.2] - 2026-10-28

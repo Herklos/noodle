@@ -17,11 +17,10 @@ final class BrowserWebViewTests: XCTestCase {
         BrowserWebView.dismantleNSView(left, coordinator: tab)
         XCTAssertTrue(tab.web.superview === returning)
         BrowserWebView.dismantleNSView(returning, coordinator: tab)
-        XCTAssertTrue(tab.web.window === tab.surface)
+        XCTAssertNil(tab.web.window)
     }
 
-    /// A tab out of the browser window keeps its page in a window of its own that nobody at this
-    /// Mac sees. Only a live view puts it on screen, transparent; nothing else can show it.
+    /// An idle tab has no window. A live view uses a transparent window that nobody at this Mac sees.
     @MainActor func testATabsOwnWindowStaysOffScreenUnlessWatched() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -29,7 +28,7 @@ final class BrowserWebViewTests: XCTestCase {
         defer { runtime.shutdown() }
         let tab = try runtime.makeTab(browserID: try library.create(name: "Work").id)
         defer { tab.surface.orderOut(nil) }
-        XCTAssertTrue(tab.web.window === tab.surface)
+        XCTAssertNil(tab.web.window)
         let attempts: [(String, () -> Void)] = [
             ("orderFront", { tab.surface.orderFront(nil) }), ("orderBack", { tab.surface.orderBack(nil) }),
             ("makeKeyAndOrderFront", { tab.surface.makeKeyAndOrderFront(nil) }),
@@ -46,6 +45,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(tab.surface.alphaValue, 0)
         XCTAssertTrue(tab.surface.ignoresMouseEvents)
         tab.watched = false
+        XCTAssertNil(tab.web.window)
         XCTAssertFalse(tab.surface.isVisible)
         XCTAssertEqual(tab.surface.alphaValue, 0, "the window turned opaque off screen")
     }
@@ -78,7 +78,7 @@ final class BrowserWebViewTests: XCTestCase {
                       "the tab's page showed on this Mac")
     }
 
-    /// A tab rests again once the bot stops using it, so tabs bots left behind cost nothing; and
+    /// A tab rests again once the bot stops using it; and
     /// while a person watches the browser live, only the tab they see draws.
     @MainActor func testATabRestsWhenTheBotStopsUsingItOrAPersonWatches() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -101,6 +101,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(tab.attended)
         for _ in 0..<100 where tab.attended { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertFalse(tab.attended, "the tab kept drawing after the bot stopped using it")
+        XCTAssertNil(tab.web.window)
         XCTAssertFalse(tab.surface.isVisible)
         let rested = try await becomes("hidden")
         XCTAssertTrue(rested, "the page still counts as seen after the bot stopped using it")

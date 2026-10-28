@@ -14,7 +14,7 @@ import WebKit
     let surface: BrowserSurfacePanel
     weak var runtime: BrowserRuntime?
     @Published var info: BrowserTabInfo
-    @Published var dialog: BrowserDialog?
+    @Published var dialog: BrowserDialog? { didSet { restoreSurface() } }
     /// Shown in place of a page that could not load or whose process stopped.
     @Published private(set) var failure: BrowserPageFailure?
     /// The page's own icon, kept while the tab stays on the same site.
@@ -27,8 +27,12 @@ import WebKit
     private(set) var frames: [String: WKFrameInfo] = [:]
     var webMCPAllowed = true
     var webMCPFramePolicies: [String: Bool] = [:]
-    private var upload: (id: UUID, urls: [URL], provided: Bool, origin: String, mainFrame: Bool, continuation: CheckedContinuation<Void, Error>)?
-    private var operations: [UUID: () -> Void] = [:]
+    private var upload: (id: UUID, urls: [URL], provided: Bool, origin: String, mainFrame: Bool, continuation: CheckedContinuation<Void, Error>)? {
+        didSet { restoreSurface() }
+    }
+    private var operations: [UUID: () -> Void] = [:] { didSet { restoreSurface() } }
+    /// Native input must keep its window across the JavaScript calls that locate its target.
+    private var surfaceUsers = 0 { didSet { restoreSurface() } }
     private var stopped = false
     private var finishedDocument = false
     private var visitID: UUID?
@@ -99,12 +103,14 @@ import WebKit
         observations = [web.observe(\.url, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.update() } },
                         web.observe(\.title, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.update() } },
                         web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.update() } }]
+        restoreSurface()
     }
     func update() {
         guard !stopped else { return }
         info.url = web.url?.absoluteString ?? info.url
         info.title = web.title?.isEmpty == false ? web.title! : (web.url?.host ?? "New Tab")
         info.loading = web.isLoading
+        restoreSurface()
         runtime?.saveTab(self)
         // URL observation also catches History API and fragment navigation after
         // the document finishes; title changes update that visit, not a new row.
@@ -148,7 +154,17 @@ import WebKit
         web.setAllMediaPlaybackSuspended(mediaResting || mutedBySuspending, completionHandler: nil)
     }
     func restoreSurface() {
-        if !stopped && web.window == nil {
+        guard !stopped else { showUnseen(); return }
+        // SwiftUI owns mounted pages, including a container waiting to enter its window.
+        guard web.window == nil || web.window === surface else { showUnseen(); return }
+        guard web.window != nil || web.superview == nil else { showUnseen(); return }
+        let needed = watched || attended || mustKeepRunning || surfaceUsers > 0 || pointer.pressed || web.isLoading
+        guard needed else {
+            if web.window === surface { detachSurface() }
+            showUnseen()
+            return
+        }
+        if web.window == nil {
             // Keep the visible tab's viewport when parking it for background
             // automation. Resetting it on every switch reflows responsive pages.
             let size = web.frame.size
@@ -189,11 +205,13 @@ import WebKit
         }
         """
     func detachSurface() {
+        let wasInSurface = web.window === surface
         if let window = web.window, let responder = window.firstResponder as? NSView,
            responder === web || responder.isDescendant(of: web) {
             window.makeFirstResponder(nil)
         }
         web.removeFromSuperview()
+        if wasInSurface { surface.contentView = nil }
         showUnseen()
     }
     /// While a person watches from another device, or a bot works in it, the page must draw as if
@@ -201,26 +219,27 @@ import WebKit
     /// frames, and sites that wait for one before showing anything stay empty. A tab not in a
     /// browser window has its own panel put there, transparent, at the back and taking no clicks.
     var watched = false {
-        didSet { if watched != oldValue { showUnseen() } }
+        didSet { restoreSurface() }
     }
     /// A bot used the tab lately, so the page draws as if the bot were looking at it.
     private(set) var attended = false {
-        didSet { if attended != oldValue { showUnseen() } }
+        didSet { if attended != oldValue { restoreSurface() } }
     }
     private var attention: Task<Void, Never>?
     /// A bot used the tab: it draws as if seen until `span` passes without the bot using it again.
-    /// Then it rests, as any tab out of sight does, so tabs bots left behind cost nothing.
+    /// Then its view leaves the window, keeping the document alive while WebKit can release rendering resources.
     func attend(for span: Duration) {
         guard !stopped else { return }
         attention?.cancel()
         attended = true
+        restoreSurface()
         attention = Task { [weak self] in
             try? await Task.sleep(for: span)
             guard !Task.isCancelled else { return }
             self?.attended = false
         }
     }
-    func endAttention() { attention?.cancel(); attention = nil; attended = false }
+    func endAttention() { attention?.cancel(); attention = nil; attended = false; restoreSurface() }
     /// The tab's own window is on screen, out of sight, for a bot or a live view.
     private var shownUnseen = false
     private func showUnseen() {
@@ -574,6 +593,7 @@ import WebKit
     }
 
     func move(target: String?, x: Double?, y: Double?, frame: String?) async throws {
+        surfaceUsers += 1; defer { surfaceUsers -= 1 }
         let generation = inputGeneration
         var point: CGPoint
         if let target {
@@ -591,11 +611,13 @@ import WebKit
         try pointer.move(to: point)
     }
     func click(target: String?, x: Double?, y: Double?, frame: String?, count: Int = 1) async throws {
+        surfaceUsers += 1; defer { surfaceUsers -= 1 }
         guard !pointer.pressed else { throw BrowserError("Mouse is already pressed.") }
         try await move(target: target, x: x, y: y, frame: frame)
         for number in 1...count { try pointer.down(count: number); try pointer.up(count: number) }
     }
     func press(_ key: String) throws {
+        surfaceUsers += 1; defer { surfaceUsers -= 1 }
         let keys: [String: (String, UInt16)] = ["Enter": ("\r",36), "Tab": ("\t",48), "Escape": ("\u{1b}",53), "Backspace": ("\u{7f}",51), "Space": (" ",49), "ArrowLeft": ("\u{f702}",123), "ArrowRight": ("\u{f703}",124), "ArrowDown": ("\u{f701}",125), "ArrowUp": ("\u{f700}",126)]
         guard let (characters, code) = keys[key], let window = web.window else { throw BrowserError("Unsupported key or unavailable tab.") }
         if let view = window.firstResponder as? NSView, view !== web, !view.isDescendant(of: web) {
@@ -629,6 +651,7 @@ import WebKit
     /// What a person watching remotely did, as real events in the tab, the same way Noodle
     /// Computer and Noodle Applet take it.
     func apply(_ input: SurfaceInput) throws {
+        surfaceUsers += 1; defer { surfaceUsers -= 1 }
         humanInput = false; viewerInput = true
         if surfaceInjector == nil { surfaceInjector = SurfaceEventInjector(view: web) }
         try surfaceInjector?.deliver(input)
