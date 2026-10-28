@@ -48,7 +48,19 @@ private actor FakeHub {
 
     func follow(_ stream: LinkStream) {
         followers.append(stream)
-        stream.send(Data())
+        if holdsFollows { held.append(stream) } else { stream.send(Data()) }
+    }
+
+    /// Streams not yet taken on, as by a Hub slow to answer, until `releaseFollows`.
+    var holdsFollows = false
+    var held: [LinkStream] = []
+
+    func holdFollows() { holdsFollows = true }
+
+    func releaseFollows() {
+        holdsFollows = false
+        held.forEach { $0.send(Data()) }
+        held = []
     }
 
     func push(_ event: LinkEvent) { followers.last?.send(LinkProtocol.encode(event)) }
@@ -500,6 +512,31 @@ private actor RecordedSubscriptions: PushSubscriptions {
         for _ in 0..<100 where !chats.isConnected { try await Task.sleep(for: .milliseconds(100)) }
         #expect(chats.isConnected)
         #expect(pauses.all.count == 1)
+    }
+
+    /// The app coming back to the front starts connecting, and then becomes active: that leaves the connection under
+    /// way to finish, rather than dropping it and waiting before starting over.
+    @Test func comingBackLeavesAConnectionUnderWayToFinish() async throws {
+        let hub = FakeHub()
+        let (phone, server) = try await paired(to: hub)
+        defer { server.stop() }
+        let pauses = Pauses()
+        let chats = HubChats(pairing: phone.pairing, networkChanges: { AsyncStream { _ in } }, pause: { pause in
+            pauses.take(pause)
+            try await Task.sleep(for: .seconds(3600))
+        })
+        await hub.holdFollows()
+        let following = Task { await chats.follow() }
+        defer { following.cancel() }
+        for _ in 0..<100 where await hub.followers.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.isConnecting)
+
+        chats.resume()
+        await hub.releaseFollows()
+        for _ in 0..<100 where !chats.isConnected && pauses.all.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.isConnected)
+        #expect(pauses.all.isEmpty)
+        #expect(await hub.followers.count == 1)
     }
 
     /// A chat effect waits on the Hub until the phone shows its conversation: the phone hears of it, takes it

@@ -879,6 +879,13 @@ enum HubThread: HubConversation, Equatable {
     /// Connects again at once, as when someone taps Try Again or the network changes.
     func reconnect() { wakes.wake() }
 
+    /// Connects at once if the live stream is down and no try is under way, as when the app comes back to the front.
+    /// A try under way, such as the one started as the app came back, is left to finish rather than started over.
+    func resume() {
+        guard !isConnected, !isConnecting else { return }
+        reconnect()
+    }
+
     /// Connects again if the live stream is down, or else loads everything again.
     func tryAgain() {
         if isConnected { Task { try? await reload() } } else { reconnect() }
@@ -1605,7 +1612,7 @@ struct AgentsView: View {
         // Back in front, as after switching airplane mode off in Control Center, a Hub not connected is tried at once.
         .onChange(of: phase) {
             guard phase == .active else { return }
-            for hub in chats where !hub.isConnected { hub.reconnect() }
+            for hub in chats { hub.resume() }
         }
         // Not while the phone is away, so the Hub knows at once to notify it instead.
         .task(id: FollowKey(hubs: pairings.map(CurrentHub.name), away: phase == .background)) {
