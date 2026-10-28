@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.79.0] - 2026-10-28
+
 ### Changed
 
 - Bots' pictures show their status with less noise. A ready bot has no dot; a working one is circled by a turning arc; a stopped or starting one is greyed out. A bot waiting for Kick keeps its red dot.
