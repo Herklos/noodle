@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-28
+
 ### Changed
 
 - Noodle opens and returns to your chats without stutter. When you come back to the app, the open chat updates first and the others update together in the background. A chat no longer redraws for messages in other chats, so scrolling stays smooth while Noodle catches up.
