@@ -210,6 +210,10 @@ final class MCPConnectionTests: XCTestCase {
         }
         let dial = try MCPConnectionRecord.dialURL(url, lookup: { _ in ["127.0.0.1"] })
         XCTAssertEqual(dial.host, "127.0.0.1")
+
+        let v6 = try MCPConnectionRecord.dialURL(url, lookup: { _ in ["::1", "127.0.0.1"] })
+        XCTAssertEqual(v6.absoluteString, "http://[::1]:8080/mcp")
+        XCTAssertEqual(v6.host, "::1")
         let literal = try MCPConnectionRecord.dialURL(URL(string: "https://127.0.0.1:8080/mcp")!, lookup: { _ in ["127.0.0.1"] })
         XCTAssertEqual(literal.host, "127.0.0.1")
     }

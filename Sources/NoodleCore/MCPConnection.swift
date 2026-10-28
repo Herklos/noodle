@@ -107,12 +107,26 @@ public struct MCPConnectionRecord: Codable, Identifiable, Equatable, Sendable {
             throw MCPConnectionError.message("Local mode accepts loopback only.")
         }
         guard canonical.scheme == "http", !isNumericLoopback(host) else { return canonical }
-        var parts = URLComponents(url: canonical, resolvingAgainstBaseURL: false)
-        parts?.host = addresses[0]
-        guard let dial = parts?.url else {
+        let address = addresses[0].trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard let dial = httpDial(canonical, host: address) else {
             throw MCPConnectionError.message("Local mode accepts loopback only.")
         }
         return dial
+    }
+
+    /// URLComponents cannot build a URL whose host is `::1`. Bracket that address directly.
+    private static func httpDial(_ url: URL, host: String) -> URL? {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        if !host.contains(":") {
+            parts.host = host
+            return parts.url
+        }
+        let shown = "[\(host.replacingOccurrences(of: "%", with: "%25"))]"
+        let scheme = parts.scheme ?? "http"
+        let port = parts.port.map { ":\($0)" } ?? ""
+        let path = parts.percentEncodedPath
+        let query = parts.percentEncodedQuery.map { "?\($0)" } ?? ""
+        return URL(string: "\(scheme)://\(shown)\(port)\(path)\(query)")
     }
 
     public static func systemAddresses(for host: String) throws -> [String] {
