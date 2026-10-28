@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Edit Computer toolbar button uses a plain pencil icon.
+
 ## [0.33.4] - 2026-10-26
 
 ### Fixed

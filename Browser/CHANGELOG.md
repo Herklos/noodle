@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Edit Browser toolbar button uses a plain pencil icon.
+
 ### Improved
 
 - Browser frees cached page resources when the Mac is short of memory, keeping current pages, sign-ins and unsaved edits open. Going Back may reload a page whose cached copy was freed.

@@ -794,7 +794,7 @@ struct ComputerDetailView: View {
         Button {
           editing = true
         } label: {
-          Label("Edit Computer", systemImage: "ellipsis")
+          Label("Edit Computer", systemImage: "pencil")
         }.help("Edit Computer")
       }
       ToolbarItem(id: "computer-power", placement: .primaryAction) {
