@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Noodle opens and returns to your chats without stutter. When you come back to the app, the open chat updates first and the others update together in the background. A chat no longer redraws for messages in other chats, so scrolling stays smooth while Noodle catches up.
+- Noodle keeps each chat's latest 200 messages on your phone between launches. Earlier messages load as you scroll back, as before.
+
+### What to Test
+
+- With a long chat open, switch to another app for a minute and come back. Check that you can scroll the chat smoothly right away, and that replies sent while you were away show up, in the open chat first.
+- Quit Noodle and open it again. Check that the list and the open chat show at once and then update. In a long chat, scroll back and check that earlier messages still load.
+- While a bot replies in another chat, scroll the open one. Check that it stays smooth and that the list shows the reply.
+- Turn on Airplane Mode, then turn it off in Control Center and come back to Noodle. Check that it reconnects right away.
+
 ## [0.49.0] - 2026-10-27
 
 ### Added
