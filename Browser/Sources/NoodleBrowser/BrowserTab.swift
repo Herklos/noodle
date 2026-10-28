@@ -132,10 +132,20 @@ import WebKit
         typealias PageMuted = @convention(c) (AnyObject, Selector, UInt) -> Void
         guard let method = class_getInstanceMethod(WKWebView.self, selector) else {
             // A WebKit without page muting only offers suspending playback, which pauses video too.
-            web.setAllMediaPlaybackSuspended(muted, completionHandler: nil); return
+            mutedBySuspending = muted; suspendMedia(); return
         }
         // 1 is WebKit's audio-muted bit; cameras and microphones are refused anyway.
         unsafeBitCast(method_getImplementation(method), to: PageMuted.self)(web, selector, muted ? 1 : 0)
+    }
+    private var mutedBySuspending = false
+    /// Nobody used the page for a while, so its video and audio are suspended where they are, and
+    /// pick up from there when it is used again. Out of sight, a page still runs its players' scripts
+    /// at full speed, which kept some busy for hours after a bot left them.
+    var mediaResting = false {
+        didSet { if mediaResting != oldValue { suspendMedia() } }
+    }
+    private func suspendMedia() {
+        web.setAllMediaPlaybackSuspended(mediaResting || mutedBySuspending, completionHandler: nil)
     }
     func restoreSurface() {
         if !stopped && web.window == nil {

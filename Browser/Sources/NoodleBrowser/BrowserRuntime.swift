@@ -206,7 +206,7 @@ import WebKit
         let selected = try? library.profile(browserID).selectedTabID
         for tab in tabs.values where tab.browserID == browserID {
             tab.watched = watched && tab.id == selected
-            if watched { tab.endAttention() }
+            if watched { tab.endAttention(); tab.mediaResting = false }
         }
     }
     func selectTab(browserID: UUID, tabID: UUID) throws {
@@ -220,7 +220,7 @@ import WebKit
     /// A person, a bot or someone watching live used the tab. Saved at most once a minute,
     /// since people's input arrives many times a second.
     func touch(browserID: UUID, tabID: UUID, now: Date = Date()) {
-        tabs[tabID]?.lastActive = now
+        tabs[tabID]?.lastActive = now; tabs[tabID]?.mediaResting = false
         do {
             var profile = try library.profile(browserID)
             guard let index = profile.tabs.firstIndex(where: { $0.id == tabID }) else { return }
@@ -245,6 +245,16 @@ import WebKit
                 if stamped { try library.update(profile) }
                 for id in expired { try closeTab(browserID: profile.id, tabID: id) }
             } catch { failure = error.localizedDescription }
+        }
+    }
+    /// How long a page goes unused before its media is suspended.
+    static let mediaRest: TimeInterval = 1800
+    /// Suspends media in pages nobody used for `age`, and resumes it in pages in use again. A page
+    /// being watched live or shown in a browser window counts as used however long it goes untouched.
+    func restMedia(unusedFor age: TimeInterval, now: Date = Date()) {
+        for tab in tabs.values {
+            tab.mediaResting = !tab.watched && !inUse(browserID: tab.browserID, tabID: tab.id)
+                && now.timeIntervalSince(tab.lastActive) >= age
         }
     }
     /// A tab on screen, being watched or waiting on a dialog.
@@ -280,7 +290,14 @@ import WebKit
                 try? await Task.sleep(for: .seconds(3600))
             }
         }
+        mediaRestTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.restMedia(unusedFor: Self.mediaRest)
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
+    private var mediaRestTask: Task<Void, Never>?
     func closeTab(browserID: UUID, tabID: UUID) throws {
         var profile = try library.profile(browserID)
         guard profile.tabs.contains(where: { $0.id == tabID }) else { throw BrowserError("Tab not found in this browser.") }
@@ -343,6 +360,7 @@ import WebKit
         server = nil
         externalServer = nil
         expiry?.cancel(); expiry = nil
+        mediaRestTask?.cancel(); mediaRestTask = nil
         for tab in tabs.values { tab.stop() }
         tabs.removeAll()
         library.flush()

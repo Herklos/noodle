@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-10-28
+
+### Fixed
+
+- Video and audio in a tab nobody has used for 30 minutes are now paused where they are, and pick up from there when you or a bot use the tab again. Some pages kept their players busy for hours after a bot left them, slowing the whole Mac. Tabs you're watching live or have open in a browser window keep playing.
+
 ## [0.22.1] - 2026-10-26
 
 ### Fixed

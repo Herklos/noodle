@@ -220,6 +220,36 @@ final class BrowserRuntimeTests: XCTestCase {
         XCTAssertEqual(reloaded.web.url?.absoluteString, "https://example.com/2")
         XCTAssertEqual(runtime.tabs.count, BrowserLimits.runningPages)
     }
+    /// Media in a page nobody used for a while is suspended; use, a live viewer or a browser window
+    /// on screen keeps it playing, and using the tab again resumes it.
+    @MainActor func testMediaRestsInPagesNobodyUses() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = BrowserLibrary(root: root), now = Date(), age: TimeInterval = 1800
+        var a = try library.create(name: "A")
+        let infos = (0..<4).map { BrowserTabInfo(title: "Page \($0)", url: "https://example.com/\($0)") }
+        a.tabs = infos; a.selectedTabID = infos[0].id; try library.update(a)
+        let runtime = BrowserRuntime(library: library)
+        defer { runtime.shutdown() }
+        let tabs = try infos.map { try runtime.tab(browserID: a.id, tabID: $0.id) }
+        let (idle, recent, watched, shown) = (tabs[0], tabs[1], tabs[2], tabs[3])
+        for tab in tabs { tab.lastActive = now - age - 60 }
+        recent.lastActive = now - 600
+        watched.watched = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = shown.web; window.orderFront(nil)
+        runtime.restMedia(unusedFor: age, now: now)
+        XCTAssertTrue(idle.mediaResting, "an unused page kept its media playing")
+        XCTAssertFalse(recent.mediaResting, "a page used lately had its media suspended")
+        XCTAssertFalse(watched.mediaResting, "a page watched live had its media suspended")
+        XCTAssertFalse(shown.mediaResting, "a page in a browser window had its media suspended")
+        runtime.touch(browserID: a.id, tabID: idle.id, now: now)
+        XCTAssertFalse(idle.mediaResting, "using the page left its media suspended")
+        runtime.restMedia(unusedFor: age, now: now + 60)
+        XCTAssertFalse(idle.mediaResting)
+    }
     /// A page that stopped comes back with its history, so going back still works.
     @MainActor func testAStoppedPageComesBackWithItsHistory() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
