@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- The toolbar button for editing a bot or group uses a plain pencil icon.
+
 ### Fixed
 
 - The arc around a working bot's picture in the toolbar stays centred on the picture instead of drifting off it.

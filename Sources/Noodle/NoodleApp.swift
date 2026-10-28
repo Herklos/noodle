@@ -605,14 +605,14 @@ private struct MainToolbarInfoButton: View {
             Button {
                 if let conversation = store.selectedConversation { store.agentBeingEdited = store.participants(for: conversation).first }
             } label: {
-                Label("Edit Bot", systemImage: "ellipsis")
+                Label("Edit Bot", systemImage: "pencil")
             }
             .help("Edit Bot")
         case .groupInfo:
             Button {
                 store.groupBeingEdited = store.selectedConversation
             } label: {
-                Label("Group Info", systemImage: "ellipsis")
+                Label("Group Info", systemImage: "pencil")
             }
             .help("Group Info")
         case .none:
