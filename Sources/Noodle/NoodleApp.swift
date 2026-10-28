@@ -26,11 +26,11 @@ struct NoodleApp: App {
     @State private var errorAlert: StoreErrorAlert
 
     init() {
+        // The View menu carries its own Full Screen item, after the layouts and a divider.
+        UserDefaults.standard.register(defaults: ["NSFullScreenMenuItemEverywhere": false])
         #if NOODLE_DEV_HOOKS
         // Development builds only. Each hook runs an isolated fixture in place of the app and exits.
         Logger(subsystem: "com.pdparchitect.noodle", category: "DevelopmentHooks").notice("noodle.development-hooks.enabled")
-        // The View menu carries its own Full Screen item, after the layouts and a divider.
-        UserDefaults.standard.register(defaults: ["NSFullScreenMenuItemEverywhere": false])
         let checks = LaunchChecks.current
         if checks.contains(DevelopmentHook.browserIntegration) || checks.contains(DevelopmentHook.browserDiscovery) || checks.contains(DevelopmentHook.browserPicker) {
             NSApplication.shared.setActivationPolicy(.accessory)
@@ -125,12 +125,10 @@ struct NoodleApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
-            #if NOODLE_DEV_HOOKS
             CommandGroup(before: .toolbar) {
                 MainWindowLayoutCommands()
                 FullScreenCommand()
             }
-            #endif
             CommandGroup(replacing: .help) {
                 Button("\(NoodleAppIdentity.name) Help") {
                     NSWorkspace.shared.open(URL(string: "https://github.com/pdparchitect/noodle")!)
@@ -356,13 +354,9 @@ struct RootView: View {
     /// The Kick alert of the selected conversation's paused bot, asked for from the toolbar.
     @State private var kickRequest: AgentKickRequest?
     @State private var toolbarState = MainToolbarState()
-    #if NOODLE_DEV_HOOKS
     @AppStorage(MainWindowLayout.key) private var layout = MainWindowLayout.list
     @State private var columns = ColumnsModel()
     private var showsColumns: Bool { layout == .columns }
-    #else
-    private let showsColumns = false
-    #endif
 
     var body: some View {
         Group {
@@ -440,11 +434,7 @@ struct RootView: View {
                 // Last: a toolbar(removing:) applied after it swallows the column width, even one removing nothing.
                 .navigationSplitViewColumnWidth(min: 280, ideal: 326, max: 380)
         } detail: {
-            #if NOODLE_DEV_HOOKS
             if showsColumns { ConversationColumns(model: columns) } else { listDetail }
-            #else
-            listDetail
-            #endif
         }
         .navigationSplitViewStyle(.balanced)
         .background(SelectedConversationWindowHost())
@@ -476,9 +466,7 @@ struct RootView: View {
                 ToolbarItem(placement: .navigation) { createMenu }
             }
 
-            #if NOODLE_DEV_HOOKS
             if showsColumns { ToolbarItem(placement: .principal) { ColumnSwitcher(model: columns) } }
-            #endif
 
             // Each item reads only what it shows from toolbarState. Any change inside an item makes AppKit
             // measure it and retile the whole toolbar, so a switch that shows the same controls changes nothing.

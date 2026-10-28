@@ -1,4 +1,3 @@
-#if NOODLE_DEV_HOOKS
 import NoodleCore
 import NoodleRuntime
 import NoodleRuntimeSettings
@@ -6,11 +5,10 @@ import NoodleWallpaper
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Prototype of the Columns layout: several full conversations side by side in the main window.
-/// Development builds only, switched on with the toolbar's List/Columns control.
+/// View > As List shows one conversation beside the sidebar; As Columns shows several side by side.
 enum MainWindowLayout: String {
     case list, columns
-    static let key = "NoodlePrototypeLayout"
+    static let key = "NoodleMainWindowLayout"
 }
 
 /// Which conversations are open as columns, per space, and which has focus.
@@ -19,7 +17,7 @@ enum MainWindowLayout: String {
     private var openBySpace: [String: [UUID]] = ColumnsModel.saved() {
         didSet { UserDefaults.standard.set(openBySpace.mapValues { $0.map(\.uuidString) }, forKey: Self.key) }
     }
-    private static let key = "NoodlePrototypeColumns"
+    private static let key = "NoodleOpenColumns"
 
     private static func saved() -> [String: [UUID]] {
         let stored = UserDefaults.standard.dictionary(forKey: key) as? [String: [String]] ?? [:]
@@ -547,4 +545,3 @@ struct ColumnSwitcher: View {
         }
     }
 }
-#endif

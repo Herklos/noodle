@@ -6,6 +6,12 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.78.1] - 2026-10-28
+
+### Added
+
+- View › As Columns shows several conversations side by side in the main window. Click a conversation in the sidebar to open it as a column; close a column with its close button. The toolbar shows the open columns' pictures to jump between them, and each space remembers its columns. View › As List returns to one conversation.
+
 ## [0.78.0] - 2026-10-28
 
 ### Changed
