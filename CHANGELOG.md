@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.78.0] - 2026-10-28
+
 ### Changed
 
 - The main window stays smooth while bots reply and change status. The sidebar and the open conversation no longer redraw for messages in other conversations, and switching conversations no longer rebuilds the toolbar.
