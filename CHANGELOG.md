@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- Bots read a conversation's history the newest 100 messages at a time, and ask for earlier ones when they need them.
+
 ### Fixed
 
 - In View › As Columns, switching spaces no longer carries over a column for a conversation the new space doesn't hold. A space with none of its conversations open shows no columns, and its empty state now fits on one line.
@@ -14,6 +18,7 @@ All notable changes to Noodle are documented here, following
   - Choosing a conversation in the sidebar starts typing in its column again.
   - A column's header can be dragged to reorder the columns on the first press, even while another column has focus.
   - A header dropped on a conversation is no longer added to it as an attachment.
+- A bot reading a conversation's history no longer has every attachment in it copied into its workspace again each time. In groups with many files this rewrote gigabytes and took a gigabyte of memory every few minutes, slowing the Mac.
 
 ## [0.78.1] - 2026-10-28
 

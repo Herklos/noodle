@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Bots read a conversation's history the newest 100 messages at a time, and ask for earlier ones when they need them.
+
+### Fixed
+
+- A bot reading a conversation's history no longer has every attachment in it copied into its workspace again each time. In groups with many files this rewrote gigabytes and took a gigabyte of memory every few minutes, slowing the Mac.
+
 ## [0.45.1] - 2026-10-27
 
 ### Changed

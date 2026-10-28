@@ -106,6 +106,40 @@ final class MessengerBridgeTests: XCTestCase {
         XCTAssertFalse(file.absolutePath.hasPrefix(repository.conversationDirectory(id: conversation.id).path))
     }
 
+    func testListingAgainLeavesExistingAttachmentCopiesAlone() throws {
+        let attachment = try repository.importAttachment(data: Data("payload".utf8), originalFilename: "a.txt",
+            into: conversation.id, mediaType: "text/plain")
+        try repository.append(ChatMessage(conversationID: conversation.id, author: .user, body: "attachment",
+            delivery: .queued, attachmentIDs: [attachment.id]))
+        func copy() throws -> (path: String, inode: Any?) {
+            let deliveries = try decode(call(.listMessages(conversationID: conversation.id)), as: [MessengerDelivery].self)
+            let path = try XCTUnwrap(deliveries.flatMap(\.attachments).first).absolutePath
+            return (path, try FileManager.default.attributesOfItem(atPath: path)[.systemFileNumber])
+        }
+        let first = try copy(), second = try copy()
+        XCTAssertEqual(first.path, second.path)
+        // A rewrite lands as a new file renamed into place, so the copy would change identity.
+        XCTAssertEqual(first.inode as? Int, second.inode as? Int)
+        XCTAssertEqual(try String(contentsOfFile: second.path, encoding: .utf8), "payload")
+    }
+
+    func testListingReturnsOnlyTheLatestPage() throws {
+        for index in 0..<150 {
+            try repository.append(ChatMessage(conversationID: conversation.id, author: .user, body: "message \(index)", delivery: .queued))
+        }
+        let deliveries = try decode(call(.listMessages(conversationID: conversation.id)), as: [MessengerDelivery].self)
+        XCTAssertEqual(deliveries.count, MessengerCLI.messagePageSize)
+        XCTAssertEqual(deliveries.last?.message.body, "message 149")
+
+        let oldest = try XCTUnwrap(deliveries.first?.message.id)
+        let result = MessengerCLI.run(arguments: ["messenger", "--agent-directory", workspace.path, "--list-messages",
+            "--conversation", conversation.id.uuidString, "--before", oldest.uuidString])
+        let earlier = try decode(result, as: [MessengerDelivery].self)
+        XCTAssertEqual(earlier.last?.message.body, "message 49")
+        XCTAssertTrue(earlier.contains { $0.message.body == "message 0" })
+        XCTAssertFalse(earlier.contains { $0.message.id == oldest })
+    }
+
     func testAttachmentCannotReadAnotherBotOrFollowALink() throws {
         let source = repository.directory(for: other).appendingPathComponent("private.txt")
         try Data("private".utf8).write(to: source)

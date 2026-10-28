@@ -122,6 +122,22 @@ public final class WorkspaceMailbox: @unchecked Sendable {
         guard Self.validName(name) else { throw Self.invalid() }
         let input = try ComputerTransferFiles.openSource(source)
         defer { close(input) }
+        try copy(from: input, named: name)
+    }
+
+    /// Leaves a copy that is already there, a plain file of the source's size, as it is. For files that
+    /// never change once stored, such as attachments, which would otherwise be rewritten on every read.
+    public func copyUnlessPresent(from source: URL, named name: String) throws {
+        guard Self.validName(name) else { throw Self.invalid() }
+        let input = try ComputerTransferFiles.openSource(source)
+        defer { close(input) }
+        var original = stat(), present = stat()
+        if fstat(input, &original) == 0, fstatat(descriptor, name, &present, AT_SYMLINK_NOFOLLOW) == 0,
+           present.st_mode & S_IFMT == S_IFREG, present.st_nlink == 1, present.st_size == original.st_size { return }
+        try copy(from: input, named: name)
+    }
+
+    private func copy(from input: Int32, named name: String) throws {
         let temporary = "." + UUID().uuidString.lowercased()
         let output = openat(descriptor, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard output >= 0 else { throw Self.invalid() }

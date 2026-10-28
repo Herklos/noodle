@@ -14,6 +14,9 @@ public struct MessengerCommandResult: Codable, Sendable {
 }
 
 public enum MessengerCLI {
+    /// How many messages --list-messages returns at a time, the newest first page.
+    public static let messagePageSize = 100
+
     public static func shouldHandle(arguments: [String] = CommandLine.arguments) -> Bool {
         guard let executable = arguments.first else { return false }
         return URL(fileURLWithPath: executable).lastPathComponent == "messenger" ||
@@ -82,7 +85,9 @@ public enum MessengerCLI {
                     let deliveries = try repository.latestMessages(for: agentID, consuming: consumes, preparing: { original in
                         let visible = try brokered ? project(original, repository: repository, agentID: agentID) : original
                         response = .json(visible)
-                        if brokered, try JSONEncoder().encode(response).count > MessengerBridgeClient.maxResponseBytes {
+                        // Encoding escapes at most every other character, so only a reply near the limit is encoded again to measure it.
+                        if brokered, response.standardOutput.utf8.count * 2 + 1024 > MessengerBridgeClient.maxResponseBytes,
+                           try JSONEncoder().encode(response).count > MessengerBridgeClient.maxResponseBytes {
                             throw HarnessSetupError("The inbox is too large. Read individual conversations with --list-messages; no inbox offsets were advanced.")
                         }
                     })
@@ -106,10 +111,13 @@ public enum MessengerCLI {
                     conversationID: conversationID
                 ))
 
-            case .listMessages(let conversationID):
-                let deliveries = try repository.latestMessages(
+            case .listMessages(let conversationID, let before):
+                let all = try repository.latestMessages(
                     for: agentID, consuming: false, in: conversationID, includingRead: true
                 )
+                // One page, ending before the given message or at the newest. Only its attachments are copied.
+                let end = before.flatMap { id in all.firstIndex { $0.message.id == id } } ?? all.count
+                let deliveries = Array(all[max(0, end - messagePageSize)..<end])
                 return .json(try brokered ? project(deliveries, repository: repository, agentID: agentID) : deliveries)
 
             case .react(let conversationID, let messageID, let emoji, let present):
@@ -198,7 +206,7 @@ public enum MessengerCLI {
                 let source = repository.attachmentsDirectory(conversationID: item.conversationID).appendingPathComponent(item.storedFilename)
                 guard source.standardizedFileURL.deletingLastPathComponent() == repository.attachmentsDirectory(conversationID: item.conversationID).standardizedFileURL,
                       source.resolvingSymlinksInPath() == source.standardizedFileURL else { throw WorkspaceError.invalidAttachment }
-                try folder.copy(from: source, named: item.storedFilename)
+                try folder.copyUnlessPresent(from: source, named: item.storedFilename)
                 item.absolutePath = folder.url.appendingPathComponent(item.storedFilename).path
                 copies[item.id] = item.absolutePath
                 return item
@@ -281,7 +289,12 @@ public enum MessengerCLI {
             case .listMessages:
                 guard let raw = Self.option("--conversation", in: values),
                       let id = UUID(uuidString: raw) else { throw MessengerCLIError.invalidArguments }
-                action = .listMessages(conversationID: id)
+                var before: UUID?
+                if let rawBefore = Self.option("--before", in: values) {
+                    guard let id = UUID(uuidString: rawBefore) else { throw MessengerCLIError.invalidArguments }
+                    before = id
+                }
+                action = .listMessages(conversationID: id, before: before)
             case .react, .unreact:
                 guard values.contains("--react") != values.contains("--unreact"),
                       let rawConversation = Self.option("--conversation", in: values),
@@ -521,7 +534,8 @@ public enum MessengerAction: Codable, Sendable {
         case getLatest(consumes: Bool)
         case listConversations
         case listParticipants(conversationID: UUID)
-        case listMessages(conversationID: UUID)
+        /// Nil `before` reads the newest page.
+        case listMessages(conversationID: UUID, before: UUID? = nil)
         case react(conversationID: UUID, messageID: UUID, emoji: String, present: Bool)
         case send(conversationID: UUID, body: String, attachmentURLs: [URL])
         /// Nil clears it.
