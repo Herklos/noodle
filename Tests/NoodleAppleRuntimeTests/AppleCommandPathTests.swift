@@ -58,6 +58,22 @@ final class AppleCommandPathTests: XCTestCase {
         }
     }
 
+    func testLongerWordThatOnlyBeginsWithThePathIsLeftAlone() async throws {
+        for command in ["ls \(path)ing", "ls \(path)-old", "ls \(path).bak", "cd \(path)2 && pwd", "echo \(path)x\(path)y"] {
+            XCTAssertEqual(keeping(command), command)
+        }
+        // The path itself, at the end of the command, before a slash or before a separator, is still one word.
+        XCTAssertEqual(keeping("ls \(path)"), "ls \(escaped)")
+        XCTAssertEqual(keeping("ls \(path)/sub"), "ls \(escaped)/sub")
+        XCTAssertEqual(keeping("ls \(path);ls \(path)|cat \(path)>out \(path)<in"), "ls \(escaped);ls \(escaped)|cat \(escaped)>out \(escaped)<in")
+        XCTAssertEqual(keeping("(cd \(path))"), "(cd \(escaped))")
+        XCTAssertEqual(keeping("ls \(path)\ntrue"), "ls \(escaped)\ntrue")
+        let sibling = workspace.deletingLastPathComponent().appendingPathComponent("work spacing")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        let result = try await AppleCommand.run("ls -d \(path)ing", workspace: workspace)
+        XCTAssertNotEqual(result.status, 0, "A longer name must not be read as the workspace path: \(result.output)")
+    }
+
     func testPathWithoutASpaceIsNotRewritten() {
         let command = "cd /tmp/plain && ls"
         XCTAssertEqual(AppleCommand.keepingPathsWhole(command, paths: ["/tmp/plain"]), command)

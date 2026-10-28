@@ -3,7 +3,8 @@ import Foundation
 extension AppleCommand {
     /// A model often writes the workspace path into a command without quoting it. The path can hold a
     /// space, as in `Application Support`, and Bash then splits it into two words. This escapes each
-    /// unquoted copy of those paths so it stays one word. Everything else is left as written: quoted
+    /// unquoted copy of those paths so it stays one word. A copy counts only when the path is the whole
+    /// word: the command ends there, or a slash or a shell separator follows. Everything else is left as written: quoted
     /// and escaped text, comments, and commands with a here-document.
     static func keepingPathsWhole(_ command: String, paths: [String]) -> String {
         var known: [(path: [Unicode.Scalar], escaped: String)] = []
@@ -20,6 +21,10 @@ extension AppleCommand {
         var index = 0
         func previousIs(_ allowed: String) -> Bool {
             index == 0 || allowed.unicodeScalars.contains(input[index - 1])
+        }
+        // A path is the whole word only if the command ends there, or a slash or a separator follows.
+        func endsWord(at end: Int) -> Bool {
+            end == input.count || "/ \t\n;|&)<>".unicodeScalars.contains(input[end])
         }
         while index < input.count {
             let scalar = input[index]
@@ -52,7 +57,7 @@ extension AppleCommand {
                     while index < input.count, input[index] != "\n" { output.append(input[index]); index += 1 }
                     continue
                 } else if previousIs(" \t\n;|&(<>=:"),
-                          let hit = known.first(where: { input[index...].starts(with: $0.path) }) {
+                          let hit = known.first(where: { input[index...].starts(with: $0.path) && endsWord(at: index + $0.path.count) }) {
                     output.append(contentsOf: hit.escaped.unicodeScalars)
                     index += hit.path.count
                     continue
