@@ -9,6 +9,7 @@ All notable changes to Noodle are documented here, following
 ### Changed
 
 - The toolbar button for editing a bot or group uses a plain pencil icon.
+- In View › As Columns, each header follows the list toolbar's button order. Its pencil opens the bot or group editor directly.
 
 ### Fixed
 

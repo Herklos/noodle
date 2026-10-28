@@ -468,7 +468,7 @@ private struct ColumnCard: View {
     }
 }
 
-private struct ColumnHeader: View {
+struct ColumnHeader: View {
     @Environment(NoodleStore.self) private var store
     let conversation: BotConversation
     let isFocused: Bool
@@ -494,11 +494,13 @@ private struct ColumnHeader: View {
                 Spacer(minLength: 4)
             }
             .overlay { ColumnDragHandle(id: conversation.id, select: select, reorder: reorder) }
+            editButton
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
             ConversationPauseControl(conversation: conversation, kickRequest: $kickRequest)
             Group {
                 VoiceCallToolbarControl(conversation: conversation)
                 ConversationCompanionsMenu(conversation: conversation)
-                actionsMenu
                 Button(action: close) { Label("Close Column", systemImage: "xmark") }
                     .help("Close Column")
             }
@@ -515,23 +517,18 @@ private struct ColumnHeader: View {
         .onHover { isHovered = $0 }
     }
 
-    private var actionsMenu: some View {
-        Menu {
-            if conversation.kind == .direct, let agent = store.participants(for: conversation).first {
-                if !store.isShared(agent.id) { Button("Edit Bot…") { store.agentBeingEdited = agent } }
-            } else if conversation.kind == .group {
-                Button("Edit Group…") { store.groupBeingEdited = conversation }
+    @ViewBuilder private var editButton: some View {
+        if conversation.kind == .direct, let agent = store.participants(for: conversation).first, !store.isShared(agent.id) {
+            Button { store.agentBeingEdited = agent } label: {
+                Label("Edit Bot", systemImage: "pencil")
             }
-            Button("Change Background…") { store.backgroundBeingEdited = conversation }
-            Divider()
-            Button("Open in New Window") { store.dockConversation(conversation.id) }
-            Button("Float on Top") { store.floatConversation(conversation.id) }
-        } label: {
-            Label("Conversation Info", systemImage: "ellipsis")
+            .help("Edit Bot")
+        } else if conversation.kind == .group {
+            Button { store.groupBeingEdited = conversation } label: {
+                Label("Group Info", systemImage: "pencil")
+            }
+            .help("Group Info")
         }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Conversation Info")
     }
 }
 
@@ -607,7 +604,7 @@ struct ColumnSwitcher: View {
 
 /// Pressing a column's header selects it, and dragging moves it, from the first press: SwiftUI's
 /// draggable lost the press to the focus change when another column had the keyboard.
-private struct ColumnDragHandle: NSViewRepresentable {
+struct ColumnDragHandle: NSViewRepresentable {
     /// Only Noodle's own type, so a column dropped on a transcript or a message field is not taken as text.
     static let type = NSPasteboard.PasteboardType("com.pdparchitect.noodle.column")
     let id: UUID
