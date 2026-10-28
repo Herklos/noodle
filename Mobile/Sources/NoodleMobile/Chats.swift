@@ -827,7 +827,7 @@ enum HubThread: HubConversation, Equatable {
     /// What the bubble over a pinned circle says: the start of an unread reply, or else the bot's status.
     func note(for thread: HubThread) -> PinnedNote? {
         if isUnread(thread), let reply = messages(of: thread).last(where: { if case .bot = $0.author { true } else { false } }) {
-            let text = MessageSegment.previewText(reply.body).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let text = MessageRendering.previewText(reply.body).split(whereSeparator: \.isWhitespace).joined(separator: " ")
             if !text.isEmpty { return .unread(text) }
         }
         return thread.bot?.status.map(PinnedNote.status)
@@ -1947,14 +1947,14 @@ struct AgentsView: View {
     private func rowLink(_ row: Row, _ label: AgentRow) -> some View {
         if layout == .split {
             let selected = navigation.selection == row.id
-            Button { navigation.open(row.id, in: layout) } label: { label.contentShape(.rect) }
+            Button { navigation.open(row.id, in: layout) } label: { label.equatable().contentShape(.rect) }
                 .buttonStyle(.plain)
                 // The pointer marks the row it is over, as in the Mac's list.
                 .hoverEffect(.highlight)
                 .listRowBackground(selected ? Color.accentColor.opacity(0.15) : nil)
                 .accessibilityAddTraits(selected ? .isSelected : [])
         } else {
-            NavigationLink(value: row.id) { label }
+            NavigationLink(value: row.id) { label.equatable() }
         }
     }
 
@@ -2206,7 +2206,9 @@ struct MoreSheet: View {
     }
 }
 
-private struct AgentRow: View {
+/// Equatable, as the Mac's sidebar rows are: a message or a status change draws again only the rows it changes.
+/// What it reads of `chats` itself it observes on its own.
+private struct AgentRow: View, Equatable {
     let chats: HubChats
     let thread: HubThread
     let latest: LinkMessage?
@@ -2216,6 +2218,11 @@ private struct AgentRow: View {
     /// The conversation's Hub, when several are shown together.
     var hub: String?
     static let dotSize: CGFloat = 10, dotGap: CGFloat = 8
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.chats === b.chats && a.thread == b.thread && a.latest == b.latest && a.unread == b.unread && a.muted == b.muted
+            && a.hub == b.hub
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -2245,7 +2252,7 @@ private struct AgentRow: View {
                 if let pause {
                     Text(pause).font(.subheadline).foregroundStyle(.red).lineLimit(1)
                 }
-                Text(latest.map { MessageSegment.previewText($0.body) } ?? thread.about)
+                Text(latest.map { MessageRendering.previewText($0.body) } ?? thread.about)
                     .font(.subheadline).foregroundStyle(.secondary)
                     .lineLimit(pause == nil ? 2 : 1)
             }
@@ -3453,7 +3460,7 @@ private struct Bubble: View {
         case .bot:
             HStack(alignment: .bottom, spacing: 6) {
                 if let avatar {
-                    Button { showAgent(avatar) } label: { AgentAvatar(draft: avatar.draft, size: Self.avatarSize) }
+                    Button { showAgent(avatar) } label: { AgentAvatar(face: BotFace(avatar), size: Self.avatarSize) }
                         .buttonStyle(.plain)
                         .hoverEffect(.lift)
                         .accessibilityLabel("Show profile for \(avatar.draft.name)")
@@ -3505,7 +3512,7 @@ private struct Bubble: View {
         if showsText {
             // Tables and the long message layout split the text into separate bubbles, as on the Mac;
             // reactions mark the first.
-            let segments = MessageSegment.split(message.body, layout: MessageTextLayout(rawValue: textLayout) ?? .standard)
+            let segments = MessageRendering.segments(message.body, layout: MessageTextLayout(rawValue: textLayout) ?? .standard)
             ForEach(Array((segments.isEmpty ? [.text(message.body)] : segments).enumerated()), id: \.offset) { index, segment in
                 segmentBubble(segment, at: index, foreground: foreground, background: background)
                     .scaleEffect(pressing == index ? 0.96 : 1)
@@ -3515,7 +3522,7 @@ private struct Bubble: View {
                     .modifier(Reactions(badges: reactions, shown: index == 0 && !message.reactions.isEmpty))
             }
         }
-        if let url = LinkPreview.firstURL(in: message.body) {
+        if let url = MessageRendering.firstURL(in: message.body) {
             LinkPreviewCard(url: url, previews: chats.linkPreviews, conversationID: thread.conversationID)
         }
         if !message.attachments.isEmpty {
@@ -4209,7 +4216,7 @@ struct ThreadAvatar: View {
     var body: some View {
         switch thread {
         case .bot(let bot):
-            AgentAvatar(draft: bot.draft, size: size, phase: chats.phase(of: bot))
+            AgentAvatar(face: BotFace(bot), size: size, phase: chats.phase(of: bot))
         case .group(let group):
             let active = chats.activeMembers(of: group)
             GroupAvatar(faces: (active.isEmpty ? chats.members(of: group) : active).map(BotFace.init), size: size)

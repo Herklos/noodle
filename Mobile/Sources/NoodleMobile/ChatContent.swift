@@ -482,13 +482,68 @@ struct WebPreview: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
+/// What drawing a message works out from its text, kept by that text. A bubble is drawn again whenever its
+/// conversation changes or it scrolls back into view, and parsing Markdown each time is what made scrolling stutter.
+@MainActor enum MessageRendering {
+    /// How many of each are kept; past that they are worked out afresh.
+    private static let limit = 2_000
+    private struct SegmentsKey: Hashable {
+        let body: String
+        let layout: MessageTextLayout
+    }
+    private struct TextKey: Hashable {
+        let text: String
+        let onTint: Bool
+        let foreground: Color
+    }
+    private static var segments: [SegmentsKey: [MessageSegment]] = [:]
+    private static var links: [String: URL?] = [:]
+    private static var texts: [TextKey: AttributedString] = [:]
+    private static var previews: [String: String] = [:]
+    /// How many times a text was worked out rather than found.
+    private(set) static var parses = 0
+
+    /// The message's bubbles, as `MessageSegment.split` cuts them.
+    static func segments(_ body: String, layout: MessageTextLayout) -> [MessageSegment] {
+        kept(in: &segments, for: SegmentsKey(body: body, layout: layout)) { MessageSegment.split(body, layout: layout) }
+    }
+
+    /// The link a message's preview card shows, as `LinkPreview.firstURL` finds it.
+    static func firstURL(in body: String) -> URL? {
+        kept(in: &links, for: body) { LinkPreview.firstURL(in: body) }
+    }
+
+    /// A bubble's text, as `MessageText.markdown` styles it.
+    static func markdown(_ text: String, onTint: Bool, foreground: Color) -> AttributedString {
+        kept(in: &texts, for: TextKey(text: text, onTint: onTint, foreground: foreground)) {
+            MessageText.markdown(text, onTint: onTint, foreground: foreground)
+        }
+    }
+
+    /// A one-line preview, as `MessageSegment.previewText` gives it.
+    static func previewText(_ body: String) -> String {
+        kept(in: &previews, for: body) { MessageSegment.previewText(body) }
+    }
+
+    private static func kept<Key: Hashable, Value>(in cache: inout [Key: Value], for key: Key, _ make: () -> Value) -> Value {
+        if let value = cache[key] { return value }
+        parses += 1
+        let value = make()
+        if cache.count >= limit { cache.removeAll(keepingCapacity: true) }
+        cache[key] = value
+        return value
+    }
+}
+
 /// The preview card for the first public web link in a message, as on the Mac.
 enum LinkPreview {
+    /// Made once: making one compiles its patterns. Matching with it is safe from any thread.
+    nonisolated(unsafe) private static let links = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
     static func firstURL(in text: String) -> URL? {
         let markdown = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))?
             .runs.compactMap(\.link) ?? []
-        let detected = (try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue))?
-            .matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url) ?? []
+        let detected = links?.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url) ?? []
         return (markdown + detected).first(where: isPublicWeb)
     }
 
