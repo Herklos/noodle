@@ -57,7 +57,8 @@ struct ConversationAvatar: View {
 
     private func member(_ agent: AgentRecord, in frame: CGRect) -> some View {
         BotAvatar(agent: agent, size: frame.width, showsShadow: false)
-            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+            // Thinner on a small picture, where a fixed border would cover much of each face.
+            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: max(1, size * 0.04)))
             .offset(x: frame.minX, y: frame.minY)
     }
 
@@ -69,6 +70,14 @@ struct ConversationAvatar: View {
             let side = snap(size * 0.86)
             let origin = snap((size - side) / 2 - size * 0.06)
             return [CGRect(x: origin, y: origin, width: side, height: side)]
+        }
+        if count == 2 {
+            // Diagonally across the middle, as large as the circle holds them.
+            let side = snap(size * 0.6)
+            let centre = (size - side) / 2
+            return [CGPoint(x: -0.14, y: -0.14), CGPoint(x: 0.14, y: 0.14)].map {
+                CGRect(x: snap(centre + size * $0.x), y: snap(centre + size * $0.y), width: side, height: side)
+            }
         }
         let side = snap(size * 0.62)
         let centre = (size - side) / 2
@@ -126,11 +135,15 @@ private struct WorkingRing: View {
 
 extension View {
     /// A ready bot's picture is shown as it is; a working one is circled, and an idle one, stopped or starting, greyed out.
-    func runtimeLook(_ status: ConversationRuntimeStatus, ringWidth: CGFloat = 2) -> some View {
-        grayscale(status == .idle ? 1 : 0)
+    /// The ring scales with the picture's `size`, sitting just outside its edge.
+    func runtimeLook(_ status: ConversationRuntimeStatus, size: CGFloat) -> some View {
+        let ringWidth = max(1, size * 0.045)
+        return grayscale(status == .idle ? 1 : 0)
             .opacity(status == .idle ? 0.5 : 1)
             .overlay {
-                if status == .working { WorkingRing(lineWidth: ringWidth).padding(-ringWidth * 1.5) }
+                if status == .working {
+                    WorkingRing(lineWidth: ringWidth).padding(-(ringWidth / 2 + max(1, size * 0.04)))
+                }
             }
     }
 }
@@ -246,7 +259,7 @@ struct ConversationStatusAvatar: View {
         ZStack(alignment: .bottomTrailing) {
             ConversationAvatar(participants: store.shownParticipants(for: conversation),
                 isGroup: conversation.kind == .group, size: size)
-                .runtimeLook(status)
+                .runtimeLook(status, size: size)
             // Opaque, or the cut leaves a ghost of the picture behind.
             if status.hasMark {
                 Circle().fill(.black)

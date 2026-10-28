@@ -249,7 +249,7 @@ private struct ConversationRow: View, Equatable {
                     isGroup: isGroup,
                     size: 42
                 )
-                .runtimeLook(content.runtimeStatus, ringWidth: 2.5)
+                .runtimeLook(content.runtimeStatus, size: 42)
                 if content.runtimeStatus.hasMark {
                     RuntimeStatusMark(status: content.runtimeStatus, size: 10)
                         .padding(2)

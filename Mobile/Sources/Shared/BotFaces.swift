@@ -119,27 +119,32 @@ struct GroupAvatar: View {
                 Circle().fill(.quaternary).frame(width: size * 0.88, height: size * 0.88)
                     .offset(x: size * 0.06, y: size * 0.06)
                 AgentAvatar(face: face, size: size * 0.86)
-                    .overlay { Circle().stroke(Color(.systemBackground), lineWidth: 2) }
+                    .overlay { Circle().stroke(Color(.systemBackground), lineWidth: max(1, size * 0.04)) }
                     .offset(x: -size * 0.06, y: -size * 0.06)
             }
             .frame(width: size, height: size)
         } else {
+            let shown = Array(faces.prefix(3))
             ZStack {
                 Circle().fill(.quaternary)
-                ForEach(Array(faces.prefix(3).enumerated()), id: \.offset) { index, face in
-                    AgentAvatar(face: face, size: size * 0.62)
-                        .overlay { Circle().stroke(Color(.systemBackground), lineWidth: 2) }
-                        .offset(Self.offset(index, size: size))
+                ForEach(Array(shown.enumerated()), id: \.offset) { index, face in
+                    AgentAvatar(face: face, size: size * (shown.count == 2 ? 0.6 : 0.62))
+                        // Thinner on a small picture, where a fixed border would cover much of each face.
+                        .overlay { Circle().stroke(Color(.systemBackground), lineWidth: max(1, size * 0.04)) }
+                        .offset(Self.offset(index, of: shown.count, size: size))
                 }
             }
             .frame(width: size, height: size)
         }
     }
 
-    private static func offset(_ index: Int, size: CGFloat) -> CGSize {
-        switch index {
-        case 0: CGSize(width: -size * 0.18, height: -size * 0.14)
-        case 1: CGSize(width: size * 0.18, height: -size * 0.14)
+    private static func offset(_ index: Int, of count: Int, size: CGFloat) -> CGSize {
+        // Two sit diagonally across the middle, as large as the circle holds them, as on the Mac.
+        switch (count, index) {
+        case (2, 0): CGSize(width: -size * 0.14, height: -size * 0.14)
+        case (2, _): CGSize(width: size * 0.14, height: size * 0.14)
+        case (_, 0): CGSize(width: -size * 0.18, height: -size * 0.14)
+        case (_, 1): CGSize(width: size * 0.18, height: -size * 0.14)
         default: CGSize(width: 0, height: size * 0.19)
         }
     }
