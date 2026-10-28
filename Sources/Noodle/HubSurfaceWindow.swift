@@ -170,6 +170,9 @@ struct HubSurfaceWindow: View {
                 case .failed(let reason)?: failure = reason; showing = false
                 case .controls(let gamepad)?: controls = gamepad
                 case .notice(let next)?: notice = next
+                case .fileAsk(let ask)?:
+                    let chosen = await ViewerFilePanel.choose(ask)
+                    channel.send(SurfaceControl.files(id: ask.id, names: chosen.names, bodies: chosen.bodies).encoded)
                 default: break
                 }
             }
@@ -385,5 +388,37 @@ private struct ControllerInput: NSViewRepresentable {
             guard let controls, let window else { return gamepad.detach() }
             gamepad.attach(controls, in: window) { [weak self] in self?.onKey($0) }
         }
+    }
+}
+
+
+/// The system open panel on the Mac where the person is watching, not on the Mac running Browser.
+private enum ViewerFilePanel {
+    static func choose(_ ask: SurfaceFileAsk) async -> (names: [String], bodies: [Data]) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = ask.directories
+        panel.allowsMultipleSelection = ask.multiple
+        let response: NSApplication.ModalResponse = await withCheckedContinuation { continuation in
+            panel.begin { continuation.resume(returning: $0) }
+        }
+        guard response == .OK else { return ([], []) }
+        return ViewerFileRead.bodies(ask.multiple ? panel.urls : Array(panel.urls.prefix(1)))
+    }
+}
+
+enum ViewerFileRead {
+    static func bodies(_ urls: [URL]) -> (names: [String], bodies: [Data]) {
+        var names: [String] = []
+        var bodies: [Data] = []
+        for url in urls {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if data.count > SurfaceFileAsk.byteLimit { return ([SurfaceFileAsk.tooLarge], [Data()]) }
+            names.append(url.lastPathComponent)
+            bodies.append(data)
+        }
+        return (names, bodies)
     }
 }

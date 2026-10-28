@@ -889,3 +889,15 @@ private final class FakeLink: @unchecked Sendable {
     var backlog = 0
     var forwarded: [SurfacePacket] = []
 }
+
+
+final class SurfaceFileAskTests: XCTestCase {
+    func testAFileAskRoundTripsAndIsNotAStatus() {
+        let ask = SurfaceFileAsk(id: UUID(uuidString: "00000000-0000-0000-0000-000000000166")!, multiple: true, directories: false)
+        XCTAssertEqual(SurfaceFileAsk(ask.encoded), ask)
+        XCTAssertNil(SurfaceStatus(ask.encoded))
+        let files = SurfaceControl.files(id: ask.id, names: ["a.txt"], bodies: [Data("hi".utf8)])
+        XCTAssertEqual(SurfaceControl(files.encoded), files)
+        XCTAssertNil(SurfaceFileAsk(files.encoded))
+    }
+}

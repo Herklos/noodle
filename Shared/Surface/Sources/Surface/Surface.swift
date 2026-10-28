@@ -26,10 +26,43 @@ public enum SurfaceControl: Codable, Equatable, Sendable {
     case shown(sequence: UInt64)
     /// Frames were skipped, but the viewer can still decode on from those it has shown.
     case recover
+    /// Files a person watching chose for a page that asked. Empty names means they cancelled.
+    case files(id: UUID, names: [String], bodies: [Data])
 
     public init?(_ data: Data) {
         guard let control = try? JSONDecoder().decode(Self.self, from: data) else { return nil }
         self = control
+    }
+
+    public var encoded: Data { (try? JSONEncoder().encode(self)) ?? Data() }
+}
+
+/// A page asked the person watching to choose a file. The picker is on their Mac or iPhone,
+/// never on the Mac that is running the browser.
+public struct SurfaceFileAsk: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var multiple: Bool
+    public var directories: Bool
+    /// The Hub's default largest file. A bigger body is refused.
+    public static let byteLimit = 100_000_000
+    /// Sent in place of a name when every chosen file was over `byteLimit`.
+    public static let tooLarge = "\u{0}"
+
+    public init(id: UUID, multiple: Bool, directories: Bool) {
+        self.id = id
+        self.multiple = multiple
+        self.directories = directories
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "surfaceFileAsk"
+        case multiple = "surfaceFileMultiple"
+        case directories = "surfaceFileDirectories"
+    }
+
+    public init?(_ data: Data) {
+        guard data.first == UInt8(ascii: "{"), let ask = try? JSONDecoder().decode(Self.self, from: data) else { return nil }
+        self = ask
     }
 
     public var encoded: Data { (try? JSONEncoder().encode(self)) ?? Data() }

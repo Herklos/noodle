@@ -40,6 +40,8 @@ import Foundation
     /// The picture had stayed the same long enough that the encoder sent nothing for it.
     private var settled = false
     private var lastCapture: ContinuousClock.Instant?
+    /// Someone watching is choosing files. The first reply wins; a later one is ignored.
+    private var fileWaits: [UUID: CheckedContinuation<(names: [String], bodies: [Data])?, Never>] = [:]
     /// What capture times count from.
     private let began = ContinuousClock.now
     /// Full pace until then, as after a viewer arrives or acts: what they did takes a few frames to show.
@@ -59,6 +61,25 @@ import Foundation
 
     /// Someone is watching, which keeps bots off the surface until they leave.
     public var isWatched: Bool { !viewers.isEmpty }
+
+    /// Asks whoever is watching to choose files, and waits until they do, they cancel, or they leave.
+    public func requestFiles(multiple: Bool, directories: Bool) async -> (names: [String], bodies: [Data])? {
+        guard isWatched else { return nil }
+        let id = UUID()
+        let ask = SurfaceFileAsk(id: id, multiple: multiple, directories: directories).encoded
+        return await withCheckedContinuation { continuation in
+            fileWaits[id] = continuation
+            viewers.values.forEach { $0.socket.send(ask) }
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(120))
+                self?.finishFiles(id, with: nil)
+            }
+        }
+    }
+
+    private func finishFiles(_ id: UUID, with files: (names: [String], bodies: [Data])?) {
+        fileWaits.removeValue(forKey: id)?.resume(returning: files)
+    }
 
     /// Why the surface shows nothing new, which viewers are told as they arrive and as it changes.
     public var notice: SurfaceNotice? {
@@ -103,7 +124,11 @@ import Foundation
     private func leave(_ id: ObjectIdentifier) {
         guard viewers.removeValue(forKey: id) != nil else { return }
         encoder.setBitRate(rate)
-        if viewers.isEmpty { watchingChanged?(false) }
+        if viewers.isEmpty {
+            watchingChanged?(false)
+            let pending = Array(fileWaits.keys)
+            pending.forEach { finishFiles($0, with: nil) }
+        }
     }
 
     private func handle(_ control: SurfaceControl, from id: ObjectIdentifier) async {
@@ -128,6 +153,9 @@ import Foundation
             viewers[id]?.waiting = true
             if viewers[id]?.shown != nil { wantsRecovery = true } else { wantsKeyFrame = true }
             wake()
+        case .files(let fileID, let names, let bodies):
+            guard names.count == bodies.count else { finishFiles(fileID, with: nil); return }
+            finishFiles(fileID, with: (names, bodies))
         }
     }
 
