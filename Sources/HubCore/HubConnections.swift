@@ -120,23 +120,32 @@ import NoodleMCP
     }
 
     public func connections(for user: HubUser) -> [MCPConnectionRecord] {
-        registry.connections.filter { access.owner(ofConnection: $0.id) == user.id }
+        registry.all.filter { access.owner(ofConnection: $0.id) == user.id }
     }
 
     /// Saves a new connection, or changes one of the user's own. It is not assigned to any bot.
     @discardableResult public func add(_ record: MCPConnectionRecord, for user: HubUser) throws -> MCPConnectionRecord {
         var next = registry
-        if let index = next.connections.firstIndex(where: { $0.id == record.id }) {
+        if record.place == .loopback {
+            next.connections.removeAll { $0.id == record.id }
+            if let index = next.loopback.firstIndex(where: { $0.id == record.id }) {
+                _ = try owned(record.id, by: user)
+                next.loopback[index] = record
+            } else {
+                next.loopback.append(record)
+            }
+        } else if let index = next.connections.firstIndex(where: { $0.id == record.id }) {
             _ = try owned(record.id, by: user)
             next.connections[index] = record
         } else {
+            next.loopback.removeAll { $0.id == record.id }
             next.connections.append(record)
         }
         try next.save(root: root)
         registry = next
         access.setOwner(user, ofConnection: record.id)
         synchronize()
-        return registry.connections.first { $0.id == record.id }!
+        return registry.record(record.id)!
     }
 
     /// Reads the connections and grants again, after Noodle changed them in the same files on its owner's Mac.
@@ -146,7 +155,7 @@ import NoodleMCP
         registry = saved
         Task { [weak self, service] in
             var signedIn: Set<UUID> = []
-            for connection in saved.connections where await service.hasCredentials(connection.id) { signedIn.insert(connection.id) }
+            for connection in saved.all where await service.hasCredentials(connection.id) { signedIn.insert(connection.id) }
             self?.signedIn = signedIn
         }
     }
