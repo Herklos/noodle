@@ -138,6 +138,29 @@ private actor FakeHub {
                                 createdAt: Date(timeIntervalSince1970: 10), delivered: true)]
     }
 
+    /// The conversations of the pages asked for since `slowPages`, in order, and how many were asked for at once at most.
+    var pageOrder: [UUID] = []
+    var pagesInFlight = 0
+    var mostPagesInFlight = 0
+    /// How long each page takes, as over a slow link.
+    var pageDelay: Duration = .zero
+
+    func slowPages(_ delay: Duration) {
+        pageDelay = delay
+        pageOrder = []
+        mostPagesInFlight = 0
+    }
+
+    func answer(_ data: Data) async -> LinkResponse {
+        guard pageDelay > .zero, case .success(.messagePage(let page)) = LinkProtocol.decode(data) else { return reply(to: data) }
+        pageOrder.append(page.conversationID)
+        pagesInFlight += 1
+        mostPagesInFlight = max(mostPagesInFlight, pagesInFlight)
+        try? await Task.sleep(for: pageDelay)
+        pagesInFlight -= 1
+        return reply(to: data)
+    }
+
     func reply(to data: Data) -> LinkResponse {
         switch LinkProtocol.decode(data) {
         case .success(.enroll):
@@ -393,7 +416,7 @@ private actor RecordedSubscriptions: PushSubscriptions {
         let identity = LinkIdentity()
         let server = try LinkServer(identity: identity, port: 0, admits: admits) { _, data in
             if case .success(.subscribe) = LinkProtocol.decode(data) { return .stream { stream in Task { await hub.follow(stream) } } }
-            return .response(LinkProtocol.encode(await hub.reply(to: data)))
+            return .response(LinkProtocol.encode(await hub.answer(data)))
         }
         try await server.start()
         let endpoint = LinkEndpoint(host: "127.0.0.1", port: try #require(server.port))
@@ -1844,6 +1867,31 @@ private actor RecordedSubscriptions: PushSubscriptions {
         #expect(try await redraws { _ = chats.messages(of: crew) } after: {
             try await chats.apply(.conversationChanged(conversationID: crew.id, count: 2))
         })
+    }
+
+    /// Everything syncs again as the app comes back: the conversation on screen first, then the rest a few at a time
+    /// rather than one after another.
+    @Test func aSyncLoadsTheConversationOnScreenFirstAndTheRestTogether() async throws {
+        let hub = FakeHub()
+        var crews: [LinkGroup] = []
+        for index in 0..<8 { crews.append(await hub.addGroup(named: "Crew \(index)", saying: "Morning")) }
+        let scout = await hub.bot
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        for crew in crews { await hub.botSays("Report", in: crew.id) }
+
+        chats.shownConversation = crews[5].id
+        await hub.slowPages(.milliseconds(100))
+        try await chats.reload()
+
+        let order = await hub.pageOrder
+        #expect(order.first == crews[5].id)
+        #expect(Set(order) == Set(crews.map(\.id) + [scout.conversationID]))
+        #expect(await hub.mostPagesInFlight > 1)
+        #expect(await hub.mostPagesInFlight <= HubChats.loadingWidth)
+        for crew in crews { #expect(chats.messages(of: crew).map(\.body) == ["Morning", "Report"]) }
+        #expect(chats.error == nil)
     }
 
     /// An admin's Users screen follows the Hub's users, as the Hub pushes that they changed.

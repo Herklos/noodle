@@ -153,6 +153,8 @@ enum HubThread: HubConversation, Equatable {
     @ObservationIgnored private let networkChanges: @Sendable () -> AsyncStream<Void>
     @ObservationIgnored private let pause: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let backoff: HubBackoff
+    /// The conversation on screen, which loads first when everything syncs.
+    @ObservationIgnored var shownConversation: UUID?
     /// Wakes `follow` to connect at once. Only a wait under way hears it.
     @ObservationIgnored private let wakes = Wakes()
 
@@ -1056,12 +1058,10 @@ enum HubThread: HubConversation, Equatable {
     func reload() async throws {
         guard case .bots(let bots) = try await pairing.request(.bots) else { throw LinkError("The Hub sent an unexpected answer.") }
         setAgents(pairing.keptPictures(bots))
-        var failure: Error?
-        for bot in bots {
-            do { try await load(bot.conversationID) } catch { failure = failure ?? error }
-        }
         // A Hub from before groups does not know the request; it has none to show.
-        if let failed = try? await loadGroups() { failure = failure ?? failed }
+        let listed = (try? await listGroups()) ?? []
+        let failure = await loadConversations(bots.map(\.conversationID) + listed.map(\.id))
+        for group in listed { if let upTo = group.readUpTo { noteRead(group.id, upTo: upTo) } }
         try Task.checkCancellation()
         forgetGone()
         if seen == nil {
@@ -1092,14 +1092,16 @@ enum HubThread: HubConversation, Equatable {
 
     /// Throws if the groups cannot be listed; returns why the first conversation that did not load failed.
     private func loadGroups() async throws -> Error? {
+        let listed = try await listGroups()
+        let failure = await loadConversations(listed.map(\.id))
+        for group in listed { if let upTo = group.readUpTo { noteRead(group.id, upTo: upTo) } }
+        return failure
+    }
+
+    private func listGroups() async throws -> [LinkGroup] {
         guard case .groups(let listed) = try await pairing.request(.groups) else { throw LinkError("The Hub sent an unexpected answer.") }
         if groups != listed { groups = listed }
-        var failure: Error?
-        for group in listed {
-            do { try await load(group.id) } catch { failure = failure ?? error }
-            if let upTo = group.readUpTo { noteRead(group.id, upTo: upTo) }
-        }
-        return failure
+        return listed
     }
 
     /// Conversations of bots and groups that are gone.
@@ -1421,28 +1423,110 @@ enum HubThread: HubConversation, Equatable {
     /// The first time, the newest page only; after that, what is new, a page at a time. A message
     /// the bot has not taken yet is read again until it shows as delivered.
     private func load(_ conversationID: UUID) async throws {
-        guard var at = read[conversationID] else {
+        let fetched = try await fetch(conversationID)
+        apply(fetched)
+        if let failure = fetched.failure { throw failure }
+    }
+
+    /// The pages `fetch` brought of a conversation, for `apply` to show in one go.
+    private struct Fetched: Sendable {
+        let conversationID: UUID
+        /// Where the pages start; nil for the newest page of a conversation not loaded before.
+        let after: Int?
+        var pages: [LinkMessages]
+        /// Why the pages stop short, when a later one did not come.
+        var failure: (any Error)?
+    }
+
+    private static func isPending(_ message: LinkMessage) -> Bool { message.author == .you && !message.delivered }
+
+    private func fetch(_ conversationID: UUID) async throws -> Fetched {
+        guard let after = read[conversationID] else {
             let page = try await self.page(LinkMessagePage(conversationID: conversationID, limit: Self.pageSize))
+            return Fetched(conversationID: conversationID, after: nil, pages: [page])
+        }
+        var fetched = Fetched(conversationID: conversationID, after: after, pages: [])
+        var at = after
+        while true {
+            let page: LinkMessages
+            do {
+                page = try await self.page(LinkMessagePage(conversationID: conversationID, after: at, limit: 2 * Self.pageSize))
+            } catch {
+                // What came is kept; the rest loads next time.
+                if fetched.pages.isEmpty { throw error }
+                fetched.failure = error
+                return fetched
+            }
+            fetched.pages.append(page)
+            at += page.messages.count
+            if page.messages.contains(where: Self.isPending) || page.messages.isEmpty || at >= page.count { return fetched }
+        }
+    }
+
+    private func apply(_ fetched: Fetched) {
+        let conversationID = fetched.conversationID
+        guard var at = fetched.after else {
+            guard let page = fetched.pages.first else { return }
             settle(page.messages)
             merge(page.messages, into: conversationID)
             let first = page.start ?? 0
             setStart(first, of: conversationID)
-            let pending = page.messages.firstIndex { $0.author == .you && !$0.delivered }
+            let pending = page.messages.firstIndex(where: Self.isPending)
             read[conversationID] = pending.map { first + $0 } ?? page.count
             return
         }
-        while true {
-            let page = try await self.page(LinkMessagePage(conversationID: conversationID, after: at, limit: 2 * Self.pageSize))
+        for page in fetched.pages {
             settle(page.messages)
             merge(page.messages, into: conversationID)
-            if let pending = page.messages.firstIndex(where: { $0.author == .you && !$0.delivered }) {
+            if let pending = page.messages.firstIndex(where: Self.isPending) {
                 read[conversationID] = at + pending
                 return
             }
             at += page.messages.count
             read[conversationID] = at
-            if page.messages.isEmpty || at >= page.count { return }
         }
+    }
+
+    /// How many conversations load at once when everything syncs: enough to hide the Hub's round trips, few enough
+    /// not to crowd a slow link.
+    static let loadingWidth = 4
+
+    /// Loads what is new in each conversation: the one on screen first, then the rest a few at a time, shown together
+    /// once they are all in, so the list is drawn again once rather than once for each. Why the first that did not
+    /// load failed; the others still load.
+    private func loadConversations(_ ids: [UUID]) async -> Error? {
+        var failure: Error?
+        var rest = ids[...]
+        if let shown = shownConversation, let index = rest.firstIndex(of: shown) {
+            rest.remove(at: index)
+            do { try await load(shown) } catch { failure = error }
+        }
+        let results = await withTaskGroup(of: Result<Fetched, any Error>.self) { group in
+            var results: [Result<Fetched, any Error>] = []
+            for _ in 0..<Self.loadingWidth {
+                guard let id = rest.popFirst() else { break }
+                group.addTask { await self.fetchResult(id) }
+            }
+            while let result = await group.next() {
+                results.append(result)
+                if let id = rest.popFirst() { group.addTask { await self.fetchResult(id) } }
+            }
+            return results
+        }
+        for result in results {
+            switch result {
+            case .success(let fetched):
+                apply(fetched)
+                if let failed = fetched.failure { failure = failure ?? failed }
+            case .failure(let error):
+                failure = failure ?? error
+            }
+        }
+        return failure
+    }
+
+    private func fetchResult(_ conversationID: UUID) async -> Result<Fetched, any Error> {
+        do { return .success(try await fetch(conversationID)) } catch { return .failure(error) }
     }
 
     /// Whether earlier messages wait on the Hub, to load as the person scrolls back.
@@ -2815,9 +2899,11 @@ struct ChatView: View {
         // Open means read, including replies that arrive while it is open.
         .onAppear {
             chats.markRead(thread)
+            chats.shownConversation = thread.conversationID
             draft = chats.draft(for: thread)
             files = chats.pendingFiles(for: thread)
         }
+        .onDisappear { if chats.shownConversation == thread.conversationID { chats.shownConversation = nil } }
         .onChange(of: draft) { chats.setDraft(draft, for: thread) }
         .onChange(of: files) { chats.setPendingFiles(files, for: thread) }
         .onChange(of: messages.last?.id) { chats.markRead(thread) }
