@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- In View › As Columns, Noodle no longer quits when columns close while others further along are on screen, for example on switching to a space with fewer of them.
+
 ## [0.78.2] - 2026-10-28
 
 ### Changed

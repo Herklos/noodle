@@ -130,13 +130,21 @@ struct ConversationColumns: View {
     }
 
     private func updateLoaded(count: Int) {
-        let near = Set(max(0, visible.lowerBound - Self.loadedMargin)..<min(count, visible.upperBound + Self.loadedMargin))
-        var next = loaded.filter { $0 < count }.union(near)
-        if next.count > Self.maxLoaded {
-            let center = Double(visible.lowerBound + visible.upperBound) / 2
-            next = Set(next.sorted { abs(Double($0) - center) < abs(Double($1) - center) }.prefix(Self.maxLoaded))
-        }
+        let next = Self.loadedColumns(loaded, visible: visible, count: count)
         if next != loaded { loaded = next }
+    }
+
+    /// The columns to keep loaded, by index, when `visible` are on screen out of `count`.
+    static func loadedColumns(_ loaded: Set<Int>, visible: Range<Int>, count: Int) -> Set<Int> {
+        // `visible` can still describe columns that were just closed, past the end of the ones left.
+        let start = min(max(0, visible.lowerBound - loadedMargin), count)
+        let near = Set(start..<max(start, min(count, visible.upperBound + loadedMargin)))
+        var next = loaded.filter { $0 < count }.union(near)
+        if next.count > maxLoaded {
+            let center = Double(visible.lowerBound + visible.upperBound) / 2
+            next = Set(next.sorted { abs(Double($0) - center) < abs(Double($1) - center) }.prefix(maxLoaded))
+        }
+        return next
     }
 
 
