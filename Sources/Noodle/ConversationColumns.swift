@@ -58,6 +58,20 @@ enum MainWindowLayout: String {
         openBySpace[space ?? ""] = ids
     }
 
+    /// Switching to a space closes the columns it does not hold, and returns the conversation to select there.
+    func enter(_ space: String?, selected: UUID?, holds: (UUID) -> Bool) -> UUID? {
+        let ids = open(in: space).filter(holds)
+        if ids != open(in: space) { openBySpace[space ?? ""] = ids }
+        if let focused = ids.first { return focused }
+        // A space with no columns starts with the selected conversation, if it holds it, or with none.
+        guard let selected, holds(selected) else {
+            focusedID = nil
+            return nil
+        }
+        show(selected, in: space)
+        return selected
+    }
+
     func step(_ offset: Int, in space: String?) -> UUID? {
         let ids = open(in: space)
         guard !ids.isEmpty else { return nil }
@@ -88,15 +102,13 @@ struct ConversationColumns: View {
             if NSApp.currentEventIsClick { model.focusComposer(of: id) }
         }
         .onChange(of: store.space) { _, space in
-            // A space never used in Columns starts with its selected conversation.
-            if let focused = model.open(in: space).first { store.selectedConversationID = focused }
-            else if let id = store.selectedConversationID { model.show(id, in: space) }
+            store.selectedConversationID = model.enter(space, selected: store.selectedConversationID, holds: store.spaceHolds)
         }
         .onChange(of: ids, initial: true) { updateLoaded(count: ids.count) }
         .overlay {
             if ids.isEmpty {
                 ContentUnavailableView("No Columns", systemImage: "rectangle.split.3x1",
-                    description: Text("Choose a conversation in the sidebar to open it as a column."))
+                    description: Text("Choose a conversation to open it as a column."))
             }
         }
         // Stand-ins for the menu shortcuts the PRD asks for.

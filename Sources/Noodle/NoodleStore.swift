@@ -634,6 +634,11 @@ final class NoodleStore {
         return spaceMirror.map { Set($0.localConversationIDs) }
     }
 
+    /// Whether the shown space holds the conversation; All holds every one.
+    func spaceHolds(_ conversationID: UUID) -> Bool {
+        shownSpaceConversationIDs?.contains(conversationID) != false
+    }
+
     var filteredConversations: [BotConversation] {
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let space = shownSpaceConversationIDs

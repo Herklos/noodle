@@ -220,6 +220,43 @@ final class HubHarnessChoiceTests: XCTestCase {
         XCTAssertEqual(Set(store.filteredConversations.map(\.id)), [f.directA.id, f.directB.id])
     }
 
+    func testColumnsOnlyShowWhatTheSpaceHolds() throws {
+        let f = try StoreFixture()
+        defer { f.cleanUp() }
+        UserDefaults.standard.removeObject(forKey: NoodleStore.spaceKey)
+        addTeardownBlock { UserDefaults.standard.removeObject(forKey: NoodleStore.spaceKey) }
+        let store = NoodleStore(repository: f.repository, runtime: f.runtime.runtime, connectsServices: false)
+        let columns = ColumnsModel()
+        let work = try XCTUnwrap(store.addSpace(named: "Work"))
+        store.setMember(true, of: work.id, conversationID: f.directB.id)
+        let home = try XCTUnwrap(store.addSpace(named: "Home"))
+        store.setMember(true, of: home.id, conversationID: f.directA.id)
+        addTeardownBlock { @MainActor in
+            for space in [work.id.uuidString, home.id.uuidString] {
+                for id in columns.open(in: space) { _ = columns.close(id, in: space) }
+            }
+        }
+
+        // A column opened in Home is not carried into Work, which does not hold it.
+        columns.show(f.directA.id, in: store.space)
+        store.showSpace(custom: work.id)
+        XCTAssertNil(columns.enter(store.space, selected: f.directA.id, holds: store.spaceHolds))
+        XCTAssertEqual(columns.open(in: store.space), [])
+
+        // One the space holds starts it.
+        store.setMember(true, of: work.id, conversationID: f.directA.id)
+        XCTAssertEqual(columns.enter(store.space, selected: f.directA.id, holds: store.spaceHolds), f.directA.id)
+        XCTAssertEqual(columns.open(in: store.space), [f.directA.id])
+
+        // A column whose conversation has left the space closes.
+        columns.show(f.directB.id, in: store.space)
+        store.showSpace(custom: home.id)
+        store.setMember(false, of: work.id, conversationID: f.directA.id)
+        store.showSpace(custom: work.id)
+        XCTAssertEqual(columns.enter(store.space, selected: f.directA.id, holds: store.spaceHolds), f.directB.id)
+        XCTAssertEqual(columns.open(in: store.space), [f.directB.id])
+    }
+
     /// Once this Mac has served its owner's devices, they name its bots by its key, so spaces here do too.
     func testThisMacsBotsAreNamedAsItsDevicesNameThem() throws {
         let f = try StoreFixture()

@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- In View › As Columns, switching spaces no longer carries over a column for a conversation the new space doesn't hold. A space with none of its conversations open shows no columns, and its empty state now fits on one line.
+
 ## [0.78.1] - 2026-10-28
 
 ### Added
