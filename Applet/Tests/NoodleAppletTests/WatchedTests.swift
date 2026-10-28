@@ -55,6 +55,26 @@ final class WatchedTests: XCTestCase {
         XCTAssertEqual(runner.stirred, stirred, "a window nobody watches was still stirred")
     }
 
+    /// The unseen window is on screen, so Mission Control would lay it out as an empty frame
+    /// under the pointer, and ⌘` and the Window menu would offer it.
+    @MainActor func testAWatchedNoodletsWindowStaysOutOfMissionControl() async throws {
+        let (runner, root) = try makeRunner()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await runner.start()
+        defer { runner.stop() }
+        let behavior = runner.window.collectionBehavior
+        runner.watched = true
+        XCTAssertTrue(runner.window.collectionBehavior.contains([.transient, .ignoresCycle]), "Mission Control shows the unseen window")
+        XCTAssertTrue(runner.window.isExcludedFromWindowsMenu, "the Window menu offers the unseen window")
+        runner.watched = false
+        XCTAssertEqual(runner.window.collectionBehavior, behavior)
+        XCTAssertFalse(runner.window.isExcludedFromWindowsMenu)
+        runner.watched = true
+        runner.show()
+        XCTAssertEqual(runner.window.collectionBehavior, behavior, "a noodlet shown on the Mac is missing from Mission Control")
+        XCTAssertFalse(runner.window.isExcludedFromWindowsMenu)
+    }
+
     /// A window on the Mac's screen changes whenever the person uses it, so it is left alone.
     @MainActor func testANoodletShownOnTheMacIsNotStirred() async throws {
         let (runner, root) = try makeRunner()

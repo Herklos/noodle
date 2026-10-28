@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.33.5] - 2026-10-28
+
+### Fixed
+
+- A noodlet watched from another device or being recorded no longer shows up as an empty window in Mission Control, ⌘` or the Window menu.
+
 ## [0.33.4] - 2026-10-27
 
 ### Added

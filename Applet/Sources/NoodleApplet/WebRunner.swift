@@ -176,9 +176,15 @@ final class WebRunner: NSObject, NoodletPageHost, NSWindowDelegate {
     if seen, !window.isVisible { presentUnseen() }
     if !seen, window.alphaValue == 0 { window.orderOut(nil); restoreSeen() }
   }
+  /// How the window takes part in Mission Control and ⌘` while the Mac shows it.
+  private var seenBehavior: NSWindow.CollectionBehavior?
   private func presentUnseen() {
     window.alphaValue = 0
     window.ignoresMouseEvents = true
+    // On screen, the window would still be laid out by Mission Control and offered by ⌘` and the Window menu.
+    if seenBehavior == nil { seenBehavior = window.collectionBehavior }
+    window.collectionBehavior = [.transient, .ignoresCycle]
+    window.isExcludedFromWindowsMenu = true
     // A transparent window at the back counts as occluded, which WebKit reports to the page as
     // hidden, and games stop drawing; with detection off the page is visible while ordered in.
     setOcclusionDetection(false)
@@ -197,6 +203,9 @@ final class WebRunner: NSObject, NoodletPageHost, NSWindowDelegate {
     setAppNap(true)
     window.alphaValue = 1
     window.ignoresMouseEvents = false
+    if let seenBehavior { window.collectionBehavior = seenBehavior }
+    seenBehavior = nil
+    window.isExcludedFromWindowsMenu = false
     setOcclusionDetection(true)
   }
   /// How long the unseen window stays unchanged; macOS takes the app for idle after half a minute at the soonest.
