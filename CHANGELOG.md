@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.79.1] - 2026-10-28
+
 ### Changed
 
 - The toolbar button for editing a bot or group uses a plain pencil icon.

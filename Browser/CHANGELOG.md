@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-10-28
+
 ### Changed
 
 - The Edit Browser toolbar button uses a plain pencil icon.
