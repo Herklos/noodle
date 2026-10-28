@@ -8,6 +8,8 @@ All notable changes to Noodle are documented here, following
 
 ### Changed
 
+- Bots' pictures show their status with less noise. A ready bot has no dot; a working one is circled by a turning arc; a stopped or starting one is greyed out. A bot waiting for Kick keeps its red dot.
+
 - In View › As Columns, each column shows its own background, reaching up under the toolbar, and the window's background no longer changes with the focused column. The focused column's header is lighter and the others' darker, in place of the line under it.
 
 ### Fixed

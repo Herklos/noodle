@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "title": "Bots in every state",
+  "clock": "10:00",
+  "settings": { "Noodle.firstBotSetup.dismissed": true },
+  "harnesses": {
+    "claude-code": { "models": "builtin" }
+  },
+  "agents": [
+    { "key": "ada", "name": "Ada", "harness": "claude-code", "model": "opus",
+      "description": "Ready", "avatar": { "image": "face:feminine-04" } },
+    { "key": "ben", "name": "Ben", "harness": "claude-code", "model": "sonnet",
+      "description": "Working", "avatar": { "image": "face:masculine-02" },
+      "status": { "phase": "working", "detail": "Writing the release notes" } },
+    { "key": "cleo", "name": "Cleo", "harness": "claude-code", "model": "sonnet",
+      "description": "Stopped", "avatar": { "image": "face:feminine-07" },
+      "status": { "phase": "offline", "detail": "Stopped" } },
+    { "key": "dev", "name": "Dev", "harness": "claude-code", "model": "sonnet",
+      "description": "Starting", "avatar": { "image": "face:any-02" },
+      "status": { "phase": "starting" } },
+    { "key": "eli", "name": "Eli", "harness": "claude-code", "model": "sonnet",
+      "description": "Waiting for Kick", "avatar": { "image": "face:masculine-05" },
+      "status": { "phase": "failed", "failure": "usageLimit",
+        "detail": "Claude Code's usage limit has been reached. Once usage is available again, right-click the bot and choose Kick to resume." } }
+  ],
+  "conversations": [
+    { "key": "ada", "direct": "ada", "messages": [ { "at": "09:50", "from": "ada", "text": "Ready when you are." } ] },
+    { "key": "ben", "direct": "ben", "messages": [ { "at": "09:52", "from": "user", "text": "Write the release notes for 2.4." } ] },
+    { "key": "cleo", "direct": "cleo", "messages": [ { "at": "-1d 17:00", "from": "cleo", "text": "Signing off for the day." } ] },
+    { "key": "dev", "direct": "dev", "messages": [ { "at": "09:40", "from": "dev", "text": "Back in a moment." } ] },
+    { "key": "eli", "direct": "eli", "messages": [ { "at": "09:30", "from": "eli", "text": "I hit the usage limit halfway through." } ] },
+    { "key": "team", "group": { "name": "Team", "description": "Ada and Ben", "members": ["ada", "ben"] },
+      "messages": [ { "at": "09:55", "from": "ada", "text": "Ben is on the notes, I will review them." } ] }
+  ],
+  "present": {
+    "window": { "size": [1240, 820] },
+    "select": "ada"
+  },
+  "timeline": [
+    { "wait": 3.0, "agent": "ada", "status": { "phase": "working", "detail": "Reviewing the notes" } },
+    { "wait": 3.0, "agent": "dev", "status": { "phase": "ready" } },
+    { "wait": 3.0, "agent": "ben", "status": { "phase": "ready" } },
+    { "wait": 3.0, "agent": "ada", "status": { "phase": "ready" } }
+  ]
+}

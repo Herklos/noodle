@@ -94,13 +94,44 @@ enum ConversationRuntimeStatus: Equatable {
         else { self = .idle }
     }
 
-    var color: Color {
-        switch self {
-        case .working: .blue
-        case .failed: .red
-        case .ready: .green
-        case .idle: .gray
-        }
+    /// Only a bot waiting for Kick marks the picture with a dot; the other states change the picture itself.
+    var hasMark: Bool { self == .failed }
+}
+
+/// The red dot of a bot that waits for Kick.
+struct RuntimeStatusMark: View {
+    let status: ConversationRuntimeStatus
+    let size: CGFloat
+
+    var body: some View {
+        if status == .failed { Circle().fill(.red).frame(width: size, height: size) }
+    }
+}
+
+/// An arc that circles a working bot's picture.
+private struct WorkingRing: View {
+    let lineWidth: CGFloat
+    @State private var turning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.28)
+            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: turning)
+            .onAppear { turning = true }
+            .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// A ready bot's picture is shown as it is; a working one is circled, and an idle one, stopped or starting, greyed out.
+    func runtimeLook(_ status: ConversationRuntimeStatus, ringWidth: CGFloat = 2) -> some View {
+        grayscale(status == .idle ? 1 : 0)
+            .opacity(status == .idle ? 0.5 : 1)
+            .overlay {
+                if status == .working { WorkingRing(lineWidth: ringWidth).padding(-ringWidth * 1.5) }
+            }
     }
 }
 
@@ -211,18 +242,22 @@ struct ConversationStatusAvatar: View {
     var ringWidth: CGFloat = 2
 
     var body: some View {
+        let status = store.runtimeStatus(for: conversation)
         ZStack(alignment: .bottomTrailing) {
             ConversationAvatar(participants: store.shownParticipants(for: conversation),
                 isGroup: conversation.kind == .group, size: size)
+                .runtimeLook(status)
             // Opaque, or the cut leaves a ghost of the picture behind.
-            Circle().fill(.black)
-                .frame(width: dotSize + ringWidth * 2, height: dotSize + ringWidth * 2)
-                .offset(x: ringWidth, y: ringWidth)
-                .blendMode(.destinationOut)
+            if status.hasMark {
+                Circle().fill(.black)
+                    .frame(width: dotSize + ringWidth * 2, height: dotSize + ringWidth * 2)
+                    .offset(x: ringWidth, y: ringWidth)
+                    .blendMode(.destinationOut)
+            }
         }
         .compositingGroup()
         .overlay(alignment: .bottomTrailing) {
-            Circle().fill(store.runtimeStatus(for: conversation).color).frame(width: dotSize, height: dotSize)
+            RuntimeStatusMark(status: status, size: dotSize)
         }
         .help(store.runtimeHelp(for: conversation))
     }

@@ -209,7 +209,7 @@ private struct ConversationRowContent: Equatable {
     var timestamp: String
     var pause: String?
     var detail: String
-    var runtimeColor: Color
+    var runtimeStatus: ConversationRuntimeStatus
     var runtimeHelp: String
     var isUnread: Bool
     var isMuted: Bool
@@ -220,7 +220,7 @@ private struct ConversationRowContent: Equatable {
         timestamp = SidebarTimestamp.text(for: conversation.updatedAt)
         pause = store.pauseSummary(for: conversation)
         self.detail = store.sidebarDetail(for: conversation, showing: detail)
-        runtimeColor = store.runtimeStatus(for: conversation).color
+        runtimeStatus = store.runtimeStatus(for: conversation)
         runtimeHelp = store.runtimeHelp(for: conversation)
         isUnread = store.hasUnreadMessages(in: conversation)
         isMuted = store.isMuted(conversation.id)
@@ -248,10 +248,13 @@ private struct ConversationRow: View, Equatable {
                     isGroup: isGroup,
                     size: 42
                 )
-                Circle()
-                    .fill(runtimeColor)
-                    .frame(width: 10, height: 10)
-                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                .runtimeLook(content.runtimeStatus, ringWidth: 2.5)
+                if content.runtimeStatus.hasMark {
+                    RuntimeStatusMark(status: content.runtimeStatus, size: 10)
+                        .padding(2)
+                        .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                        .padding(-2)
+                }
             }
             .help(runtimeHelp)
 
@@ -315,7 +318,6 @@ private struct ConversationRow: View, Equatable {
     }
 
     private var timestamp: String { content.timestamp }
-    private var runtimeColor: Color { content.runtimeColor }
     private var runtimeHelp: String { content.runtimeHelp }
     private var pause: String? { content.pause }
     private var detail: String { content.detail }
