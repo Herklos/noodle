@@ -248,4 +248,24 @@ final class MCPConnectionTests: XCTestCase {
         XCTAssertEqual(loaded.loopback.first?.consentedOrigin, "http://127.0.0.1:8080")
     }
 
+    func testLoopbackLookalikesAreNotLoopback() {
+        let rejected = ["127.0.0.1.example.com", "127.1", "0.0.0.0", "::ffff:127.0.0.1", "[::ffff:127.0.0.1]"]
+        for host in rejected {
+            XCTAssertFalse(MCPConnectionRecord.isLoopbackName(host), host)
+            XCTAssertFalse(MCPConnectionRecord.isNumericLoopback(host), host)
+        }
+        for host in ["127.0.0.1", "127.255.255.255", "::1", "[::1]", "localhost"] {
+            XCTAssertTrue(MCPConnectionRecord.isLoopbackName(host), host)
+        }
+        let urls = [
+            "http://127.0.0.1.example.com/mcp", "http://127.1/mcp", "http://0.0.0.0/mcp",
+            "http://[::ffff:127.0.0.1]/mcp"
+        ]
+        for url in urls {
+            XCTAssertThrowsError(try MCPConnectionRecord.validatedLoopbackEndpoint(URL(string: url)!)) { error in
+                XCTAssertEqual(error.localizedDescription, "Local mode accepts loopback only.")
+            }
+        }
+    }
+
 }

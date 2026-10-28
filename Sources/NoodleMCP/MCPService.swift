@@ -227,7 +227,7 @@ public actor MCPService {
                 }
                 token = access
             } else if connection.authorization == .browser {
-                token = try await refreshedToken(connection, epoch: epoch, deadline: deadline)
+                throw MCPConnectionError.message("Browser sign-in is not available for a server on this Mac.")
             } else {
                 token = ""
             }

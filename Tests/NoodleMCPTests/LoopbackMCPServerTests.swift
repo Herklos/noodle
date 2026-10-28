@@ -13,7 +13,7 @@ import NoodleCore
 /// A redirect, including to another loopback port, is not followed.
 
 private final class LoopbackServer: @unchecked Sendable {
-    enum Mode { case json, sse, legacy, redirect(URL) }
+    enum Mode { case json, sse, message, legacy, redirect(URL) }
     let mode: Mode
     private let lock = NSLock()
     private var gets = 0
@@ -92,7 +92,7 @@ private final class LoopbackServer: @unchecked Sendable {
         case .redirect(let url):
             let response = "HTTP/1.1 302 Found\r\nLocation: \(url.absoluteString)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
-        case .json, .sse:
+        case .json, .sse, .message:
             guard let payload = Self.rpc(body) else {
                 let accepted = "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 connection.send(content: Data(accepted.utf8), completion: .contentProcessed { _ in connection.cancel() })
@@ -100,6 +100,10 @@ private final class LoopbackServer: @unchecked Sendable {
             }
             if case .sse = mode {
                 let framed = Data("data: \(String(decoding: payload, as: UTF8.self))\n\n".utf8)
+                send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(framed.count)\r\nConnection: close\r\n\r\n",
+                     body: framed, on: connection)
+            } else if case .message = mode {
+                let framed = Data("event: message\ndata: \(String(decoding: payload, as: UTF8.self))\n\n".utf8)
                 send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(framed.count)\r\nConnection: close\r\n\r\n",
                      body: framed, on: connection)
             } else {
@@ -179,6 +183,14 @@ final class LoopbackMCPServerTests: XCTestCase {
 
     func testPostEventStreamListsTools() async throws {
         let server = try LoopbackServer(.sse)
+        defer { server.stop() }
+        let text = try await tools(port: server.port)
+        XCTAssertTrue(text.contains("echo"))
+        XCTAssertEqual(server.counts().gets, 0)
+    }
+
+    func testStreamableEventMessageListsTools() async throws {
+        let server = try LoopbackServer(.message)
         defer { server.stop() }
         let text = try await tools(port: server.port)
         XCTAssertTrue(text.contains("echo"))

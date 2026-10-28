@@ -44,6 +44,15 @@ final class MCPGuardedHTTP: URLProtocol, URLSessionDataDelegate, @unchecked Send
     }
     override func stopLoading() { loadingTask?.cancel(); session?.invalidateAndCancel() }
 
+    /// The old separate-endpoint handshake. A Streamable HTTP body starts with `event: message`.
+    private static func legacyEndpointHandshake(_ prefix: String) -> Bool {
+        let line = prefix.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let field = line.trimmingCharacters(in: .whitespaces).lowercased()
+        guard field.hasPrefix("event:") else { return false }
+        let name = field.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
+        return name == "endpoint"
+    }
+
     private static func allowed(_ url: URL) -> Bool {
         (try? MCPConnectionRecord.validatedEndpoint(url)) != nil
             || (try? MCPConnectionRecord.validatedLoopbackEndpoint(url)) != nil
@@ -85,7 +94,7 @@ final class MCPGuardedHTTP: URLProtocol, URLSessionDataDelegate, @unchecked Send
         let type = response.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
         eventStream = type.contains("text/event-stream")
         // Hold the response until the first body bytes are checked. A legacy
-        // `event:` stream must fail before the client treats this as success.
+        // loopback `event: endpoint` handshake must fail before the client treats this as success.
         heldResponse = response
         completionHandler(.allow)
     }
@@ -97,8 +106,9 @@ final class MCPGuardedHTTP: URLProtocol, URLSessionDataDelegate, @unchecked Send
         }
         if eventStream, !sawBody {
             sawBody = true
-            let prefix = String(decoding: data.prefix(64), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            if prefix.hasPrefix("event:") {
+            let prefix = String(decoding: data.prefix(64), as: UTF8.self)
+            let host = dataTask.originalRequest?.url?.host ?? ""
+            if MCPConnectionRecord.isLoopbackName(host), Self.legacyEndpointHandshake(prefix) {
                 responseError = MCPServiceError.legacyEventStream
                 heldResponse = nil
                 loadingTask?.cancel()

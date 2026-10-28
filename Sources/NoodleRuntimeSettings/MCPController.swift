@@ -164,7 +164,11 @@ public final class MCPController {
     }
     func connect(_ record: MCPConnectionRecord) {
         guard signingIn == nil else { return }
-        if record.place == .loopback, record.authorization != .browser {
+        if record.place == .loopback {
+            if record.authorization == .browser {
+                errors[record.id] = "Browser sign-in is not available for a server on this Mac."
+                return
+            }
             connectLoopback(record)
             return
         }

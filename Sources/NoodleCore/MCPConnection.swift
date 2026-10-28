@@ -172,10 +172,33 @@ public struct MCPConnectionRecord: Codable, Identifiable, Equatable, Sendable {
     public static func isNumericLoopback(_ host: String) -> Bool {
         var text = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
         if let percent = text.firstIndex(of: "%") { text = String(text[..<percent]) }
-        if text == "::1" { return true }
-        if text.hasPrefix("::ffff:") { text = String(text.dropFirst("::ffff:".count)) }
-        let octets = text.split(separator: ".").compactMap { UInt8($0) }
-        return octets.count == 4 && octets[0] == 127
+        if text.contains(":") { return ipv6Loopback(text) }
+        return ipv4Loopback(text)
+    }
+
+    /// Four numeric labels, then inet_pton. A name such as 127.0.0.1.example.com has more than four.
+    private static func ipv4Loopback(_ text: String) -> Bool {
+        let labels = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count == 4 else { return false }
+        guard labels.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return false }
+        var address = in_addr()
+        guard inet_pton(AF_INET, text, &address) == 1 else { return false }
+        let value = UInt32(bigEndian: address.s_addr)
+        return (value & 0xff00_0000) == 0x7f00_0000
+    }
+
+    /// Exactly ::1. An IPv4-mapped address, including ::ffff:127.0.0.1, is not loopback.
+    private static func ipv6Loopback(_ text: String) -> Bool {
+        if text.contains(".") { return false }
+        var address = in6_addr()
+        var loopback = in6_addr()
+        guard inet_pton(AF_INET6, text, &address) == 1,
+              inet_pton(AF_INET6, "::1", &loopback) == 1 else { return false }
+        return withUnsafePointer(to: address) { left in
+            withUnsafePointer(to: loopback) { right in
+                memcmp(left, right, MemoryLayout<in6_addr>.size) == 0
+            }
+        }
     }
 
     private static func skillName(for name: String) -> String {

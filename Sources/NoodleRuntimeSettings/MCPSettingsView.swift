@@ -127,6 +127,8 @@ public struct MCPEditor: View {
     private let saveLater: ((MCPConnectionRecord) async throws -> MCPConnectionRecord)?
     private let storeBearer: ((String, MCPConnectionRecord) async throws -> Void)?
     private let discardBearer: ((MCPConnectionRecord) async throws -> Void)?
+    /// The Mac app can add a server on this Mac. Noodle Hub only adds a remote server.
+    private let choosesPlace: Bool
     let existing: MCPConnectionRecord?
     let onBack: (() -> Void)?
     let onSaved: (MCPConnectionRecord) -> Void
@@ -153,6 +155,7 @@ public struct MCPEditor: View {
         saveLater = nil
         storeBearer = { token, record in try await controller.storeBearer(token, for: record) }
         discardBearer = { record in try await controller.discardLoopbackBearer(record) }
+        choosesPlace = true
         self.existing = existing
         self.onBack = onBack; self.onSaved = onSaved
         self.onConnect = onConnect ?? controller.connect
@@ -161,7 +164,7 @@ public struct MCPEditor: View {
         _description = State(initialValue: existing?.description ?? "")
         _instructions = State(initialValue: existing?.instructions ?? "")
         _place = State(initialValue: existing?.place ?? .remote)
-        _authorization = State(initialValue: existing?.authorization ?? .none)
+        _authorization = State(initialValue: Self.shownAuthorization(existing?.authorization))
         _bearer = State(initialValue: "")
         _allowed = State(initialValue: existing?.consentedOrigin != nil)
     }
@@ -175,6 +178,7 @@ public struct MCPEditor: View {
         saveLater = save
         storeBearer = nil
         discardBearer = nil
+        choosesPlace = false
         self.existing = existing
         self.onBack = onBack; self.onSaved = onSaved
         self.onConnect = onConnect
@@ -183,7 +187,7 @@ public struct MCPEditor: View {
         _description = State(initialValue: existing?.description ?? "")
         _instructions = State(initialValue: existing?.instructions ?? "")
         _place = State(initialValue: existing?.place ?? .remote)
-        _authorization = State(initialValue: existing?.authorization ?? .none)
+        _authorization = State(initialValue: Self.shownAuthorization(existing?.authorization))
         _bearer = State(initialValue: "")
         _allowed = State(initialValue: existing?.consentedOrigin != nil)
     }
@@ -209,7 +213,7 @@ public struct MCPEditor: View {
                     TextField("e.g. Notion — Work", text: $name, axis: .horizontal).lineLimit(1)
                         .help("Use a distinct name for each account")
                 }
-                if existing == nil {
+                if choosesPlace, existing == nil {
                     Picker("Connection", selection: $place) {
                         Text("Remote server").tag(MCPConnectionPlace.remote)
                         Text("Server on this Mac").tag(MCPConnectionPlace.loopback)
@@ -224,7 +228,6 @@ public struct MCPEditor: View {
                     Picker("Authorization", selection: $authorization) {
                         Text("No token").tag(MCPLocalAuthorization.none)
                         Text("Bearer token").tag(MCPLocalAuthorization.bearer)
-                        Text("Browser sign-in").tag(MCPLocalAuthorization.browser)
                     }.pickerStyle(.radioGroup)
                     if authorization == .bearer {
                         SecureField("Bearer token", text: $bearer)
@@ -258,6 +261,10 @@ public struct MCPEditor: View {
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }.textFieldStyle(.roundedBorder).padding(20)
         }.frame(width: 480)
+    }
+    private static func shownAuthorization(_ stored: MCPLocalAuthorization?) -> MCPLocalAuthorization {
+        guard let stored, stored != .browser else { return MCPLocalAuthorization.none }
+        return stored
     }
     private var consentText: String {
         let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)

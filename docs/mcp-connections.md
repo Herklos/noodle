@@ -30,8 +30,8 @@ Choose **Server on this Mac** and allow the connection before agents can use it.
 The allow step names the address. A changed address asks again. Declining leaves
 the connection unconnected.
 
-A loopback connection can use no token, a bearer token entered in the secure
-field, or browser sign-in when the server offers it. The token is stored in the
+A loopback connection can use no token, or a bearer token entered in the secure
+field. The token is stored in the
 login keychain. It is not part of the address, and it is not written into the
 registry, bot instructions, or logs. Noodle does not follow redirects, and
 `https` on this Mac uses normal certificate checks.

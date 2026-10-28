@@ -120,32 +120,32 @@ import NoodleMCP
     }
 
     public func connections(for user: HubUser) -> [MCPConnectionRecord] {
-        registry.all.filter { access.owner(ofConnection: $0.id) == user.id }
+        registry.connections.filter { access.owner(ofConnection: $0.id) == user.id }
     }
 
-    /// Saves a new connection, or changes one of the user's own. It is not assigned to any bot.
+    /// Saves a new remote connection, or changes one of the user's own. A server on this Mac stays out of Hub.
     @discardableResult public func add(_ record: MCPConnectionRecord, for user: HubUser) throws -> MCPConnectionRecord {
         var next = registry
-        if record.place == .loopback {
-            next.connections.removeAll { $0.id == record.id }
-            if let index = next.loopback.firstIndex(where: { $0.id == record.id }) {
-                _ = try owned(record.id, by: user)
-                next.loopback[index] = record
-            } else {
-                next.loopback.append(record)
+        let inConnections = next.connections.contains { $0.id == record.id }
+        let inLoopback = next.loopback.contains { $0.id == record.id }
+        if inConnections || inLoopback {
+            guard access.owner(ofConnection: record.id) == user.id else {
+                throw LinkError("That connection is not yours or no longer exists.")
             }
-        } else if let index = next.connections.firstIndex(where: { $0.id == record.id }) {
-            _ = try owned(record.id, by: user)
+        }
+        if inLoopback || record.place == .loopback {
+            throw LinkError("Noodle Hub does not keep a server on this Mac.")
+        }
+        if let index = next.connections.firstIndex(where: { $0.id == record.id }) {
             next.connections[index] = record
         } else {
-            next.loopback.removeAll { $0.id == record.id }
             next.connections.append(record)
         }
         try next.save(root: root)
         registry = next
         access.setOwner(user, ofConnection: record.id)
         synchronize()
-        return registry.record(record.id)!
+        return registry.connections.first { $0.id == record.id }!
     }
 
     /// Reads the connections and grants again, after Noodle changed them in the same files on its owner's Mac.
@@ -155,7 +155,7 @@ import NoodleMCP
         registry = saved
         Task { [weak self, service] in
             var signedIn: Set<UUID> = []
-            for connection in saved.all where await service.hasCredentials(connection.id) { signedIn.insert(connection.id) }
+            for connection in saved.connections where await service.hasCredentials(connection.id) { signedIn.insert(connection.id) }
             self?.signedIn = signedIn
         }
     }
