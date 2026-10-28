@@ -170,8 +170,9 @@ public struct MCPConnectionRecord: Codable, Identifiable, Equatable, Sendable {
     }
 
     public static func isNumericLoopback(_ host: String) -> Bool {
-        var text = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
-        if let percent = text.firstIndex(of: "%") { text = String(text[..<percent]) }
+        let text = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        // Do not strip at "%". 127.0.0.1%.example.com would then read as 127.0.0.1.
+        if text.contains("%") { return false }
         if text.contains(":") { return ipv6Loopback(text) }
         return ipv4Loopback(text)
     }

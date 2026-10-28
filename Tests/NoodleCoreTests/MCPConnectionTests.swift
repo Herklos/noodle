@@ -249,7 +249,7 @@ final class MCPConnectionTests: XCTestCase {
     }
 
     func testLoopbackLookalikesAreNotLoopback() {
-        let rejected = ["127.0.0.1.example.com", "127.1", "0.0.0.0", "::ffff:127.0.0.1", "[::ffff:127.0.0.1]"]
+        let rejected = ["127.0.0.1.example.com", "127.0.0.1%.example.com", "127.1", "0.0.0.0", "::ffff:127.0.0.1", "[::ffff:127.0.0.1]", "[::1%25en0]"]
         for host in rejected {
             XCTAssertFalse(MCPConnectionRecord.isLoopbackName(host), host)
             XCTAssertFalse(MCPConnectionRecord.isNumericLoopback(host), host)
@@ -258,7 +258,7 @@ final class MCPConnectionTests: XCTestCase {
             XCTAssertTrue(MCPConnectionRecord.isLoopbackName(host), host)
         }
         let urls = [
-            "http://127.0.0.1.example.com/mcp", "http://127.1/mcp", "http://0.0.0.0/mcp",
+            "http://127.0.0.1.example.com/mcp", "http://127.0.0.1%25.example.com/mcp", "http://127.1/mcp", "http://0.0.0.0/mcp",
             "http://[::ffff:127.0.0.1]/mcp"
         ]
         for url in urls {

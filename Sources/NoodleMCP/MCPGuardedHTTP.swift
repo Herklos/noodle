@@ -93,9 +93,14 @@ final class MCPGuardedHTTP: URLProtocol, URLSessionDataDelegate, @unchecked Send
         }
         let type = response.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
         eventStream = type.contains("text/event-stream")
-        // Hold the response until the first body bytes are checked. A legacy
-        // loopback `event: endpoint` handshake must fail before the client treats this as success.
-        heldResponse = response
+        let host = dataTask.originalRequest?.url?.host ?? ""
+        if MCPConnectionRecord.isLoopbackName(host) {
+            // Hold the response until the first body bytes are checked. A legacy
+            // loopback `event: endpoint` handshake must fail before the client treats this as success.
+            heldResponse = response
+        } else {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        }
         completionHandler(.allow)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
