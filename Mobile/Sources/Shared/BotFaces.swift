@@ -30,7 +30,7 @@ struct AgentAvatar: View {
     ]
     let face: BotFace
     let size: CGFloat
-    /// Shown as a dot in the corner, as on the Mac. Nil shows none.
+    /// Shown on the picture, as on the Mac. Nil shows none.
     var phase: LinkBotPhase?
 
     init(face: BotFace, size: CGFloat, phase: LinkBotPhase? = nil) {
@@ -45,15 +45,6 @@ struct AgentAvatar: View {
 
     static var colourCount: Int { gradients.count }
 
-    /// The Mac's colours: working blue, failed red, ready green, anything else grey.
-    static func colour(of phase: LinkBotPhase) -> Color {
-        switch phase {
-        case .working: .blue
-        case .failed: .red
-        case .ready: .green
-        case .offline, .starting: .gray
-        }
-    }
 
     /// Bots may store any integer; it wraps onto the palette.
     static func colourIndex(_ colour: Int) -> Int { Int(colour.magnitude % UInt(gradients.count)) }
@@ -76,16 +67,43 @@ struct AgentAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        // As on the Mac: a ready bot is shown as it is, a working one circled, a stopped or starting one
+        // greyed out, and one waiting for Kick marked with a red dot.
+        .grayscale(isIdle ? 1 : 0)
+        .opacity(isIdle ? 0.5 : 1)
+        .overlay {
+            if phase == .working { WorkingRing(lineWidth: max(2, size * 0.05)).padding(-max(3, size * 0.075)) }
+        }
         .overlay(alignment: .bottomTrailing) {
-            if let phase {
+            if phase == .failed {
                 let dot = max(8, size * 0.24)
-                Circle().fill(Self.colour(of: phase))
+                Circle().fill(.red)
                     .frame(width: dot, height: dot)
                     .overlay { Circle().strokeBorder(Color(.systemBackground), lineWidth: 2) }
-                    .accessibilityLabel(phase.rawValue.capitalized)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(phase?.rawValue.capitalized ?? "")
         .accessibilityHidden(phase == nil)
+    }
+}
+
+extension AgentAvatar {
+    private var isIdle: Bool { phase == .offline || phase == .starting }
+}
+
+/// An arc that circles a working bot's picture.
+private struct WorkingRing: View {
+    let lineWidth: CGFloat
+    @State private var turning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.28)
+            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: turning)
+            .onAppear { turning = true }
     }
 }
 

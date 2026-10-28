@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Bots' pictures show their status as on the Mac, with less noise. A ready bot has no dot; a working one is circled by a turning arc; a stopped one, or one on a Hub that isn't connected, is greyed out. A bot waiting for Kick keeps its red dot.
+
+### What to Test
+
+- Send a bot a message and check that its picture is circled while it works and plain once it has replied. With the Hub out of reach, check that bots' pictures are greyed out.
+
 ## [0.50.0] - 2026-10-28
 
 ### Changed
