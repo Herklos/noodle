@@ -294,6 +294,7 @@ final class BrowserWebViewTests: XCTestCase {
             return true
         }
         XCTAssertTrue(loaded, "pages did not load")
+        _ = try await tab.evaluate("window.drawn = 0; (function count() { drawn++; requestAnimationFrame(count); })(); return true;")
         // As in the browser window, which the person may have closed meanwhile.
         let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 700), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -313,7 +314,15 @@ final class BrowserWebViewTests: XCTestCase {
             let away = try await until { tab.web.window === tab.surface && other.web.window === window }
             XCTAssertTrue(away, "switching away did not move the pages")
             XCTAssertTrue(tab.attended && tab.surface.isVisible && tab.surface.alphaValue == 0, "the bot's tab stopped drawing out of sight")
-            try await Task.sleep(for: .milliseconds(100))
+            // WebKit sends the page to its top a frame or two after it starts drawing in its own
+            // window, and the tab puts it back on a later frame. Frames are waited for, not a fixed
+            // time a slow machine may draw none in: the browser window here is never on screen, so
+            // a page that went back to it before then would have no frame to put it back on.
+            let start = try await tab.evaluate("return drawn;") as? Int ?? 0
+            let kept = try await until {
+                try await tab.evaluate("return document.visibilityState === 'visible' && drawn >= \(start + 5) && scrollY === 500;") as? Bool == true
+            }
+            XCTAssertTrue(kept, "the bot's tab did not draw at its scroll position out of sight")
             presentation.selectTab(tab.id)
             let back = try await until { tab.web.window === window }
             XCTAssertTrue(back, "switching back did not move the page")
