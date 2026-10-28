@@ -4,12 +4,13 @@
 
 ### Changed
 
-- Bots' pictures show their status as on the Mac, with less noise. A ready bot has no dot; a working one is circled by a turning arc; a stopped one, or one on a Hub that isn't connected, is greyed out. A bot waiting for Kick keeps its red dot.
+- Bots' pictures show their status as on the Mac, with less noise. A ready bot has no dot; a working one is circled by a turning arc; a stopped one, or one on a Hub that isn't connected, is greyed out. A bot waiting for Kick keeps its red dot. Groups show their status too: circled while a member works.
 - A group of two shows its members' pictures diagonally across its circle, larger than before, and the borders between members' pictures are thinner on small pictures.
 
 ### What to Test
 
 - Send a bot a message and check that its picture is circled while it works and plain once it has replied. With the Hub out of reach, check that bots' pictures are greyed out.
+- Send a message in a group and check that the group's picture is circled while a member works. Check that a group of two shows both pictures diagonally and large.
 
 ## [0.50.0] - 2026-10-28
 

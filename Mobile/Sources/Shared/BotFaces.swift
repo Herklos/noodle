@@ -67,29 +67,33 @@ struct AgentAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        // As on the Mac: a ready bot is shown as it is, a working one circled, a stopped or starting one
-        // greyed out, and one waiting for Kick marked with a red dot.
-        .grayscale(isIdle ? 1 : 0)
-        .opacity(isIdle ? 0.5 : 1)
-        .overlay {
-            if phase == .working { WorkingRing(lineWidth: max(2, size * 0.05)).padding(-max(3, size * 0.075)) }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if phase == .failed {
-                let dot = max(8, size * 0.24)
-                Circle().fill(.red)
-                    .frame(width: dot, height: dot)
-                    .overlay { Circle().strokeBorder(Color(.systemBackground), lineWidth: 2) }
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(phase?.rawValue.capitalized ?? "")
-        .accessibilityHidden(phase == nil)
+        .statusLook(phase, size: size)
     }
 }
 
-extension AgentAvatar {
-    private var isIdle: Bool { phase == .offline || phase == .starting }
+extension View {
+    /// As on the Mac: a ready bot is shown as it is, a working one circled, a stopped or starting one
+    /// greyed out, and one waiting for Kick marked with a red dot. The marks scale with the picture's `size`.
+    func statusLook(_ phase: LinkBotPhase?, size: CGFloat) -> some View {
+        let isIdle = phase == .offline || phase == .starting
+        let ringWidth = max(1, size * 0.045)
+        return grayscale(isIdle ? 1 : 0)
+            .opacity(isIdle ? 0.5 : 1)
+            .overlay {
+                if phase == .working { WorkingRing(lineWidth: ringWidth).padding(-(ringWidth / 2 + max(1, size * 0.04))) }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if phase == .failed {
+                    let dot = max(8, size * 0.24)
+                    Circle().fill(.red)
+                        .frame(width: dot, height: dot)
+                        .overlay { Circle().strokeBorder(Color(.systemBackground), lineWidth: 2) }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(phase?.rawValue.capitalized ?? "")
+            .accessibilityHidden(phase == nil)
+    }
 }
 
 /// An arc that circles a working bot's picture.
@@ -111,8 +115,23 @@ private struct WorkingRing: View {
 struct GroupAvatar: View {
     let faces: [BotFace]
     let size: CGFloat
+    /// The members' status together, as `phase(of:)` works it out. Nil shows none.
+    var phase: LinkBotPhase? = nil
+
+    /// As on the Mac: a working member wins, then one waiting for Kick, then all ready; anything else is idle.
+    static func phase(of members: [LinkBotPhase?]) -> LinkBotPhase? {
+        let known = members.compactMap { $0 }
+        if known.isEmpty { return nil }
+        if known.contains(.working) { return .working }
+        if known.contains(.failed) { return .failed }
+        return known.allSatisfy { $0 == .ready } ? .ready : .offline
+    }
 
     var body: some View {
+        pictures.statusLook(phase, size: size)
+    }
+
+    @ViewBuilder private var pictures: some View {
         if faces.count == 1, let face = faces.first {
             // One bot in front of a disc, so it still reads as a group.
             ZStack {

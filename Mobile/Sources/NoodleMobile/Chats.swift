@@ -4445,7 +4445,8 @@ struct ThreadAvatar: View {
             AgentAvatar(face: BotFace(bot), size: size, phase: chats.phase(of: bot))
         case .group(let group):
             let active = chats.activeMembers(of: group)
-            GroupAvatar(faces: (active.isEmpty ? chats.members(of: group) : active).map(BotFace.init), size: size)
+            let members = active.isEmpty ? chats.members(of: group) : active
+            GroupAvatar(faces: members.map(BotFace.init), size: size, phase: GroupAvatar.phase(of: members.map(chats.phase(of:))))
         }
     }
 }
