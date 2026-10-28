@@ -6,6 +6,8 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+## [0.78.2] - 2026-10-28
+
 ### Changed
 
 - Bots read a conversation's history the newest 100 messages at a time, and ask for earlier ones when they need them.
