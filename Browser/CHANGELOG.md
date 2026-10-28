@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Improved
+
+- Browser frees cached page resources when the Mac is short of memory, keeping current pages, sign-ins and unsaved edits open. Going Back may reload a page whose cached copy was freed.
+
 ## [0.22.2] - 2026-10-28
 
 ### Fixed

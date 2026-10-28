@@ -15,6 +15,39 @@ import WebKit
     var favicons: [UUID: NSImage] { stopped.compactMapValues(\.favicon).merging(tabs.compactMapValues(\.favicon)) { $1 } }
     /// What a stopped page leaves behind: its icon, and its history until the page loads again.
     private var stopped: [UUID: (favicon: NSImage?, history: Any?)] = [:]
+    /// Only the memory-cache type is passed here: cookies, site storage and the current document stay intact.
+    var removeWebsiteData: (WKWebsiteDataStore, Set<String>, @escaping @MainActor @Sendable () -> Void) -> Void = { store, types, completion in
+        store.removeData(ofTypes: types, modifiedSince: .distantPast, completionHandler: completion)
+    }
+    private var memoryPressure: DispatchSourceMemoryPressure?
+    private var trimmedCaches: Set<UUID> = []
+    private var trimmingCaches: Set<UUID> = []
+    func startMemoryPressureMonitoring() {
+        guard memoryPressure == nil else { return }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: .main)
+        memoryPressure = source
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let events = self.memoryPressure?.data else { return }
+                self.handleMemoryPressure(events)
+            }
+        }
+        source.activate()
+    }
+    /// Trim once per pressure episode so a busy Mac does not repeatedly throw away freshly fetched resources.
+    /// WebKit may reload a previous document when going Back after this; the document currently in use stays alive.
+    func handleMemoryPressure(_ events: DispatchSource.MemoryPressureEvent) {
+        if events.contains(.normal) { trimmedCaches.removeAll() }
+        guard !events.intersection([.warning, .critical]).isEmpty else { return }
+        // Reuse the stores of live pages. Opening a store for an unloaded profile could start another network process.
+        for tab in Array(tabs.values) where !trimmingCaches.contains(tab.browserID) && !trimmedCaches.contains(tab.browserID) {
+            let id = tab.browserID
+            trimmingCaches.insert(id); trimmedCaches.insert(id)
+            removeWebsiteData(tab.web.configuration.websiteDataStore, [WKWebsiteDataTypeMemoryCache]) { [weak self] in
+                self?.trimmingCaches.remove(id)
+            }
+        }
+    }
     /// How long a tab a bot used keeps drawing out of sight after the bot's last call, long enough
     /// for a bot to think between steps.
     var agentAttention = Duration.seconds(300)
@@ -359,6 +392,8 @@ import WebKit
     func shutdown() {
         server = nil
         externalServer = nil
+        memoryPressure?.cancel(); memoryPressure = nil
+        trimmedCaches.removeAll()
         expiry?.cancel(); expiry = nil
         mediaRestTask?.cancel(); mediaRestTask = nil
         for tab in tabs.values { tab.stop() }

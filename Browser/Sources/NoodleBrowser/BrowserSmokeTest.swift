@@ -128,6 +128,27 @@ import SwiftUI
                 try require(try await isolated.evaluate("return !(await (await fetch('/auth-state')).json()).authenticated;") as? Bool == true, "Profile cookie isolation failed")
                 _ = try await tab.evaluate("return await new Promise((resolve,reject)=>{const r=indexedDB.open('noodle-fixture',1);r.onupgradeneeded=()=>r.result.createObjectStore('values');r.onerror=()=>reject(r.error);r.onsuccess=()=>{const db=r.result,tx=db.transaction('values','readwrite');tx.objectStore('values').put('saved','state');tx.oncomplete=()=>{db.close();resolve(true)};tx.onerror=()=>reject(tx.error)}});")
                 print("PASS DOM inspection, iframe, fill, native click, authenticated request, profile isolation, IndexedDB write")
+                _ = try await tab.evaluate("window.cacheTrimMarker={value:'kept'};document.querySelector('#username').value='unsaved edit';return true;")
+                let removeCachedData = runtime.removeWebsiteData
+                var remainingStores = Set(runtime.tabs.values.map(\.browserID)).count
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    runtime.removeWebsiteData = { store, types, completion in
+                        removeCachedData(store, types) {
+                            completion()
+                            remainingStores -= 1
+                            if remainingStores == 0 { continuation.resume() }
+                        }
+                    }
+                    runtime.handleMemoryPressure(.warning)
+                }
+                runtime.removeWebsiteData = removeCachedData
+                try require(try await tab.evaluate("return cacheTrimMarker.value==='kept' && document.querySelector('#username').value==='unsaved edit' && localStorage.getItem('remembered')==='yes' && (await (await fetch('/auth-state')).json()).authenticated;") as? Bool == true,
+                            "Cache cleanup lost the live document, unsaved input, site storage or authentication")
+                try require(try await tab.evaluate("return await new Promise((resolve,reject)=>{const r=indexedDB.open('noodle-fixture',1);r.onerror=()=>reject(r.error);r.onsuccess=()=>{const db=r.result;const q=db.transaction('values').objectStore('values').get('state');q.onsuccess=()=>{db.close();resolve(q.result==='saved')};q.onerror=()=>reject(q.error)}});") as? Bool == true,
+                            "Cache cleanup removed IndexedDB data")
+                try require(try await isolated.evaluate("return !(await (await fetch('/auth-state')).json()).authenticated && localStorage.getItem('remembered')===null;") as? Bool == true,
+                            "Cache cleanup mixed profile state")
+                print("PASS memory-pressure cache cleanup preserves live JavaScript, unsaved input, login, localStorage, IndexedDB and profile isolation")
                 try await verifyLiveView(runtime, tab: isolated)
                 try await verifyWebMCP(runtime, browserID: profile.id, otherID: other.id, base: base)
                 #if NOODLE_DEV_HOOKS
