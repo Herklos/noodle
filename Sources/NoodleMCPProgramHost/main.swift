@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import NoodleCore
 
-/// One connection from Noodle. The program runs here, outside the app sandbox.
+/// One connection from Noodle. launchd starts this process without the app sandbox.
 private final class HostSession: NSObject, MCPProgramHostService {
     private let lock = NSLock()
     private var processes: [Int32: Process] = [:]
@@ -53,9 +53,13 @@ private final class HostSession: NSObject, MCPProgramHostService {
               directoryIsFolder.boolValue else {
             throw MCPConnectionError.message("The program's folder is not available.")
         }
+        if MCPProgramHostLaunch.refusesAppSandbox(containerIdentifier: ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"]) {
+            throw MCPConnectionError.message("The program host is inside the app sandbox, so it will not start the program.")
+        }
+        let command = MCPProgramHostLaunch.command(executable: executable, arguments: arguments)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
         process.environment = clean(environment)
         process.currentDirectoryURL = URL(fileURLWithPath: directory, isDirectory: true)
         let inputPipe = Pipe()

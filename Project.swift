@@ -268,18 +268,21 @@ let project = Project(
                 "PRODUCT_NAME": "NoodleAgentHost",
             ]) { $1 })
         ),
-.target(
+        // launchd starts this helper. It is not given the app sandbox. It applies its own Seatbelt before exec.
+        .target(
             name: "NoodleMCPProgramHost",
             destinations: .macOS,
             product: .xpc,
             bundleId: "com.pdparchitect.noodle.mcp-program-host",
             deploymentTargets: .macOS("26.0"),
             infoPlist: .file(path: "Support/MCPProgramHost-Info.plist"),
+            entitlements: .file(path: "Support/MCPProgramHost.entitlements"),
             sources: ["Sources/NoodleMCPProgramHost/**"],
-            dependencies: [.package(product: "NoodleCore"), .package(product: "NoodleAgentBridge")],
+            dependencies: [.package(product: "NoodleCore")],
             settings: .settings(base: signing.merging([
                 "PRODUCT_BUNDLE_IDENTIFIER": "$(NOODLE_APP_BUNDLE_ID).mcp-program-host",
                 "PRODUCT_NAME": "NoodleMCPProgramHost",
+                "ENABLE_APP_SANDBOX": "NO",
             ]) { $1 })
         ),
         // Send to Noodle, sharing only the app group it hands items over in.

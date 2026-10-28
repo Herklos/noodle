@@ -2,6 +2,19 @@ import XCTest
 import NoodleCore
 
 final class MCPProgramTests: XCTestCase {
+
+    func testHostAppliesItsOwnSeatbeltOutsideTheAppSandbox() {
+        let command = MCPProgramHostLaunch.command(executable: "/usr/local/bin/npx", arguments: ["-y", "pkg"])
+        XCTAssertEqual(command.executable, "/usr/bin/sandbox-exec")
+        XCTAssertEqual(command.arguments, ["-p", MCPProgramHostLaunch.profile, "/usr/local/bin/npx", "-y", "pkg"])
+        XCTAssertTrue(MCPProgramHostLaunch.profile.contains("(allow default)"))
+        XCTAssertFalse(MCPProgramHostLaunch.profile.contains("(deny default)"))
+        XCTAssertFalse(MCPProgramHostLaunch.profile.contains("app-sandbox"))
+        XCTAssertFalse(MCPProgramHostLaunch.refusesAppSandbox(containerIdentifier: nil))
+        XCTAssertFalse(MCPProgramHostLaunch.refusesAppSandbox(containerIdentifier: ""))
+        XCTAssertTrue(MCPProgramHostLaunch.refusesAppSandbox(containerIdentifier: "com.pdparchitect.noodle"))
+    }
+
     func testExecutableAndArgumentsStaySeparateFields() throws {
         let program = try MCPProgramRecord(name: "Anytype", executable: "npx", arguments: ["-y", "@anyproto/anytype-mcp"])
         XCTAssertEqual(program.arguments, ["-y", "@anyproto/anytype-mcp"])
