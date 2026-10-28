@@ -10,6 +10,7 @@ enum ViewerFileChoice: Sendable {
     case chosen([(name: String, body: Data)])
     case cancelled
     case tooLarge
+    case failed
     case unavailable
 }
 
@@ -644,6 +645,7 @@ enum ViewerFileChoice: Sendable {
             guard let streamer = surfaces[browserID], streamer.isWatched else { return .unavailable }
             guard let answer = await streamer.requestFiles(multiple: multiple, directories: directories) else { return .unavailable }
             if answer.names == [SurfaceFileAsk.tooLarge] { return .tooLarge }
+            if answer.names == [SurfaceFileAsk.failed] { return .failed }
             if answer.names.isEmpty { return .cancelled }
             let pairs = Array(zip(answer.names, answer.bodies))
             guard pairs.allSatisfy({ $0.1.count <= SurfaceFileAsk.byteLimit }) else { return .tooLarge }

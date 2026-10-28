@@ -1065,8 +1065,7 @@ struct LiveSurfaceScreen: View {
                     hardware.attach(gamepad, onKey: hold)
                 case .notice(let next)?: notice = next
                 case .fileAsk(let ask)?:
-                    let chosen = await PhoneFilePicker.choose(ask)
-                    channel.send(SurfaceControl.files(id: ask.id, names: chosen.names, bodies: chosen.bodies).encoded)
+                    for frame in await PhoneFilePicker.choose(ask) { channel.send(frame) }
                 default: break
                 }
             }
@@ -1157,10 +1156,10 @@ extension LinkAttachment {
 private final class PhoneFilePicker: NSObject, UIDocumentPickerDelegate {
     private var finish: (([URL]) -> Void)?
 
-    static func choose(_ ask: SurfaceFileAsk) async -> (names: [String], bodies: [Data]) {
+    static func choose(_ ask: SurfaceFileAsk) async -> [Data] {
         let urls = await PhoneFilePicker().present(ask)
         let picked = ask.multiple ? urls : Array(urls.prefix(1))
-        return PhoneFilePicker.bodies(picked)
+        return SurfaceFileRead.frames(id: ask.id, urls: picked)
     }
 
     private func present(_ ask: SurfaceFileAsk) async -> [URL] {
@@ -1185,17 +1184,4 @@ private final class PhoneFilePicker: NSObject, UIDocumentPickerDelegate {
         finish?([]); finish = nil
     }
 
-    fileprivate static func bodies(_ urls: [URL]) -> (names: [String], bodies: [Data]) {
-        var names: [String] = []
-        var bodies: [Data] = []
-        for url in urls {
-            let access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else { continue }
-            if data.count > SurfaceFileAsk.byteLimit { return ([SurfaceFileAsk.tooLarge], [Data()]) }
-            names.append(url.lastPathComponent)
-            bodies.append(data)
-        }
-        return (names, bodies)
-    }
 }

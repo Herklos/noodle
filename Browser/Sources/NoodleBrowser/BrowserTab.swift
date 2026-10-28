@@ -430,6 +430,10 @@ import WebKit
             info.error = "That file is larger than this Hub allows."
             runtime.saveTab(self)
             completion(nil)
+        case .failed:
+            info.error = "That file couldn't be sent. Try a smaller one."
+            runtime.saveTab(self)
+            completion(nil)
         case .chosen(let files):
             do {
                 var staged: [URL] = []
