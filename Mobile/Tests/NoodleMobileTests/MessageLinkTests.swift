@@ -1,4 +1,5 @@
 import Foundation
+import HubLink
 import SwiftUI
 import UIKit
 @testable import NoodleMobile
@@ -152,5 +153,26 @@ import Testing
         let size = host.sizeThatFits(in: CGSize(width: 390, height: 1000))
         #expect(size.width == 280, "\(size)")
         #expect(size.height > 190, "\(size)")
+    }
+
+    /// A bubble is drawn again whenever its conversation changes; what it shows from its text is worked out once.
+    @MainActor @Test func aBubbleDrawnAgainDoesNotParseItsTextAgain() {
+        let body = "See [the oven](https://www.example.com/\(UUID().uuidString)) first.\n\n| Model | Price |\n|---|---|\n| Series 4 | 499 |"
+        let text = "Run `swift test` on \(UUID().uuidString)"
+        func render() -> ([MessageSegment], URL?, AttributedString, String) {
+            (MessageRendering.segments(body, layout: .paragraphs), MessageRendering.firstURL(in: body),
+             MessageRendering.markdown(text, onTint: true, foreground: .white), MessageRendering.previewText(body))
+        }
+        let before = MessageRendering.parses
+        let first = render()
+        let parsed = MessageRendering.parses - before
+        let again = render()
+
+        #expect(parsed > 0)
+        #expect(MessageRendering.parses - before == parsed)
+        #expect(first.0 == MessageSegment.split(body, layout: .paragraphs) && again.0 == first.0)
+        #expect(first.1 == LinkPreview.firstURL(in: body) && again.1 == first.1)
+        #expect(first.2 == MessageText.markdown(text, onTint: true, foreground: .white) && again.2 == first.2)
+        #expect(first.3 == MessageSegment.previewText(body) && again.3 == first.3)
     }
 }

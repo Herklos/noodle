@@ -50,7 +50,7 @@ struct MessageText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(Self.markdown(text, onTint: onTint, foreground: foreground))
+            Text(MessageRendering.markdown(text, onTint: onTint, foreground: foreground))
                 .lineLimit(folded ? MessageFolding.foldedLines : nil)
             if folded {
                 Button("Read more", action: expand)

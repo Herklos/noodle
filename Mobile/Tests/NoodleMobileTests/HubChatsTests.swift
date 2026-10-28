@@ -3,6 +3,7 @@ import CloudKit
 import Foundation
 import HubLink
 import NoodleWallpaperCore
+import Observation
 import UIKit
 @testable import NoodleMobile
 import SwiftUI
@@ -47,7 +48,19 @@ private actor FakeHub {
 
     func follow(_ stream: LinkStream) {
         followers.append(stream)
-        stream.send(Data())
+        if holdsFollows { held.append(stream) } else { stream.send(Data()) }
+    }
+
+    /// Streams not yet taken on, as by a Hub slow to answer, until `releaseFollows`.
+    var holdsFollows = false
+    var held: [LinkStream] = []
+
+    func holdFollows() { holdsFollows = true }
+
+    func releaseFollows() {
+        holdsFollows = false
+        held.forEach { $0.send(Data()) }
+        held = []
     }
 
     func push(_ event: LinkEvent) { followers.last?.send(LinkProtocol.encode(event)) }
@@ -123,6 +136,29 @@ private actor FakeHub {
     init() {
         messages = [LinkMessage(id: UUID(), conversationID: bot.conversationID, author: .bot(bot.id), body: "Hello",
                                 createdAt: Date(timeIntervalSince1970: 10), delivered: true)]
+    }
+
+    /// The conversations of the pages asked for since `slowPages`, in order, and how many were asked for at once at most.
+    var pageOrder: [UUID] = []
+    var pagesInFlight = 0
+    var mostPagesInFlight = 0
+    /// How long each page takes, as over a slow link.
+    var pageDelay: Duration = .zero
+
+    func slowPages(_ delay: Duration) {
+        pageDelay = delay
+        pageOrder = []
+        mostPagesInFlight = 0
+    }
+
+    func answer(_ data: Data) async -> LinkResponse {
+        guard pageDelay > .zero, case .success(.messagePage(let page)) = LinkProtocol.decode(data) else { return reply(to: data) }
+        pageOrder.append(page.conversationID)
+        pagesInFlight += 1
+        mostPagesInFlight = max(mostPagesInFlight, pagesInFlight)
+        try? await Task.sleep(for: pageDelay)
+        pagesInFlight -= 1
+        return reply(to: data)
     }
 
     func reply(to data: Data) -> LinkResponse {
@@ -336,6 +372,21 @@ private final class Door: Sendable {
     func set(open: Bool) { self.open.withLock { $0 = open } }
 }
 
+/// Whether something happened, set from any thread.
+private final class Flag: Sendable {
+    private let raised = Mutex(false)
+    var isRaised: Bool { raised.withLock { $0 } }
+    func raise() { raised.withLock { $0 = true } }
+}
+
+/// Whether a view that read what `read` reads would be drawn again after `change`.
+@MainActor private func redraws(_ read: () -> Void, after change: () async throws -> Void) async rethrows -> Bool {
+    let changed = Flag()
+    withObservationTracking(read) { changed.raise() }
+    try await change()
+    return changed.isRaised
+}
+
 /// The pauses `follow` took before trying again.
 private final class Pauses: Sendable {
     private let taken = Mutex<[Duration]>([])
@@ -365,7 +416,7 @@ private actor RecordedSubscriptions: PushSubscriptions {
         let identity = LinkIdentity()
         let server = try LinkServer(identity: identity, port: 0, admits: admits) { _, data in
             if case .success(.subscribe) = LinkProtocol.decode(data) { return .stream { stream in Task { await hub.follow(stream) } } }
-            return .response(LinkProtocol.encode(await hub.reply(to: data)))
+            return .response(LinkProtocol.encode(await hub.answer(data)))
         }
         try await server.start()
         let endpoint = LinkEndpoint(host: "127.0.0.1", port: try #require(server.port))
@@ -484,6 +535,31 @@ private actor RecordedSubscriptions: PushSubscriptions {
         for _ in 0..<100 where !chats.isConnected { try await Task.sleep(for: .milliseconds(100)) }
         #expect(chats.isConnected)
         #expect(pauses.all.count == 1)
+    }
+
+    /// The app coming back to the front starts connecting, and then becomes active: that leaves the connection under
+    /// way to finish, rather than dropping it and waiting before starting over.
+    @Test func comingBackLeavesAConnectionUnderWayToFinish() async throws {
+        let hub = FakeHub()
+        let (phone, server) = try await paired(to: hub)
+        defer { server.stop() }
+        let pauses = Pauses()
+        let chats = HubChats(pairing: phone.pairing, networkChanges: { AsyncStream { _ in } }, pause: { pause in
+            pauses.take(pause)
+            try await Task.sleep(for: .seconds(3600))
+        })
+        await hub.holdFollows()
+        let following = Task { await chats.follow() }
+        defer { following.cancel() }
+        for _ in 0..<100 where await hub.followers.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.isConnecting)
+
+        chats.resume()
+        await hub.releaseFollows()
+        for _ in 0..<100 where !chats.isConnected && pauses.all.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(chats.isConnected)
+        #expect(pauses.all.isEmpty)
+        #expect(await hub.followers.count == 1)
     }
 
     /// A chat effect waits on the Hub until the phone shows its conversation: the phone hears of it, takes it
@@ -914,6 +990,44 @@ private actor RecordedSubscriptions: PushSubscriptions {
         let scout = try #require(relaunched.agents.first)
         #expect(scout.draft.name == "Scout")
         #expect(relaunched.latestMessage(of: scout)?.body == "Hello")
+    }
+
+    /// The phone keeps each conversation's latest messages for the next launch, not all it ever loaded; earlier ones
+    /// load again as the person scrolls back.
+    @Test func aRelaunchKeepsTheLatestMessagesOfALongConversation() async throws {
+        let hub = FakeHub()
+        for index in 1..<260 { await hub.botSays("Message \(index)") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let (chats, server) = try await paired(to: hub, directory: directory)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+        while chats.hasEarlier(scout) { try await chats.loadEarlier(scout) }
+        #expect(chats.messages(of: scout).count == 260)
+
+        let relaunched = HubChats(pairing: HubPairing(directory: directory, deviceName: "iPhone"))
+        #expect(relaunched.messages(of: scout).count == 200)
+        #expect(relaunched.messages(of: scout).first?.body == "Message 60")
+        #expect(relaunched.latestMessage(of: scout)?.body == "Message 259")
+        #expect(relaunched.hasEarlier(scout))
+        try await relaunched.loadEarlier(scout)
+        #expect(relaunched.messages(of: scout).first?.body == "Message 10")
+    }
+
+    /// A burst of changes, as when the app comes back, is written once, a moment later and off the main thread; reading
+    /// the file never misses the latest.
+    @Test func theLastSyncIsWrittenOnceForABurstOfChanges() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let file = ChatsCacheFile.at(url)
+        for name in ["Scout", "Atlas", "Nova"] {
+            let bot = LinkBot(id: UUID(), conversationID: UUID(), draft: LinkBotDraft(name: name, provider: "claude"), createdAt: Date())
+            file.save(ChatsCache(agents: [bot], conversations: [:], read: [:]))
+        }
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(ChatsCacheFile.at(url) === file)
+        #expect(file.load()?.agents.map(\.draft.name) == ["Nova"])
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
     @Test func noAgentsIsOnlyKnownOnceTheHubHasAnswered() {
@@ -1742,6 +1856,80 @@ private actor RecordedSubscriptions: PushSubscriptions {
 
         #expect(chats.messages(of: scout).first?.reactions == hello.reactions)
         #expect(chats.agent(scout.id)?.phase == .working)
+    }
+
+    /// Coming back to the app syncs everything again; when nothing changed on the Hub, nothing on screen is drawn again.
+    @Test func aSyncThatBringsNothingNewRedrawsNothing() async throws {
+        let hub = FakeHub()
+        let crew = await hub.addGroup(named: "Crew", saying: "Morning")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        let redrawn = try await redraws {
+            _ = chats.messages(of: scout)
+            _ = chats.messages(of: crew)
+            _ = chats.listedThreads
+            _ = chats.hasEarlier(scout)
+            _ = chats.phase(of: scout)
+        } after: {
+            try await chats.reload()
+        }
+        #expect(!redrawn)
+    }
+
+    /// As on the Mac, an open conversation is drawn again for its own messages and its own bot or group alone.
+    @Test func aChangeInOneConversationDoesNotRedrawAnother() async throws {
+        let hub = FakeHub()
+        let crew = await hub.addGroup(named: "Crew", saying: "Morning")
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        let scout = try #require(chats.agents.first)
+
+        await hub.botSays("Anything else?")
+        let redrawn = try await redraws {
+            _ = chats.messages(of: crew)
+            _ = chats.thread(crew.id)
+        } after: {
+            try await chats.apply(.conversationChanged(conversationID: scout.conversationID, count: 3))
+            try await chats.apply(.botPhase(botID: scout.id, phase: .working))
+        }
+        #expect(!redrawn)
+        #expect(chats.messages(of: scout).last?.body == "Anything else?")
+        #expect(chats.agent(scout.id)?.phase == .working)
+
+        // Its own still are.
+        await hub.botSays("Crew, report", in: crew.id)
+        #expect(try await redraws { _ = chats.messages(of: crew) } after: {
+            try await chats.apply(.conversationChanged(conversationID: crew.id, count: 2))
+        })
+    }
+
+    /// Everything syncs again as the app comes back: the conversation on screen first, then the rest a few at a time
+    /// rather than one after another.
+    @Test func aSyncLoadsTheConversationOnScreenFirstAndTheRestTogether() async throws {
+        let hub = FakeHub()
+        var crews: [LinkGroup] = []
+        for index in 0..<8 { crews.append(await hub.addGroup(named: "Crew \(index)", saying: "Morning")) }
+        let scout = await hub.bot
+        let (chats, server) = try await paired(to: hub)
+        defer { server.stop() }
+        try await chats.reload()
+        for crew in crews { await hub.botSays("Report", in: crew.id) }
+
+        chats.shownConversation = crews[5].id
+        await hub.slowPages(.milliseconds(100))
+        try await chats.reload()
+
+        let order = await hub.pageOrder
+        #expect(order.first == crews[5].id)
+        #expect(Set(order) == Set(crews.map(\.id) + [scout.conversationID]))
+        #expect(await hub.mostPagesInFlight > 1)
+        #expect(await hub.mostPagesInFlight <= HubChats.loadingWidth)
+        for crew in crews { #expect(chats.messages(of: crew).map(\.body) == ["Morning", "Report"]) }
+        #expect(chats.error == nil)
     }
 
     /// An admin's Users screen follows the Hub's users, as the Hub pushes that they changed.

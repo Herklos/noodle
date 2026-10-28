@@ -14,17 +14,17 @@ extension HubChats {
 
     func loadConnections() async throws {
         guard case .connections(let listed) = try await pairing.request(.connections) else { throw LinkError("The Hub sent an unexpected answer.") }
-        connections = listed
+        if connections != listed { connections = listed }
     }
 
     func loadComputers() async throws {
         guard case .computers(let listed) = try await pairing.request(.computers) else { throw LinkError("The Hub sent an unexpected answer.") }
-        computers = listed
+        if computers != listed { computers = listed }
     }
 
     func loadBrowsers() async throws {
         guard case .browsers(let listed) = try await pairing.request(.browsers) else { throw LinkError("The Hub sent an unexpected answer.") }
-        browsers = listed
+        if browsers != listed { browsers = listed }
     }
 
     // MARK: Connections
