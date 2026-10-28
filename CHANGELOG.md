@@ -6,6 +6,10 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- The arc around a working bot's picture in the toolbar stays centred on the picture instead of drifting off it.
+
 ## [0.79.0] - 2026-10-28
 
 ### Changed
