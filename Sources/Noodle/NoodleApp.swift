@@ -439,7 +439,7 @@ struct RootView: View {
         .navigationSplitViewStyle(.balanced)
         .background(SelectedConversationWindowHost())
         .background(MainToolbarStateUpdater(state: toolbarState, hidden: showsColumns))
-        .background { SelectedConversationWallpaper().ignoresSafeArea() }
+        .background { SelectedConversationWallpaper(followsSelection: !showsColumns).ignoresSafeArea() }
         .onDrop(
             of: AttachmentTransfer.dropContentTypes,
             isTargeted: $isFileDropTargeted
@@ -661,9 +661,11 @@ private struct MainToolbarCompanionsMenu: View {
 
 private struct SelectedConversationWallpaper: View {
     @Environment(NoodleStore.self) private var store
+    /// In columns each column carries its own, so the window keeps the default one.
+    var followsSelection = true
 
     var body: some View {
-        let conversation = store.selectedConversation
+        let conversation = followsSelection ? store.selectedConversation : nil
         let background = store.background(for: conversation)
         ConversationWallpaper(background: background, imageURL: conversation.flatMap {
             store.repository.backgroundImageURL(background, conversationID: $0.id)

@@ -6,7 +6,13 @@ All notable changes to Noodle are documented here, following
 
 ## [Unreleased]
 
+### Changed
+
+- In View › As Columns, each column shows its own background, reaching up under the toolbar, and the window's background no longer changes with the focused column. The focused column's header is lighter and the others' darker, in place of the line under it.
+
 ### Fixed
+
+- In View › As Columns, clicking into another column starts typing in its message field.
 
 - In View › As Columns, Noodle no longer quits when columns close while others further along are on screen, for example on switching to a space with fewer of them.
 

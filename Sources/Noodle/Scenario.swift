@@ -172,6 +172,8 @@ struct Scenario: Codable {
         var window: Window?
         var sidebar: Sidebar?
         var select: String?
+        /// Conversations open as columns, left to right, in View › As Columns.
+        var columns: [String]?
         var search: String?
         var draft: String?
         var draftAttachments: [String]?
@@ -562,7 +564,7 @@ extension Scenario {
             if let window = present.window {
                 try require(window.size.count == 2 && (window.origin?.count ?? 2) == 2, "A window has a size of [width, height] and an origin of [x, y].")
             }
-            for key in [present.select, present.sheet?.groupInfo, present.sheet?.background].compactMap({ $0 }) + (present.scroll ?? [:]).keys {
+            for key in [present.select, present.sheet?.groupInfo, present.sheet?.background].compactMap({ $0 }) + (present.scroll ?? [:]).keys + (present.columns ?? []) {
                 try require(members[key] != nil, "present names the conversation \"\(key)\", which does not exist.")
             }
             if let key = present.sheet?.groupInfo { try require(conversations.first { $0.key == key }?.group != nil, "\(key) is not a group.") }
@@ -783,6 +785,10 @@ extension Scenario {
             if let key = entry.direct { seeded.directs[key] = conversation }
         }
         try repository.saveUnreadConversationIDs(unread)
+        if let columns = present?.columns {
+            defaults.set(MainWindowLayout.columns.rawValue, forKey: MainWindowLayout.key)
+            defaults.set(["": columns.compactMap { seeded.conversations[$0]?.id.uuidString }], forKey: ColumnsModel.key)
+        }
         try repository.savePinnedConversationIDs((conversations ?? []).filter { $0.pinned == true }.compactMap { seeded.conversations[$0.key]?.id })
         // Seeded history is already read: without this every bot is woken for it as it starts.
         for agent in seeded.agents.values { _ = try repository.latestMessages(for: agent.id) }

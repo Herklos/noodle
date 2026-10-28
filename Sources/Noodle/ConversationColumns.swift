@@ -22,7 +22,7 @@ enum MainWindowLayout: String {
     private var openBySpace: [String: [UUID]] = ColumnsModel.saved() {
         didSet { UserDefaults.standard.set(openBySpace.mapValues { $0.map(\.uuidString) }, forKey: Self.key) }
     }
-    private static let key = "NoodleOpenColumns"
+    static let key = "NoodleOpenColumns"
 
     private static func saved() -> [String: [UUID]] {
         let stored = UserDefaults.standard.dictionary(forKey: key) as? [String: [String]] ?? [:]
@@ -31,6 +31,8 @@ enum MainWindowLayout: String {
 
     var focusedID: UUID?
     var scrollTarget: UUID?
+    /// The toolbar's height, which the columns reach under.
+    var topInset: CGFloat = 0
     /// A column whose input should take the keyboard, kept until that column exists to take it.
     var composerFocusTarget: (id: UUID, token: UUID)?
 
@@ -98,7 +100,15 @@ struct ConversationColumns: View {
     var body: some View {
         // A saved column whose conversation has since gone is left out.
         let ids = model.open(in: store.space).filter { store.conversation(withID: $0) != nil }
-        ColumnsScrollView(store: store, model: model, ids: ids, loaded: loaded) { visible = $0 }
+        // The columns reach under the toolbar, so each wallpaper fills the window's height;
+        // their contents start below it.
+        GeometryReader { proxy in
+            ColumnsScrollView(store: store, model: model, ids: ids, loaded: loaded) { visible = $0 }
+            .ignoresSafeArea(.container, edges: .top)
+            .onChange(of: proxy.safeAreaInsets.top, initial: true) { _, top in
+                if model.topInset != top { model.topInset = top }
+            }
+        }
         .onChange(of: visible, initial: true) { updateLoaded(count: ids.count) }
         // A conversation chosen in the sidebar opens as a column, or scrolls to the one already open.
         .onChange(of: store.selectedConversationID, initial: true) { _, id in
@@ -177,6 +187,8 @@ private struct ColumnsScrollView: NSViewRepresentable {
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
+        // The columns place their contents below the toolbar themselves.
+        scrollView.automaticallyAdjustsContentInsets = false
         scrollView.horizontalScrollElasticity = .allowed
         scrollView.verticalScrollElasticity = .none
         scrollView.documentView = FlippedView()
@@ -243,6 +255,7 @@ private struct ColumnsScrollView: NSViewRepresentable {
                 } else {
                     view = NSHostingView(rootView: content)
                     view.sizingOptions = []
+                    view.safeAreaRegions = []
                     document.addSubview(view)
                     columns[id] = view
                 }
@@ -362,9 +375,12 @@ private struct ConversationColumn: View {
 
     private var isFocused: Bool { model.focusedID == conversation.id }
 
+    /// Clicking into another column also starts typing in it; clicks in the focused one keep their own meaning.
     private func select() {
+        let switching = model.focusedID != conversation.id
         model.focusedID = conversation.id
         if store.selectedConversationID != conversation.id { store.selectedConversationID = conversation.id }
+        if switching { model.focusComposer(of: conversation.id) }
     }
 
     var body: some View {
@@ -375,6 +391,18 @@ private struct ConversationColumn: View {
                     withAnimation(.smooth) { model.move(id, before: conversation.id, in: store.space) }
                 })) {
                 store.selectedConversationID = model.close(conversation.id, in: store.space)
+            }
+            // The header's bar reaches up under the app's toolbar. Only the bar is drawn there: clicks
+            // pass through to the toolbar, which keeps moving and zooming the window.
+            .padding(.top, model.topInset)
+            .background {
+                // A thin frost keeps the wallpaper's colour; the focused column's band is lighter, the others' darker.
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    Rectangle().fill(isFocused ? Color.white.opacity(0.14) : Color.black.opacity(0.28))
+                }
+                .animation(.smooth(duration: 0.2), value: isFocused)
+                .allowsHitTesting(false)
             }
 
             if isLoaded {
@@ -390,6 +418,7 @@ private struct ConversationColumn: View {
             let background = store.background(for: conversation)
             ConversationWallpaper(background: background,
                 imageURL: store.repository.backgroundImageURL(background, conversationID: conversation.id))
+                .allowsHitTesting(false)
         }
         .clipped()
         .overlay(alignment: .trailing) {
@@ -480,10 +509,9 @@ private struct ColumnHeader: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 48)
-        .background(.bar.opacity(isFocused ? 1 : 0.6))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(isFocused ? Color.accentColor : Color(nsColor: .separatorColor))
-                .frame(height: isFocused ? 2 : 1)
+            Rectangle().fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
                 .accessibilityHidden(true)
         }
         .onHover { isHovered = $0 }

@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "title": "Columns, each with its own wallpaper",
+  "clock": "09:30",
+  "settings": { "Noodle.firstBotSetup.dismissed": true },
+  "harnesses": {
+    "claude-code": { "models": "builtin" }
+  },
+  "agents": [
+    { "key": "ines", "name": "Ines", "harness": "claude-code", "model": "opus",
+      "description": "Keeps the release on track",
+      "avatar": { "image": "face:feminine-04" },
+      "autoReplies": ["On it.", "Done, the notes are in the thread."] },
+    { "key": "tomas", "name": "Tomas", "harness": "claude-code", "model": "sonnet",
+      "description": "Watches the servers",
+      "avatar": { "image": "face:masculine-02" },
+      "autoReplies": ["Checking now.", "All green again."] },
+    { "key": "lena", "name": "Lena", "harness": "claude-code", "model": "sonnet",
+      "description": "Answers support mail",
+      "avatar": { "image": "face:feminine-07" },
+      "autoReplies": ["I will reply to them.", "Sent."] },
+    { "key": "oskar", "name": "Oskar", "harness": "claude-code", "model": "sonnet",
+      "description": "Books travel and keeps the calendar",
+      "avatar": { "image": "face:any-02" },
+      "autoReplies": ["Booked.", "Moved it to Thursday."] }
+  ],
+  "conversations": [
+    { "key": "team", "background": { "preset": "sunset" },
+      "group": { "name": "Release", "description": "Version 2.4 goes out Friday", "members": ["ines", "tomas"] },
+      "messages": [
+        { "at": "08:40", "from": "user", "text": "Where are we with 2.4?" },
+        { "at": "08:42", "from": "ines", "text": "Two fixes left, both reviewed. The build goes to testers at noon." },
+        { "at": "08:45", "from": "tomas", "text": "Staging is on the release candidate and quiet overnight. Nothing in the error logs since 02:00." }
+      ] },
+    { "key": "tomas", "direct": "tomas", "background": { "preset": "ocean" },
+      "messages": [
+        { "at": "07:10", "from": "tomas", "text": "Disk on the database replica reached 81%. I cleared old snapshots, it is at 54% now." },
+        { "at": "07:12", "from": "user", "text": "Thanks. Keep an eye on it this week." },
+        { "at": "07:13", "from": "tomas", "text": "Will do. I set a warning at 75%." }
+      ] },
+    { "key": "lena", "direct": "lena", "background": { "preset": "forest" },
+      "messages": [
+        { "at": "08:05", "from": "lena", "text": "Twelve support mails overnight. Ten answered from the help pages, two need you: a refund over the limit and a press request." },
+        { "at": "08:20", "from": "user", "text": "Approve the refund. Send me the press one." },
+        { "at": "08:21", "from": "lena", "text": "Refund approved. The press request is from a podcast about small software companies, recording next month." }
+      ] },
+    { "key": "oskar", "direct": "oskar",
+      "messages": [
+        { "at": "-1d 17:30", "from": "oskar", "text": "Your Lisbon trip: flight Tuesday 07:15, hotel near the venue for two nights. The talk is Wednesday at 14:00." },
+        { "at": "09:02", "from": "user", "text": "Can you move the return flight to Thursday morning?" },
+        { "at": "09:04", "from": "oskar", "text": "Thursday 09:40 has seats, same fare class. Shall I change it?" }
+      ] }
+  ],
+  "present": {
+    "window": { "size": [1640, 940] },
+    "columns": ["team", "tomas", "lena", "oskar"],
+    "select": "team"
+  },
+  "timeline": [
+    { "wait": 2.0, "in": "oskar", "type": { "text": "Yes, change it." } },
+    { "wait": 1.0, "agent": "oskar", "reply": { "text": "Moved to Thursday 09:40. The hotel is extended by one night." } },
+    { "wait": 1.5, "agent": "tomas", "reply": { "text": "Replica disk is steady at 55%." } }
+  ]
+}
